@@ -177,7 +177,7 @@ export function buildScene(bgKey) {
     { id: 'trunk',   pos: [0, 1.0, 10.9],     r: 2.6, label: () => '트렁크 열기' },
     { id: 'chair',   pos: [1.5, 0.6, 0.8],    r: 2.2, label: () => '의자에 앉기' },
     { id: 'tent',    pos: [-1.6, 0.7, 0.0],   r: 2.3, label: () => '텐트에 들어가기' },
-    { id: 'car',     pos: [1.35, 1.0, 8.1],   r: 2.0, label: () => '운전석에 앉기' },
+    { id: 'car',     pos: [-1.35, 1.0, 8.1],  r: 2.0, label: () => '운전석에 앉기' },
     { id: 'fire',    pos: [0.3, 0.4, -1.4],   r: 2.4, label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
     { id: 'lantern', pos: [0.65, 0.6, 0.5],   r: 1.6, label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
   ];
