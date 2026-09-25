@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { $, rnd, smooth, wrapPI } from './util.js';
-import { buildScene, applyTime, rebakeEnv } from './scene.js';
+import { buildScene, applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks } from './props.js';
@@ -59,6 +59,7 @@ function loop(now) {
   if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = (0.45 + 0.4 * Math.sin(T * 1.7)) * Math.min(1, W.tm.stars * 2.5); }
   if (W.cfg.birds && W.sunUp) { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
   updateFlocks(dt, T);
+  updateMeteors(dt);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
