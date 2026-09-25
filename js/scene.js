@@ -7,8 +7,19 @@ import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, contactShadow, Particles, wingGeo, birdMat } from './props.js';
 import { startCrackle } from './audio.js';
 
-/* 하늘 기반 환경광 세기. 0 이면 단일 파일 버전과 조명이 완전히 같아진다. */
-export const IBL_STRENGTH = 0.35;
+/* 하늘 기반 환경광 세기. 0 = 단일 파일과 동일 (기본). 나중에 0.2~0.4 로 실험 가능 */
+export const IBL_STRENGTH = 0;
+
+/* 포스트 효과 토글에 따라 렌더러/셰이더 모드 전환 */
+export function applyPostMode() {
+  const on = settings.post;
+  ctx.renderer.outputEncoding = on ? THREE.LinearEncoding : THREE.sRGBEncoding;   // 켜지면 sRGB 변환은 post.js 최종 패스에서
+  document.getElementById('vignette').style.display = on ? 'none' : '';
+  document.getElementById('grain').style.display = on ? 'none' : '';
+  const W = ctx.W;
+  if (W.skyMat) W.skyMat.uniforms.uLin.value = on ? 1 : 0;
+  if (W.water) W.water.material.uniforms.uLin.value = on ? 1 : 0;
+}
 
 function disposeScene() {
   const scene = ctx.scene; if (!scene) return;
@@ -18,31 +29,31 @@ function disposeScene() {
 
 export function buildScene(bgKey, timeKey) {
   disposeScene();
-  const cfg = BG[bgKey], tm = TIME[timeKey];
+  const cfg = BG[bgKey], tm = TIME[timeKey], lin = settings.post ? 1 : 0;
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
   const W = ctx.W = { cfg, tm, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: timeKey !== 'afternoon', platforms: [] };
   scene.fog = new THREE.Fog(tm.fog, 40, tm.fogFar);
   ctx.renderer.toneMappingExposure = tm.exposure;
   const sunDir = new THREE.Vector3(...tm.sun).normalize();
 
-  /* 하늘 — 단일 파일에서 원본 색 그대로 출력됐으므로, 최종 패스의 sRGB 변환을 상쇄하도록 sRGB→선형만 적용 */
+  /* 하늘. uLin=0 이면 단일 파일과 같은 원본 출력 */
   const skyMat = new THREE.ShaderMaterial({
-    uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow }, uLin: { value: 1 } },
+    uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow }, uLin: { value: lin } },
     vertexShader: 'varying vec3 vP;void main(){vP=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
     fragmentShader: SRGB_GLSL + `uniform vec3 top,bottom,sunDir,sunColor;uniform float glow,uLin;varying vec3 vP;
       void main(){vec3 d=normalize(vP);float h=d.y;float t=pow(max(h,0.0),0.45);vec3 col=mix(bottom,top,t);
       float s=max(dot(d,sunDir),0.0);col+=sunColor*glow*(pow(s,6.0)*0.35+pow(s,40.0)*0.7)*(1.0-t*0.6);
-      col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));col=clamp(col,0.0,1.0);
-      gl_FragColor=vec4(uLin>0.5?srgb2lin(col):col,1.0);}`,
+      col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));
+      gl_FragColor=vec4(uLin>0.5?srgb2lin(clamp(col,0.0,1.0)):col,1.0);}`,
     side: THREE.BackSide, depthWrite: false });
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat));
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat)); W.skyMat = skyMat;
 
-  /* 환경광 (IBL) */
   if (IBL_STRENGTH > 0) {
     try {
       const pm = new THREE.PMREMGenerator(ctx.renderer), envScene = new THREE.Scene();
-      envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), skyMat));
-      scene.environment = pm.fromScene(envScene, 0.04).texture; pm.dispose();
+      const envMat = skyMat.clone(); envMat.uniforms.uLin.value = 1;
+      envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), envMat));
+      scene.environment = pm.fromScene(envScene, 0.04).texture; pm.dispose(); envMat.dispose();
     } catch (e) { console.warn('IBL skipped', e); }
   }
 
@@ -64,7 +75,7 @@ export function buildScene(bgKey, timeKey) {
   for (let i = 0; i < nC; i++) { const c = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, color: tm.cloud, transparent: true, opacity: tm.cloudOp * rnd(0.6, 1), fog: false, depthWrite: false })); const a = rnd(0, Math.PI * 2), r = rnd(600, 1300); c.position.set(Math.cos(a) * r, rnd(220, 420), Math.sin(a) * r); const s = rnd(260, 520); c.scale.set(s, s * 0.45, 1); scene.add(c); W.clouds.push(c); }
 
   scene.add(makeGround(cfg));
-  if (cfg.water) { W.water = makeWater(cfg.water, tm, W.uTime); scene.add(W.water); }
+  if (cfg.water) { W.water = makeWater(cfg.water, tm, W.uTime, lin); scene.add(W.water); }
   makeVegetation(cfg);
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
   if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, terrainH(x, z, cfg) + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
@@ -95,8 +106,6 @@ export function buildScene(bgKey, timeKey) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.ff = new THREE.Points(g, new THREE.PointsMaterial({ map: softTex, color: 0xd6ff7a, size: 0.14, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })); W.ff.frustumCulled = false; scene.add(W.ff);
   }
-
-  /* IBL 세기를 모든 표준 재질에 적용 */
   if (scene.environment) scene.traverse(o => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = IBL_STRENGTH; });
 
   W.interact = [
