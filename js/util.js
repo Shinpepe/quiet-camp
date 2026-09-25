@@ -7,6 +7,8 @@ export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); r
 export const wrapPI = a => Math.atan2(Math.sin(a), Math.cos(a));
 export const isTouch = 'ontouchstart' in window && !matchMedia('(pointer:fine)').matches;
 export const SEED = Math.random() * 100;
+/* 큰 TypedArray 를 spread 로 push 하면 호출 스택 한계에 걸릴 수 있어 루프로 복사한다 */
+export function pushAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); }
 
 export function hash(x, y) { const n = Math.sin(x * 127.1 + y * 311.7 + SEED) * 43758.5453; return n - Math.floor(n); }
 export function vnoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf); const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
@@ -40,7 +42,7 @@ export function mergeParts(parts) {
     const pa = g.attributes.position, ua = g.attributes.uv, k = p.uvs || 1; let minY = 1e9, maxY = -1e9; for (let i = 0; i < pa.count; i++) { minY = Math.min(minY, pa.getY(i)); maxY = Math.max(maxY, pa.getY(i)); }
     const c = new THREE.Color(p.color);
     for (let i = 0; i < pa.count; i++) { const sh = p.grad ? 0.7 + 0.4 * (pa.getY(i) - minY) / (maxY - minY + 1e-6) : 1; col.push(c.r * sh, c.g * sh, c.b * sh); if (ua) uv.push(ua.getX(i) * k, ua.getY(i) * k); else uv.push(0, 0); }
-    g.applyMatrix4(m); pos.push(...g.attributes.position.array);
+    g.applyMatrix4(m); pushAll(pos, g.attributes.position.array);
   });
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.computeVertexNormals(); return geo;
 }

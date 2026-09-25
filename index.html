@@ -4,20 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>고요한 캠핑 — Quiet Camp</title>
-<link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/style.css">
 <script type="importmap">
 { "imports": {
-  "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+  "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
 } }
 </script>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="fade"></div>
-<div id="loading"><div class="ring"></div><div>장소를 준비하는 중</div></div>
-
+<div id="loading" class="on"><div class="ring"></div><div>장소를 준비하는 중</div></div>
 <div id="menu">
   <div class="side">
     <div class="eyebrow">QUIET CAMP</div>
@@ -32,18 +30,17 @@
     <div class="settings">
       <span>소리</span><input type="range" id="vol" min="0" max="1" step="0.05" value="0.5"><span id="volV">50%</span>
       <span>시선 감도</span><input type="range" id="sens" min="0.3" max="2" step="0.1" value="1"><span id="sensV">1.0</span>
-      <span>시간 흐름</span><div class="toggle" id="flow"></div><span id="flowV"></span>
-      <span>그림자</span><div class="toggle" id="shadow"></div><span id="shadowV"></span>
-      <span>블룸</span><div class="toggle" id="bloom"></div><span id="bloomV"></span>
-      <span>주변광 차폐</span><div class="toggle" id="ao"></div><span id="aoV"></span>
-      <span>물 반사</span><div class="toggle" id="reflect"></div><span id="reflectV"></span>
-      <span>빛줄기</span><div class="toggle" id="rays"></div><span id="raysV"></span>
+      <span>시간 흐름</span><div class="toggle on" id="flow"></div><span id="flowV">켜짐</span>
+      <span>그림자</span><div class="toggle on" id="shadow"></div><span id="shadowV">켜짐</span>
+      <span>블룸</span><div class="toggle on" id="bloom"></div><span id="bloomV">켜짐</span>
+      <span>주변광 차폐</span><div class="toggle" id="ao"></div><span id="aoV">꺼짐</span>
+      <span>물 반사</span><div class="toggle" id="reflect"></div><span id="reflectV">꺼짐</span>
+      <span>빛줄기</span><div class="toggle" id="rays"></div><span id="raysV">꺼짐</span>
     </div>
     <div class="legend"><b>W A S D</b> 걷기 &nbsp; <b>마우스</b> 둘러보기 &nbsp; <b>E</b> 상호작용<br><b>클릭</b> 한 모금 &nbsp; <b>P</b> 사진 &nbsp; <b>ESC</b> 잠시 멈춤<br>모바일 — 왼쪽 드래그 이동 · 오른쪽 드래그 시선</div>
   </div>
   <div class="preview-tag">LIVE PREVIEW</div>
 </div>
-
 <div id="hud">
   <div id="caption"><small>QUIET CAMP</small><span id="capText"></span></div>
   <button id="pausebtn" title="잠시 멈춤">❚❚</button>
@@ -68,7 +65,6 @@
     <div class="row"><button class="b p" id="resume">계속하기</button><button class="b" id="photoBtn">사진 찍기 <kbd>P</kbd></button><button class="b" id="toMenu">장소 바꾸기</button></div>
   </div></div>
 </div>
-
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

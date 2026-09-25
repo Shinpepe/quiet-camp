@@ -5,11 +5,12 @@ import { buildScene, applyTime, rebakeEnv } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks } from './props.js';
-import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand } from './game.js';
+import { startAmbience } from './audio.js';
+import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock } from './game.js';
 
 const canvas = $('#c');
 const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, matchMedia('(pointer:fine)').matches ? 2 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -31,6 +32,9 @@ function loop(now) {
   paramsAt(state.clock, W.tm); applyTime();
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
   if (Math.floor(T) !== lastSec) { lastSec = Math.floor(T); if (ctx.running) updateCaption(); }
+
+  /* 낮/밤이 바뀌면 앰비언스(새소리 ↔ 풀벌레)도 따라 바꾼다 */
+  { const night = isNightClock(state.clock); if (ctx.running && night !== W.wasNight) { W.wasNight = night; startAmbience(W.cfg.ambience, night ? 'night' : 'day'); } }
 
   if (!ctx.running) { const a = T * 0.06; camera.position.set(Math.sin(a) * 9.5, 2.3 + Math.sin(T * 0.13) * 0.3, 2 + Math.cos(a) * 9.5); camera.lookAt(0, 0.9, 0.3); }
   else {

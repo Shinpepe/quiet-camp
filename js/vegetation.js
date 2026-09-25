@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
 import { BLOCKS } from './data.js';
-import { rnd, fbm, std, smoothM, shadowed, bar, jitter, mergeParts, tintOf } from './util.js';
+import { rnd, fbm, std, smoothM, shadowed, bar, jitter, mergeParts, tintOf, pushAll } from './util.js';
 import { terrainH, slopeUp } from './terrain.js';
 import { tex } from './textures.js';
 
@@ -27,7 +27,7 @@ function mergeGeos(list) {
     if (p.grad) for (let i = 0; i < pa.count; i++) { minY = Math.min(minY, pa.getY(i)); maxY = Math.max(maxY, pa.getY(i)); }
     c.set(p.color);
     for (let i = 0; i < pa.count; i++) { const sh = p.grad ? 0.72 + 0.4 * (pa.getY(i) - minY) / (maxY - minY + 1e-6) : 1; col.push(c.r * sh, c.g * sh, c.b * sh); uv.push(ua ? ua.getX(i) * k : 0, ua ? ua.getY(i) * k : 0); }
-    pos.push(...pa.array);
+    pushAll(pos, pa.array);
   });
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); return g;
 }
@@ -88,7 +88,7 @@ function crownGeo(L) {
   for (let i = 0; i < n + 2; i++) {
     const dead = i >= n, g = frondGeo(L * rnd(0.85, 1.15), dead);
     m.makeRotationY(i / n * Math.PI * 2 + rnd(-0.2, 0.2)).multiply(rz.makeRotationZ(dead ? rnd(-1.1, -0.8) : rnd(0.25, 0.75))); g.applyMatrix4(m);
-    pos.push(...g.attributes.position.array); col.push(...g.attributes.color.array); uv.push(...g.attributes.uv.array);
+    pushAll(pos, g.attributes.position.array); pushAll(col, g.attributes.color.array); pushAll(uv, g.attributes.uv.array);
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); return g;
 }

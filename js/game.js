@@ -14,9 +14,11 @@ export const anim = { sipT: null, lastSteam: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
+export const isNightClock = c => c < 0.22 || c > 0.8;
 
 function bindToggle(id, key, onChange) {
   const el = $('#' + id), lab = $('#' + id + 'V');
+  if (!el || !lab) { console.warn('toggle element missing:', id); return; }
   const paint = () => { el.classList.toggle('on', settings[key]); lab.textContent = settings[key] ? '켜짐' : '꺼짐'; };
   el.onclick = () => { settings[key] = !settings[key]; paint(); onChange(settings[key]); }; paint();
 }
@@ -44,7 +46,7 @@ export function bindInput() {
 
   $('#trunkClose').onclick = closeTrunk;
   $('#resume').onclick = () => { hidePause(); if (!isTouch) canvas().requestPointerLock(); };
-  $('#pausebtn').onclick = () => { if (ctx.paused) $('#resume').onclick(); else { if (!isTouch) document.exitPointerLock(); else showPause(); } };
+  $('#pausebtn').onclick = () => { if (ctx.paused) $('#resume').onclick(); else if (!isTouch && locked()) document.exitPointerLock(); else showPause(); };
   $('#toMenu').onclick = () => { hidePause(); ctx.running = false; $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); if (!isTouch) canvas().requestPointerLock(); };
   $('#mAct').onclick = interact; $('#mSip').onclick = () => { if (state.item && anim.sipT === null) sip(); };
@@ -53,7 +55,11 @@ export function bindInput() {
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
   bindToggle('flow', 'flow', () => {});
-  bindToggle('shadow', 'shadow', on => { ctx.renderer.shadowMap.enabled = on; if (ctx.W.sun) ctx.W.sun.castShadow = on; });
+  bindToggle('shadow', 'shadow', on => {
+    ctx.renderer.shadowMap.enabled = on; ctx.renderer.shadowMap.needsUpdate = true;
+    if (ctx.W.sun) ctx.W.sun.castShadow = on;
+    if (ctx.scene) ctx.scene.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); });
+  });
   bindToggle('bloom', 'bloom', on => ctx.post.setBloom(on));
   bindToggle('ao', 'ao', on => ctx.post.setAO(on));
   bindToggle('reflect', 'reflect', on => { if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on ? 1 : 0; });
@@ -117,7 +123,7 @@ function hidePause() { ctx.paused = false; $('#pause').classList.remove('on'); }
 
 const rc = new THREE.Raycaster(), center = new THREE.Vector2(0, 0);
 function takePhoto() {
-  if (!ctx.running) return; const hud = $('#hud'); hud.classList.add('photo');
+  if (!ctx.running || ctx.paused) return; const hud = $('#hud'); hud.classList.add('photo');
   let focus = 8;
   try { rc.setFromCamera(center, ctx.camera); const h = rc.intersectObjects(ctx.scene.children, true).find(h => h.object.visible && !h.object.isSprite && !h.object.isPoints && !h.object.userData.noAO && h.distance < 1000); if (h) focus = h.distance; } catch (e) {}
   ctx.post.renderPhoto(focus); const url = canvas().toDataURL('image/png');
@@ -140,7 +146,9 @@ export function startGame() {
     buildScene(state.bg);
     putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false;
     ctx.camera.position.set(...SEAT.car.pos); ctx.camera.rotation.set(0, 0, 0);
-    startAmbience(BG[state.bg].ambience, (state.clock < 0.22 || state.clock > 0.8) ? 'night' : 'day');
+    const night = isNightClock(state.clock);
+    ctx.W.wasNight = night;
+    startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
     ctx.running = true; updateHUD(); fade.style.opacity = 0;
     $('#lockmsg').style.opacity = isTouch ? 0 : 0.85;

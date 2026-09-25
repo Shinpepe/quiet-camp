@@ -11,21 +11,24 @@ import { paramsAt, sunDirAt } from './time.js';
 const _white = new THREE.Color(0xffffff);
 
 function disposeScene() {
-  const scene = ctx.scene; if (!scene) return;
-  if (ctx.W.water && ctx.W.water.getRenderTarget) ctx.W.water.getRenderTarget().dispose();
+  const scene = ctx.scene, W = ctx.W; if (!scene) return;
+  if (W.envRT) { W.envRT.dispose(); W.envRT = null; }
+  if (W.envScene) { W.envScene.children[0].geometry.dispose(); W.envScene = null; }
   scene.traverse(o => { if (o === ctx.camera || o.parent === ctx.camera || (o.parent && o.parent.parent === ctx.camera)) return; if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== birdMat) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose && m.dispose()); });
-  if (scene.environment) scene.environment.dispose();
+  scene.environment = null;
 }
 
-/* 하늘을 큐브맵으로 구워 환경광으로. 시간이 흐르면 몇 초마다 다시 굽는다. */
+/* 하늘을 큐브맵으로 구워 환경광으로. 시간이 흐르면 몇 초마다 다시 굽는다.
+   envScene 은 한 번만 만들고, 이전 렌더타깃은 새 것으로 바꾼 뒤 해제한다. */
 export function rebakeEnv() {
   const W = ctx.W; if (!W.skyMat) return;
   try {
     if (!ctx.pmrem) ctx.pmrem = new THREE.PMREMGenerator(ctx.renderer);
-    const envScene = new THREE.Scene(); envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), W.skyMat));
-    const rt = ctx.pmrem.fromScene(envScene, 0.04);
-    if (ctx.scene.environment) ctx.scene.environment.dispose();
+    if (!W.envScene) { W.envScene = new THREE.Scene(); W.envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), W.skyMat)); }
+    const rt = ctx.pmrem.fromScene(W.envScene, 0.04);
     ctx.scene.environment = rt.texture; ctx.scene.environmentIntensity = W.tm.ibl;
+    if (W.envRT) W.envRT.dispose();
+    W.envRT = rt;
   } catch (e) { console.warn('IBL skipped', e); }
 }
 
@@ -54,7 +57,7 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, platforms: [], mist: [], envT: 0, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, platforms: [], mist: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
