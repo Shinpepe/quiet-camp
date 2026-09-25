@@ -68,7 +68,7 @@ function spawnMeteor(m) {
   _x.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)); m.dir.crossVectors(_r, _x).normalize();
   if (m.dir.y > 0) m.dir.multiplyScalar(-1);
   if (m.dir.y > -0.3) { m.dir.y -= 0.5; m.dir.normalize(); }
-  m.speed = rnd(380, 650); m.life = rnd(0.5, 1.1); m.t = 0; m.len = rnd(45, 120); m.width = rnd(2.2, 4.2);
+  m.speed = rnd(320, 520); m.life = rnd(1.2, 2.4); m.t = 0; m.len = rnd(90, 200); m.width = rnd(2.4, 4.5);
   m.mesh.material.color.setHex(Math.random() < 0.3 ? 0xd8e6ff : 0xf4f6ff); m.mesh.visible = true;
 }
 export function updateMeteors(dt) {
