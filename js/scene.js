@@ -22,22 +22,25 @@ export function buildScene(bgKey, timeKey) {
   ctx.renderer.toneMappingExposure = tm.exposure;
   const sunDir = new THREE.Vector3(...tm.sun).normalize();
 
-  /* 하늘 — 출력 직전 pow(2.2)로 선형화 (포스트 패스에서 다시 sRGB로) */
+  /* 하늘 — 최종 패스의 ACES를 미리 역보정해서 단일 파일 버전과 같은 색이 나오게 */
   const skyMat = new THREE.ShaderMaterial({
-    uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow } },
+    uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow }, uExp: { value: tm.exposure }, uComp: { value: 1 } },
     vertexShader: 'varying vec3 vP;void main(){vP=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: `uniform vec3 top,bottom,sunDir,sunColor;uniform float glow;varying vec3 vP;
+    fragmentShader: `uniform vec3 top,bottom,sunDir,sunColor;uniform float glow,uExp,uComp;varying vec3 vP;
+      vec3 unaces(vec3 y){y=clamp(y,0.0,0.985);vec3 a=2.51-2.43*y;vec3 b=0.03-0.59*y;return (-b+sqrt(b*b+0.56*a*y))/(2.0*a);}
       void main(){vec3 d=normalize(vP);float h=d.y;float t=pow(max(h,0.0),0.45);vec3 col=mix(bottom,top,t);
       float s=max(dot(d,sunDir),0.0);col+=sunColor*glow*(pow(s,6.0)*0.35+pow(s,40.0)*0.7)*(1.0-t*0.6);
-      col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));gl_FragColor=vec4(pow(col,vec3(2.2)),1.0);}`,
+      col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));vec3 lin=pow(col,vec3(2.2));
+      gl_FragColor=vec4(uComp>0.5?unaces(lin)*0.6/uExp:lin,1.0);}`,
     side: THREE.BackSide, depthWrite: false });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat));
 
-  /* 환경광 (IBL): 하늘을 큐브맵으로 구워 재질 반사·간접광에 사용 */
+  /* 환경광 (IBL): 역보정 없는 순수 선형 하늘로 굽기 */
   try {
     const pm = new THREE.PMREMGenerator(ctx.renderer), envScene = new THREE.Scene();
-    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), skyMat));
-    scene.environment = pm.fromScene(envScene, 0.04).texture; pm.dispose();
+    const envMat = skyMat.clone(); envMat.uniforms.uComp.value = 0;
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), envMat));
+    scene.environment = pm.fromScene(envScene, 0.04).texture; pm.dispose(); envMat.dispose();
   } catch (e) { console.warn('IBL skipped', e); }
 
   /* 빛 */
