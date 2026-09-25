@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { BG } from './data.js';
-import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL } from './util.js';
-import { makeGround, makeWater, terrainH } from './terrain.js';
+import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL } from './util.js';
+import { makeGround, makeWater, terrainH, bakeHeightMap } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, contactShadow, Particles, birdMat } from './props.js';
 import { startCrackle } from './audio.js';
@@ -20,6 +20,7 @@ function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
   if (W.envRT) { W.envRT.dispose(); W.envRT = null; }
   if (W.envScene) { W.envScene.children[0].geometry.dispose(); W.envScene = null; }
+  if (W.heightTex) { W.heightTex.dispose(); W.heightTex = null; }
   scene.traverse(o => { if (o === ctx.camera || o.parent === ctx.camera || (o.parent && o.parent.parent === ctx.camera)) return; if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== birdMat) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose && m.dispose()); });
   scene.environment = null;
 }
@@ -45,26 +46,31 @@ export function applyTime() {
   const L = up ? sd : md, fade = smooth(0.0, 0.08, Math.abs(L.y));
   W.sun.position.copy(L).multiplyScalar(90); W.sun.color.copy(cur.sunColor); W.sun.intensity = cur.sunI * fade;
   W.hemi.color.copy(cur.top); W.hemi.intensity = cur.hemi; W.amb.intensity = cur.amb;
+  const glow = cur.glow * smooth(-0.15, 0.02, sd.y);
   const u = W.skyMat.uniforms;
   u.top.value.copy(cur.top); u.bottom.value.copy(cur.bottom); u.sunDir.value.copy(sd); u.moonDir.value.copy(md); u.sunColor.value.copy(cur.disc);
-  u.glow.value = cur.glow * smooth(-0.15, 0.02, sd.y); u.uCover.value = cur.cloudCover; u.cloudLit.value.copy(cur.cloudLit); u.cloudShade.value.copy(cur.cloudShade); u.uMoon.value = cur.stars;
+  u.glow.value = glow; u.uCover.value = cur.cloudCover; u.cloudLit.value.copy(cur.cloudLit); u.cloudShade.value.copy(cur.cloudShade); u.uMoon.value = cur.stars;
   W.sunDisc.position.copy(sd).multiplyScalar(1500); W.sunDisc.scale.setScalar(cur.sunSize * 1.3); W.sunDisc.material.color.copy(cur.disc).multiplyScalar(2.5); W.sunDisc.visible = sd.y > -0.05;
   W.sunGlow.position.copy(W.sunDisc.position); W.sunGlow.scale.setScalar(cur.sunSize * 13); W.sunGlow.material.color.copy(cur.disc); W.sunGlow.material.opacity = cur.glow * 0.7 * smooth(-0.05, 0.05, sd.y);
   const mk = cur.stars * smooth(-0.05, 0.05, md.y);
   W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.opacity = mk; W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
   ctx.scene.fog.color.copy(cur.fog); ctx.scene.fog.far = cur.fogFar; ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
-  if (W.water) { const wu = W.water.material.uniforms, w = W.cfg.water; wu.skyTop.value.copy(cur.top); wu.skyBottom.value.copy(cur.bottom); wu.sunDir.value.copy(L); wu.sunColor.value.copy(cur.sunColor).multiplyScalar(cur.sunI * 0.5 * fade); wu.fogColor.value.copy(cur.fog); wu.fogFar.value = cur.fogFar; wu.deep.value.set(w.deep).multiplyScalar(cur.waterMul); wu.shallow.value.set(w.shallow).multiplyScalar(cur.waterMul); }
+  if (W.water) {
+    const wu = W.water.material.uniforms, w = W.cfg.water;
+    wu.skyTop.value.copy(cur.top); wu.skyBottom.value.copy(cur.bottom); wu.sunDir.value.copy(L); wu.sunColor.value.copy(cur.sunColor).multiplyScalar(cur.sunI * 0.5 * fade);
+    wu.uSunD.value.copy(sd); wu.moonDir.value.copy(md); wu.disc.value.copy(cur.disc); wu.cloudLit.value.copy(cur.cloudLit); wu.cloudShade.value.copy(cur.cloudShade); wu.glow.value = glow; wu.uMoon.value = cur.stars; wu.uCover.value = cur.cloudCover;
+    wu.fogColor.value.copy(cur.fog); wu.fogFar.value = cur.fogFar; wu.deep.value.set(w.deep).multiplyScalar(cur.waterMul); wu.shallow.value.set(w.shallow).multiplyScalar(cur.waterMul);
+  }
+  const gs = W.groundMat && W.groundMat.userData.shader; if (gs) gs.uniforms.uCaust.value = 0.35 * cur.sunI * fade * (up ? 1 : 0.25);
   if (ctx.post) ctx.post.setTime(cur);
 }
 
 /* ── 별똥별 ── */
 const _r = new THREE.Vector3(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4();
 function spawnMeteor(m) {
-  /* 하늘 돔(반지름 1650) 위, 고도 17°~70° 어딘가에서 시작 */
   const az = rnd(0, Math.PI * 2), el = rnd(0.3, 1.22);
   _r.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
   m.head.copy(_r).multiplyScalar(1650);
-  /* 진행 방향: 구면 접선 중 아래로 향하는 쪽 */
   _x.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)); m.dir.crossVectors(_r, _x).normalize();
   if (m.dir.y > 0) m.dir.multiplyScalar(-1);
   if (m.dir.y > -0.3) { m.dir.y -= 0.5; m.dir.normalize(); }
@@ -78,7 +84,7 @@ export function updateMeteors(dt) {
     W.meteorT -= dt;
     if (W.meteorT <= 0) {
       const free = W.meteors.find(m => m.life <= 0); if (free) spawnMeteor(free);
-      W.meteorT = Math.random() < 0.25 ? rnd(0.4, 1.6) : rnd(7, 22);   // 가끔은 연달아
+      W.meteorT = Math.random() < 0.25 ? rnd(0.4, 1.6) : rnd(7, 22);
     }
   }
   W.meteors.forEach(m => {
@@ -86,7 +92,6 @@ export function updateMeteors(dt) {
     m.t += dt; if (m.t >= m.life) { m.life = 0; m.mesh.visible = false; return; }
     m.head.addScaledVector(m.dir, m.speed * dt);
     _p.copy(m.head).addScaledVector(m.dir, -m.len * 0.5); m.mesh.position.copy(_p);
-    /* 줄무늬 판을 카메라 쪽으로 세우고, 긴 축(x)을 진행 방향에 맞춘다 */
     _z.copy(ctx.camera.position).sub(_p).normalize(); _y.crossVectors(_z, m.dir).normalize(); _x.crossVectors(_y, _z).normalize();
     m.mesh.quaternion.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
     const k = m.t / m.life; m.mesh.material.opacity = Math.pow(Math.sin(Math.PI * k), 0.6) * 0.95 * W.tm.stars; m.mesh.scale.set(m.len, m.width, 1);
@@ -97,25 +102,16 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12) };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, groundMat: null };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
-  /* 하늘 + 구름층 (노이즈 기반 2.5D 구름, 빛 방향 쪽 두께로 음영) */
+  /* 하늘 + 구름층 — util.js 의 skyColor() 를 그대로 사용 (물 반사와 공유) */
   const skyMat = new THREE.ShaderMaterial({
     uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, moonDir: { value: new THREE.Vector3(0, -1, 0) }, sunColor: { value: new THREE.Color() }, glow: { value: 0 }, uTime: W.uTime, uCover: { value: 0.5 }, cloudLit: { value: new THREE.Color() }, cloudShade: { value: new THREE.Color() }, uMoon: { value: 0 } },
     vertexShader: 'varying vec3 vP;void main(){vP=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: NOISE_GLSL + `uniform vec3 top,bottom,sunDir,moonDir,sunColor,cloudLit,cloudShade;uniform float glow,uTime,uCover,uMoon;varying vec3 vP;
-      float cloudD(vec2 p){float n=vnoise(p)*0.5+vnoise(p*2.1+vec2(3.1,7.3))*0.25+vnoise(p*4.3+vec2(9.7,1.3))*0.125+vnoise(p*8.9+vec2(4.2,5.5))*0.0625;return smoothstep(0.66-uCover*0.4,0.74,n);}
-      void main(){vec3 d=normalize(vP);float h=d.y;float t=pow(max(h,0.0),0.45);vec3 col=mix(bottom,top,t);
-        float s=max(dot(d,sunDir),0.0);col+=sunColor*glow*(pow(s,6.0)*0.35+pow(s,40.0)*0.9)*(1.0-t*0.6);
-        float ms=max(dot(d,moonDir),0.0);col+=vec3(0.5,0.6,0.85)*uMoon*(pow(ms,8.0)*0.12+pow(ms,120.0)*0.4);
-        col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));
-        if(h>0.0){vec2 p=d.xz/(h+0.12)*2.2+vec2(uTime*0.006,uTime*0.0025);float dens=cloudD(p);
-          vec3 L=sunDir.y>-0.05?sunDir:moonDir;vec2 ts=(L.xz/(max(L.y,0.05)+0.12))*0.12;float d2=cloudD(p+ts);
-          vec3 cc=mix(cloudShade,cloudLit,1.0-0.75*d2);
-          col=mix(col,cc,dens*smoothstep(0.0,0.2,h));}
-        gl_FragColor=vec4(col,1.0);}`,
+    fragmentShader: NOISE_GLSL + SKY_GLSL + `uniform vec3 top,bottom,sunDir,moonDir,sunColor,cloudLit,cloudShade;uniform float glow,uTime,uCover,uMoon;varying vec3 vP;
+      void main(){gl_FragColor=vec4(skyColor(normalize(vP),top,bottom,sunDir,moonDir,sunColor,cloudLit,cloudShade,glow,uMoon,uCover,uTime,1.0),1.0);}`,
     side: THREE.BackSide, depthWrite: false });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat)); W.skyMat = skyMat;
 
@@ -133,18 +129,18 @@ export function buildScene(bgKey) {
     for (let i = 0; i < n; i++) { const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 0.97), r = 1700; sp[i * 3] = r * Math.sin(ph) * Math.cos(th); sp[i * 3 + 1] = r * Math.cos(ph); sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th); }
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0, fog: false })); scene.add(W.stars); }
-  /* 별똥별 풀 3개 (동시에 최대 3개) */
+  /* 별똥별 풀 3개 */
   for (let i = 0; i < 3; i++) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: streakTex, color: 0xf4f6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }));
     m.visible = false; m.frustumCulled = false; scene.add(m);
     W.meteors.push({ mesh: m, t: 0, life: 0, head: new THREE.Vector3(), dir: new THREE.Vector3(), speed: 0, len: 0, width: 0 });
   }
 
-  scene.add(makeGround(cfg));
-  if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime); scene.add(W.water); }
+  const ground = makeGround(cfg, W.uTime); scene.add(ground); W.groundMat = ground.material;
+  if (cfg.water) { W.heightTex = bakeHeightMap(cfg); W.water = makeWater(cfg.water, cur, W.uTime, W.heightTex); scene.add(W.water); }
   makeVegetation(cfg);
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
-  if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, terrainH(x, z, cfg) + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
+  if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const h = terrainH(x, z, cfg); if (h < 0.1) continue; const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
 
   const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);
   const chair = makeChair(); chair.position.set(1.5, 0, 0.8); scene.add(chair);
