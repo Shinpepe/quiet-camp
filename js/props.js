@@ -182,34 +182,38 @@ export function makeDock() {
   const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.06), METAL()); cleat.position.set(5.05, 0.39, -12.0); g.add(cleat);
   return shadowed(g);
 }
-/* ── 손에 드는 것: 회전체로 형태를 잡음 ── */
+/* ── 손에 드는 것: 회전체로 형태를 잡음. userData.amount(1→0) 와 setAmount(a) 로 남은 양을 표현 ── */
 export function makeItem(type) {
-  const g = new THREE.Group(); const emitter = new THREE.Object3D(); g.userData.emitter = emitter;
+  const g = new THREE.Group(); const emitter = new THREE.Object3D(); g.userData.emitter = emitter; g.userData.amount = 1;
   if (type === 'coffee') {
     const cer = smoothM(0xf2ede4, { roughness: 0.3, side: THREE.DoubleSide });
     g.add(new THREE.Mesh(lathe([[0, -0.045], [0.034, -0.045], [0.04, -0.041], [0.044, -0.02], [0.046, 0.02], [0.047, 0.045], [0.042, 0.045], [0.041, 0.02], [0.039, -0.02], [0.036, -0.033], [0, -0.033]], 30), cer));
-    const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.041, 30), smoothM(0x2c1a10, { roughness: 0.2 })); coffee.rotation.x = -Math.PI / 2; coffee.position.y = 0.03; g.add(coffee);
-    /* 손잡이: 예전엔 호의 한쪽 끝이 허공에 떠 있었고 손이 그걸 가렸다. 양 끝이 잔 벽(y +0.03, -0.024)에 닿는 201° 호로. */
+    const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.041, 30), smoothM(0x2c1a10, { roughness: 0.2 })); coffee.rotation.x = -Math.PI / 2; g.add(coffee);
     const h = new THREE.Mesh(new THREE.TorusGeometry(0.027, 0.0075, 10, 20, 3.52), cer); h.position.set(0.05, 0.003, 0); h.rotation.z = -1.76; g.add(h);
-    emitter.position.y = 0.04;
+    /* 액면: 가득이면 y 0.03, 비면 잔 바닥(-0.03). 잔 안쪽이 아래로 좁아지니 원판도 같이 줄인다 */
+    g.userData.setAmount = a => { coffee.position.y = -0.03 + 0.06 * a; coffee.scale.setScalar(0.88 + 0.12 * a); coffee.visible = a > 0.02; emitter.position.y = coffee.position.y + 0.01; };
   } else if (type === 'whisky') {
     const gm = new THREE.MeshStandardMaterial({ color: 0xdfefff, transparent: true, opacity: 0.32, roughness: 0.04, metalness: 0.05, side: THREE.DoubleSide, depthWrite: false });
     const glass = new THREE.Mesh(lathe([[0, -0.042], [0.034, -0.042], [0.04, -0.036], [0.041, 0.043], [0.037, 0.043], [0.036, -0.024], [0, -0.024]], 30), gm); glass.renderOrder = 3; g.add(glass);
-    const liq = new THREE.Mesh(new THREE.CylinderGeometry(0.0355, 0.034, 0.038, 30), smoothM(0xb8641a, { roughness: 0.12 })); liq.position.y = -0.004; liq.renderOrder = 1; g.add(liq);
-    const ice = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, roughness: 0.05, depthWrite: false });
-    [[0.008, 0.012, 0.005, 0.4, 0.5], [-0.012, 0.018, -0.006, 0.9, 1.6]].forEach(([x, y, z, rx, ry]) => { const c = new THREE.Mesh(jitter(new THREE.BoxGeometry(0.026, 0.026, 0.026, 2, 2, 2), 0.15), ice); c.position.set(x, y, z); c.rotation.set(rx, ry, 0.2); c.renderOrder = 2; g.add(c); });
+    const liq = new THREE.Mesh(new THREE.CylinderGeometry(0.0355, 0.034, 0.038, 30), smoothM(0xb8641a, { roughness: 0.12 })); liq.renderOrder = 1; g.add(liq);
+    const ice = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, roughness: 0.05, depthWrite: false }), ices = [];
+    [[0.008, 0.012, 0.005, 0.4, 0.5], [-0.012, 0.018, -0.006, 0.9, 1.6]].forEach(([x, y, z, rx, ry]) => { const c = new THREE.Mesh(jitter(new THREE.BoxGeometry(0.026, 0.026, 0.026, 2, 2, 2), 0.15), ice); c.position.set(x, y, z); c.rotation.set(rx, ry, 0.2); c.renderOrder = 2; c.userData.y0 = y; ices.push(c); g.add(c); });
     emitter.position.y = 0.04;
+    /* 액체 기둥은 바닥(-0.023)에서 위로 a 만큼, 얼음은 액면 따라 가라앉되 바닥에 걸림 */
+    g.userData.setAmount = a => { liq.scale.y = Math.max(0.03, a); liq.position.y = -0.023 + 0.019 * a; liq.visible = a > 0.02; ices.forEach(c => { c.position.y = Math.max(-0.014, c.userData.y0 - (1 - a) * 0.034); }); };
   } else {
     const paper = smoothM(0xf4f1ea, { roughness: 0.9 });
-    const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 12), paper); cig.rotation.z = Math.PI / 2; cig.position.x = 0.005; g.add(cig);
+    const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 12), paper); cig.rotation.z = Math.PI / 2; g.add(cig);
     const filt = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.022, 12), smoothM(0xd9a15a, { roughness: 0.9 })); filt.rotation.z = Math.PI / 2; filt.position.x = -0.041; g.add(filt);
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.002, 12), smoothM(0xc08a3a)); ring.rotation.z = Math.PI / 2; ring.position.x = -0.03; g.add(ring);
-    const ash = new THREE.Mesh(new THREE.CylinderGeometry(0.0038, 0.004, 0.008, 12), smoothM(0x8e8a84, { roughness: 1 })); ash.rotation.z = Math.PI / 2; ash.position.x = 0.044; g.add(ash);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.0042, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff5a1a })); tip.position.x = 0.048; g.add(tip); g.userData.tip = tip;
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xff7a2a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })); glow.scale.setScalar(0.022); glow.position.x = 0.048; g.add(glow); g.userData.glow = glow;
-    emitter.position.set(0.048, 0.003, 0);
+    const ash = new THREE.Mesh(new THREE.CylinderGeometry(0.0038, 0.004, 0.008, 12), smoothM(0x8e8a84, { roughness: 1 })); ash.rotation.z = Math.PI / 2; g.add(ash);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.0042, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff5a1a })); g.add(tip); g.userData.tip = tip;
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xff7a2a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })); glow.scale.setScalar(0.022); g.add(glow); g.userData.glow = glow;
+    emitter.position.set(0, 0.003, 0);
+    /* 필터 끝(x -0.03)은 고정, 담배 몸통이 a 배로 짧아지고 재·불씨·연기 위치가 끝을 따라간다 */
+    g.userData.setAmount = a => { const end = -0.03 + 0.07 * a; cig.scale.y = Math.max(0.05, a); cig.position.x = -0.03 + 0.035 * a; ash.position.x = end + 0.004; tip.position.x = end + 0.008; glow.position.x = end + 0.008; emitter.position.x = end + 0.008; };
   }
-  g.add(emitter); return g;
+  g.userData.setAmount(1); g.add(emitter); return g;
 }
 
 export class Particles {
