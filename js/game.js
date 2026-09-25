@@ -4,7 +4,7 @@ import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch } from './util.js';
 import { terrainH } from './terrain.js';
 import { makeItem } from './props.js';
-import { buildScene, applyPostMode, IBL_STRENGTH } from './scene.js';
+import { buildScene } from './scene.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
 
 export const player = { x: 2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
@@ -46,7 +46,7 @@ export function bindInput() {
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
   $('#shadow').onclick = () => { settings.shadow = !settings.shadow; $('#shadow').classList.toggle('on', settings.shadow); $('#shadowV').textContent = settings.shadow ? '켜짐' : '꺼짐'; ctx.renderer.shadowMap.enabled = settings.shadow; previewRebuild(); };
-  $('#post').onclick = () => { settings.post = !settings.post; $('#post').classList.toggle('on', settings.post); $('#postV').textContent = settings.post ? '켜짐 (실험)' : '꺼짐 (실험)'; applyPostMode(); };
+  $('#bloom').onclick = () => { settings.bloom = !settings.bloom; $('#bloom').classList.toggle('on', settings.bloom); $('#bloomV').textContent = settings.bloom ? '켜짐' : '꺼짐'; ctx.post.setBloom(settings.bloom); };
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
@@ -78,11 +78,7 @@ function renderTrunk() {
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
   if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
-function pickItem(type) {
-  state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand();
-  if (IBL_STRENGTH > 0) it.traverse(o => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = IBL_STRENGTH; });
-  if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다');
-}
+function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; }
 export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.2, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.22, -0.45); h.rotation.set(0, 0, 0); } }
 function sip() { anim.sipT = 0; if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); }
@@ -108,8 +104,7 @@ function showPause() { ctx.paused = true; $('#pause').classList.add('on'); $('#p
 function hidePause() { ctx.paused = false; $('#pause').classList.remove('on'); }
 function takePhoto() {
   if (!ctx.running) return; const hud = $('#hud'); hud.classList.add('photo');
-  if (settings.post) ctx.post.render(); else ctx.renderer.render(ctx.scene, ctx.camera);
-  const url = canvas().toDataURL('image/png');
+  ctx.post.render(); const url = canvas().toDataURL('image/png');
   const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${state.time}.png`; a.click();
   setTimeout(() => { hud.classList.remove('photo'); showToast('사진을 저장했다'); }, 250);
 }

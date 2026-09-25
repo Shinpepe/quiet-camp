@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { smooth, fbm, ridge, NOISE_GLSL, SRGB_GLSL } from './util.js';
+import { smooth, fbm, ridge, NOISE_GLSL } from './util.js';
 
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 
@@ -82,30 +82,30 @@ export function makeGround(cfg) {
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
 }
 
-/* 물. lin=0 이면 단일 파일과 같은 원본 출력, lin=1 이면 포스트 패스용으로 sRGB→선형 */
-export function makeWater(w, tm, uTime, lin) {
+/* 물 — r165 는 Color 가 자동으로 선형이라 셰이더 안에서 색공간 변환 불필요. 출력은 OutputPass 가 처리. */
+export function makeWater(w, tm, uTime) {
   const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180); geo.rotateX(-Math.PI / 2);
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     uniforms: {
-      uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z }, uLin: { value: lin || 0 },
+      uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z },
       deep: { value: new THREE.Color(w.deep).multiplyScalar(tm.waterMul) }, shallow: { value: new THREE.Color(w.shallow).multiplyScalar(tm.waterMul) },
       skyTop: { value: new THREE.Color(tm.top) }, skyBottom: { value: new THREE.Color(tm.bottom) },
-      sunDir: { value: new THREE.Vector3(...tm.sun).normalize() }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI) },
+      sunDir: { value: new THREE.Vector3(...tm.sun).normalize() }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI * 0.5) },
       fogColor: { value: new THREE.Color(tm.fog) }, fogNear: { value: 40 }, fogFar: { value: tm.fogFar },
     },
     vertexShader: `uniform float uTime,waveAmp,shoreZ;varying vec3 vW,vN;
       float wave(vec2 p){float k=smoothstep(0.0,10.0,shoreZ-p.y);return waveAmp*k*(0.18*sin(p.x*0.25+uTime*1.1)+0.12*sin(p.y*0.35+uTime*0.8+p.x*0.1)+0.06*sin((p.x+p.y)*0.8-uTime*2.0)+0.035*sin(p.x*1.7-p.y*0.6-uTime*2.6));}
       void main(){vec4 wp=modelMatrix*vec4(position,1.0);vec2 p=wp.xz;float h=wave(p);float e=0.6;float hx=wave(p+vec2(e,0.0));float hz=wave(p+vec2(0.0,e));
         vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
-    fragmentShader: SRGB_GLSL + `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uLin;varying vec3 vW,vN;
+    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime;varying vec3 vW,vN;
       void main(){vec3 V=normalize(cameraPosition-vW);vec3 N=normalize(vN);float fres=pow(1.0-max(dot(N,V),0.0),3.0);
         float dist=shoreZ-vW.z;float depth=clamp(dist/14.0,0.0,1.0);vec3 base=mix(shallow,deep,depth);
         vec3 sky=mix(skyBottom,skyTop,0.4);vec3 col=mix(base,sky,fres*0.7+0.08);
-        vec3 H=normalize(sunDir+V);float spec=pow(max(dot(N,H),0.0),160.0);col+=sunColor*spec*1.1;
-        float foam=smoothstep(2.4,0.0,dist)*(0.55+0.45*sin(vW.x*0.6+uTime*1.4+sin(vW.x*0.13)*3.0));col=mix(col,vec3(0.95),clamp(foam,0.0,1.0)*0.5);
+        vec3 H=normalize(sunDir+V);float spec=pow(max(dot(N,H),0.0),160.0);col+=sunColor*spec;
+        float foam=smoothstep(2.4,0.0,dist)*(0.55+0.45*sin(vW.x*0.6+uTime*1.4+sin(vW.x*0.13)*3.0));col=mix(col,vec3(0.9),clamp(foam,0.0,1.0)*0.5);
         float f=smoothstep(fogNear,fogFar,length(cameraPosition-vW));col=mix(col,fogColor,f);
-        vec3 o=clamp(col,0.0,1.0);gl_FragColor=vec4(uLin>0.5?srgb2lin(o):o,mix(0.78,0.97,depth));}`,
+        gl_FragColor=vec4(col,mix(0.78,0.97,depth));}`,
   });
   const m = new THREE.Mesh(geo, mat); m.position.set(0, 0, w.z - w.size / 2 + 1); m.frustumCulled = false; return m;
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { ctx, state, settings } from './state.js';
+import { ctx, state } from './state.js';
 import { $, rnd, smooth, wrapPI } from './util.js';
-import { buildScene, applyPostMode } from './scene.js';
+import { buildScene } from './scene.js';
 import { createPost } from './post.js';
 import { spawnFlock } from './props.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, resetHand } from './game.js';
@@ -11,7 +11,7 @@ const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: tru
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 단일 파일과 동일
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // OutputPass 가 이 설정을 읽어 최종 단계에서 적용
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
 ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
@@ -69,9 +69,9 @@ function loop(now) {
     if (type === 'smoke') { const puff = anim.sipT !== null && anim.sipT > 0.35; W.item.userData.tip.material.color.setHex(puff ? 0xffb060 : 0xff5a1a); W.item.userData.glow.material.opacity = puff ? 0.95 : 0.5 + 0.1 * Math.sin(T * 6); if (T - anim.lastSteam > (puff ? 0.02 : 0.09)) { anim.lastSteam = T; W.smoke.spawn(tmpV, { x: 0.02, y: 0.18, z: 0 }, 0.01, 3.2); } }
   }
   W.steam.update(dt, 0.03); W.smoke.update(dt, 0.04); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
-  if (settings.post) ctx.post.render(); else renderer.render(scene, camera);   // 기본: 단일 파일과 같은 직접 렌더
+  ctx.post.render();
 }
 
 bindInput();
 $('#loading').classList.add('on');
-setTimeout(() => { buildScene(state.bg, state.time); applyPostMode(); $('#loading').classList.remove('on'); requestAnimationFrame(loop); }, 50);
+setTimeout(() => { buildScene(state.bg, state.time); $('#loading').classList.remove('on'); requestAnimationFrame(loop); }, 50);
