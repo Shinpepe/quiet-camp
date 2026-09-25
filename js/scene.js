@@ -8,8 +8,6 @@ import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock,
 import { startCrackle } from './audio.js';
 import { paramsAt, sunDirAt } from './time.js';
 
-const _white = new THREE.Color(0xffffff);
-
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
   if (W.envRT) { W.envRT.dispose(); W.envRT = null; }
@@ -18,8 +16,7 @@ function disposeScene() {
   scene.environment = null;
 }
 
-/* 하늘을 큐브맵으로 구워 환경광으로. 시간이 흐르면 몇 초마다 다시 굽는다.
-   envScene 은 한 번만 만들고, 이전 렌더타깃은 새 것으로 바꾼 뒤 해제한다. */
+/* 하늘을 큐브맵으로 구워 환경광으로. 시간이 흐르면 몇 초마다 다시 굽는다. */
 export function rebakeEnv() {
   const W = ctx.W; if (!W.skyMat) return;
   try {
@@ -49,7 +46,6 @@ export function applyTime() {
   W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.opacity = mk; W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
   ctx.scene.fog.color.copy(cur.fog); ctx.scene.fog.far = cur.fogFar; ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
   if (W.water) { const wu = W.water.material.uniforms, w = W.cfg.water; wu.skyTop.value.copy(cur.top); wu.skyBottom.value.copy(cur.bottom); wu.sunDir.value.copy(L); wu.sunColor.value.copy(cur.sunColor).multiplyScalar(cur.sunI * 0.5 * fade); wu.fogColor.value.copy(cur.fog); wu.fogFar.value = cur.fogFar; wu.deep.value.set(w.deep).multiplyScalar(cur.waterMul); wu.shallow.value.set(w.shallow).multiplyScalar(cur.waterMul); }
-  W.mist.forEach(m => { m.material.uniforms.uMist.value = cur.mist * (W.cfg.snow ? 0.6 : 1); m.material.uniforms.uCol.value.copy(cur.fog).lerp(_white, 0.3); });
   if (ctx.post) ctx.post.setTime(cur);
 }
 
@@ -57,7 +53,7 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, platforms: [], mist: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
@@ -100,27 +96,14 @@ export function buildScene(bgKey) {
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
   if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, terrainH(x, z, cfg) + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
 
-  /* 골짜기 안개: 낮게 깔린 노이즈 층 두 겹 */
-  const mistMat = (h, sc) => new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    uniforms: { uTime: W.uTime, uMist: { value: 0 }, uCol: { value: new THREE.Color() }, uShore: { value: cfg.water ? cfg.water.z : -9999 }, uSc: { value: sc } },
-    vertexShader: 'varying vec3 vW;void main(){vW=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*viewMatrix*vec4(vW,1.);}',
-    fragmentShader: NOISE_GLSL + `uniform float uTime,uMist,uShore,uSc;uniform vec3 uCol;varying vec3 vW;
-      void main(){float d=length(cameraPosition-vW);vec2 p=vW.xz*uSc+vec2(uTime*0.012,uTime*0.007);
-        float n=vnoise(p)*0.5+vnoise(p*2.3+7.0)*0.3+vnoise(p*5.1+3.0)*0.2;
-        float a=smoothstep(0.38,0.8,n)*uMist*smoothstep(2.0,14.0,d)*(1.0-smoothstep(150.0,300.0,d));
-        a*=0.55+0.45*smoothstep(uShore+14.0,uShore-6.0,vW.z);
-        gl_FragColor=vec4(uCol,a*0.85);}` });
-  [[0.6, 0.018], [1.3, 0.011]].forEach(([h, sc]) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(360, 360), mistMat(h, sc)); m.rotation.x = -Math.PI / 2; m.position.set(0, h, -40); m.userData.noAO = true; m.frustumCulled = false; scene.add(m); W.mist.push(m); });
-
   const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);
   const chair = makeChair(); chair.position.set(1.5, 0, 0.8); scene.add(chair);
   const table = makeTable(); table.position.set(0.6, 0, 0.5); scene.add(table);
-  W.lantern = new THREE.PointLight(0xffc07a, cur.lantern, 12, 2); W.lantern.position.set(0.65, 0.75, 0.5); scene.add(W.lantern);
+  W.lantern = new THREE.PointLight(0xffc07a, W.lanternLit ? cur.lantern : 0, 12, 2); W.lantern.position.set(0.65, 0.75, 0.5); scene.add(W.lantern);
   const fire = makeFire(); fire.position.set(0.3, 0, -1.4); scene.add(fire);
   const car = makeCar(); car.position.set(0, 0, 8); scene.add(car);
   makeProps();
-  contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(-3.25, 1.4, 0.7, 0.7, 0.5);
+  contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(2.95, 0.3, 0.7, 0.7, 0.5);
 
   W.steam = new Particles(160, { color: 0xffffff, size: 0.05, opacity: 0.32 }); scene.add(W.steam.mesh);
   W.smoke = new Particles(260, { color: 0xc9c9d2, size: 0.09, opacity: 0.22 }); scene.add(W.smoke.mesh);
@@ -141,11 +124,12 @@ export function buildScene(bgKey) {
   }
 
   W.interact = [
-    { id: 'trunk', pos: [0, 1.0, 10.9], r: 2.6, label: () => '트렁크 열기' },
-    { id: 'chair', pos: [1.5, 0.6, 0.8], r: 2.2, label: () => '의자에 앉기' },
-    { id: 'tent',  pos: [-1.6, 0.7, 0.0], r: 2.3, label: () => '텐트에 들어가기' },
-    { id: 'car',   pos: [1.35, 1.0, 8.1], r: 2.0, label: () => '운전석에 앉기' },
-    { id: 'fire',  pos: [0.3, 0.4, -1.4], r: 2.4, label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
+    { id: 'trunk',   pos: [0, 1.0, 10.9],     r: 2.6, label: () => '트렁크 열기' },
+    { id: 'chair',   pos: [1.5, 0.6, 0.8],    r: 2.2, label: () => '의자에 앉기' },
+    { id: 'tent',    pos: [-1.6, 0.7, 0.0],   r: 2.3, label: () => '텐트에 들어가기' },
+    { id: 'car',     pos: [1.35, 1.0, 8.1],   r: 2.0, label: () => '운전석에 앉기' },
+    { id: 'fire',    pos: [0.3, 0.4, -1.4],   r: 2.4, label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
+    { id: 'lantern', pos: [0.65, 0.6, 0.5],   r: 1.6, label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
   ];
   if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.6], r: 2.0, label: () => '부두 끝에 앉기' });
   if (ctx.post) ctx.post.setScene(scene);

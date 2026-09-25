@@ -21,7 +21,9 @@ ctx.post = createPost(renderer, camera);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); });
 
 let last = performance.now(), T = 0, lastSec = -1;
-const _c = new THREE.Color(), tmpV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4), sunV = new THREE.Vector3();
+const _c = new THREE.Color(), tmpV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
+/* 랜턴 밝기: 켜졌으면 시간대 값(최소치 보장)으로, 꺼졌으면 0 으로 부드럽게 */
+const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene; if (!scene) return; T += dt; W.uTime.value = T; ctx.post.update(T);
@@ -49,19 +51,14 @@ function loop(now) {
   }
   camera.updateMatrixWorld();
 
-  /* 빛줄기: 광원의 화면 위치와 세기 (해가 낮을수록, 화면 안에 있을수록 강하게) */
-  { const L = W.sunUp ? W.sunDir : W.moonDir; sunV.copy(L).multiplyScalar(1000).add(camera.position).project(camera);
-    let s = 0; if (sunV.z < 1) { const off = 1 - smooth(0.75, 1.6, Math.hypot(sunV.x, sunV.y)); const low = W.sunUp ? (1 - smooth(0.06, 0.55, W.sunDir.y)) * smooth(-0.02, 0.06, W.sunDir.y) : 0.3 * W.tm.stars; s = off * low * 0.9; }
-    ctx.post.setSun(sunV.x, sunV.y, s); }
-
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
   if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = (0.45 + 0.4 * Math.sin(T * 1.7)) * Math.min(1, W.tm.stars * 2.5); }
   if (W.cfg.birds && W.sunUp) { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
   updateFlocks(dt, T);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
-  if (W.lantern) W.lantern.intensity = W.tm.lantern * flick;
-  if (W.tentLamp) W.tentLamp.intensity = W.tm.tentLamp * flick;
+  if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
+  if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
   if (W.dockLight) W.dockLight.intensity = W.tm.lantern * 0.8 * (0.92 + 0.06 * Math.sin(T * 11 + 1));
   if (W.stars) W.stars.material.opacity = W.tm.stars * (0.85 + 0.15 * Math.sin(T * 2.3));
   if (W.fireLight) {
@@ -78,8 +75,8 @@ function loop(now) {
     const type = state.item;
     if (anim.sipT !== null) {
       anim.sipT += dt / 1.7; const k = Math.sin(Math.PI * Math.min(anim.sipT, 1));
-      if (type === 'smoke') { basePos.set(0.2, -0.2, -0.4); sipPos.set(0.04, -0.075, -0.2); hand.rotation.set(0, 0.6 + k * 0.5, 0.15 + k * 0.1); }
-      else { basePos.set(0.22, -0.22, -0.45); sipPos.set(0.06, -0.09, -0.27); hand.rotation.set(k * 0.55, 0, k * -0.1); }
+      if (type === 'smoke') { basePos.set(0.2, -0.13, -0.4); sipPos.set(0.04, -0.045, -0.2); hand.rotation.set(0, 0.6 + k * 0.5, 0.15 + k * 0.1); }
+      else { basePos.set(0.22, -0.2, -0.45); sipPos.set(0.06, -0.08, -0.27); hand.rotation.set(k * 0.55, 0, k * -0.1); }
       hand.position.lerpVectors(basePos, sipPos, k);
       if (anim.sipT >= 1) { anim.sipT = null; resetHand(); }
     }

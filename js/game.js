@@ -3,7 +3,7 @@ import { ctx, state, settings } from './state.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch } from './util.js';
 import { terrainH } from './terrain.js';
-import { makeItem, makeHand } from './props.js';
+import { makeItem } from './props.js';
 import { buildScene } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
@@ -28,6 +28,7 @@ export function bindInput() {
     keys[e.code] = true;
     if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) startGame(); return; }
     if (e.code === 'KeyE') interact();
+    if (e.code === 'KeyF') { const l = lampForSeat(); if (l && cam.t >= 1 && !ctx.paused) toggleLamp(l); }
     if (e.code === 'KeyP') takePhoto();
     if (state.mode === 'trunk' && /^Digit[1-4]$/.test(e.code)) trunkKey(+e.code[5]);
   });
@@ -50,6 +51,7 @@ export function bindInput() {
   $('#toMenu').onclick = () => { hidePause(); ctx.running = false; $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); if (!isTouch) canvas().requestPointerLock(); };
   $('#mAct').onclick = interact; $('#mSip').onclick = () => { if (state.item && anim.sipT === null) sip(); };
+  $('#mLamp').onclick = () => { const l = lampForSeat(); if (l && cam.t >= 1 && !ctx.paused) toggleLamp(l); };
   $('#start').onclick = startGame;
   const bindRange = (id, key, fmt, apply) => { const el = $('#' + id); el.dataset.k = key; el.oninput = () => { settings[key] = +el.value; document.querySelectorAll('input[data-k=' + key + ']').forEach(o => { o.value = el.value; }); document.querySelectorAll('[id^=' + key + 'V]').forEach(l => l.textContent = fmt(settings[key])); apply && apply(settings[key]); }; };
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
@@ -63,7 +65,6 @@ export function bindInput() {
   bindToggle('bloom', 'bloom', on => ctx.post.setBloom(on));
   bindToggle('ao', 'ao', on => ctx.post.setAO(on));
   bindToggle('reflect', 'reflect', on => { if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on ? 1 : 0; });
-  bindToggle('rays', 'rays', on => ctx.post.setRays(on));
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
@@ -79,12 +80,19 @@ function startMove(to, yawTo) { cam.from.copy(ctx.camera.position); cam.to.copy(
 function sitDown(id) { const st = SEAT[id]; state.mode = 'seated'; state.seat = id; startMove(new THREE.Vector3(...st.pos), wrapPI(player.yaw)); sfx('sit'); }
 function standUp() { const st = SEAT[state.seat]; player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw)); }
 function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx('lighter'); if (W.fireLit) startCrackle(); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); }
+
+/* ── 랜턴: 테이블 랜턴은 걸어가서 E, 의자에 앉아서는 F. 텐트 랜턴은 텐트 안에서 F ── */
+const LAMP = { lantern: { flag: 'lanternLit', name: '랜턴' }, tentLamp: { flag: 'tentLampLit', name: '텐트 랜턴' } };
+export function lampForSeat() { if (state.mode !== 'seated') return null; return state.seat === 'tent' ? 'tentLamp' : state.seat === 'chair' ? 'lantern' : null; }
+function lampLabel(k) { const L = LAMP[k]; return ctx.W[L.flag] ? L.name + ' 끄기' : L.name + ' 켜기'; }
+function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx('lighter'); showToast(ctx.W[L.flag] ? L.name + '을 켰다' : L.name + '을 껐다'); updateHUD(); }
+
 export function interact() {
   if (cam.t < 1 || ctx.paused) return;
   if (state.mode === 'trunk') { closeTrunk(); return; }
   if (state.mode === 'seated') { standUp(); updateHUD(); return; }
   const t = currentTarget(); if (!t) return;
-  if (t.id === 'trunk') openTrunk(); else if (t.id === 'fire') toggleFire(); else sitDown(t.id);
+  if (t.id === 'trunk') openTrunk(); else if (t.id === 'fire') toggleFire(); else if (t.id === 'lantern') toggleLamp('lantern'); else sitDown(t.id);
   updateHUD(); anim.lastTargetId = undefined;
 }
 function openTrunk() { state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunk'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD(); }
@@ -95,9 +103,10 @@ function renderTrunk() {
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
   if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
-function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type), hd = makeHand(type === 'smoke' ? 'pinch' : 'grip'); it.position.copy(hd.userData.itemPos); hd.add(it); ctx.hand.add(hd); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
+/* 손 없이 아이템만 시야 오른쪽 아래에 든다 */
+function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; }
-export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.2, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.22, -0.45); h.rotation.set(0, 0, 0); } }
+export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); } }
 function sip() { anim.sipT = 0; if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); }
 
 export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
@@ -107,8 +116,9 @@ export function updateHUD() {
   const ib = $('#itembox'); ib.classList.toggle('on', !!state.item && state.mode !== 'trunk');
   if (state.item) { ib.querySelector('.ic').textContent = ITEMS[state.item].ic; ib.querySelector('.nm').textContent = ITEMS[state.item].name; ib.querySelector('.hn').textContent = (isTouch ? '버튼' : '클릭') + ' · ' + ITEMS[state.item].act; }
   $('#mSip').style.display = state.item && state.mode !== 'trunk' ? '' : 'none';
+  const lamp = lampForSeat(), ml = $('#mLamp'); ml.style.display = lamp ? '' : 'none'; if (lamp) ml.textContent = lampLabel(lamp);
   const p = $('#prompt');
-  if (state.mode === 'seated') { p.innerHTML = `<kbd class="a">E</kbd>${SEAT[state.seat].up}`; p.classList.add('on'); }
+  if (state.mode === 'seated') { p.innerHTML = `<kbd class="a">E</kbd>${SEAT[state.seat].up}` + (lamp ? ` &nbsp; <kbd class="a">F</kbd>${lampLabel(lamp)}` : ''); p.classList.add('on'); }
   else if (state.mode === 'trunk') p.classList.remove('on');
   $('#cross').classList.remove('hot');
 }
@@ -183,5 +193,5 @@ export function walk(dt) {
   } else player.bob += (0 - (player.bob % (Math.PI * 2))) * 0.1;
   const targetY = floorY(player.x, player.z) + EYE + Math.sin(player.bob) * 0.035;
   cam3.position.set(player.x, cam3.position.y + (targetY - cam3.position.y) * Math.min(1, dt * 12), player.z);
-  if (ctx.W.item && anim.sipT === null) { const b = state.item === 'smoke' ? [0.2, -0.2] : [0.22, -0.22]; ctx.hand.position.x = b[0] + Math.sin(player.bob * 0.5) * 0.01; ctx.hand.position.y = b[1] + Math.abs(Math.sin(player.bob)) * 0.012; }
+  if (ctx.W.item && anim.sipT === null) { const b = state.item === 'smoke' ? [0.2, -0.13] : [0.22, -0.2]; ctx.hand.position.x = b[0] + Math.sin(player.bob * 0.5) * 0.01; ctx.hand.position.y = b[1] + Math.abs(Math.sin(player.bob)) * 0.012; }
 }

@@ -9,8 +9,6 @@ const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 /* 최신 three 는 position 이 읽기 전용이라 Object.assign 으로 덮어쓸 수 없다 → set 으로 옮기고 그대로 반환 */
 const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
-/* 두 점 사이 캡슐 */
-function cap(a, b, r, mat) { const from = V(...a), to = V(...b), len = from.distanceTo(to); const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.002, len - r * 0.4), 3, 10), mat); m.position.copy(from).add(to).multiplyScalar(0.5); m.lookAt(to); m.rotateX(Math.PI / 2); return m; }
 /* 회전체: [[r,y],...] 프로파일 */
 const lathe = (pts, seg) => new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg || 28);
 /* 처진 천: 폭 w × 길이 h 판을 가운데가 sag 만큼 꺼지게 */
@@ -21,64 +19,46 @@ export function contactShadow(x, z, sx, sz, op) {
   m.rotation.x = -Math.PI / 2; m.position.set(x, terrainH(x, z, ctx.W.cfg) + 0.02, z); ctx.scene.add(m);
 }
 
-/* ── 손 (오른손) — pose: 'grip' 컵을 쥠 / 'pinch' 담배를 검지·중지 사이에 ── */
-export function makeHand(pose) {
-  const g = new THREE.Group(), sk = smoothM(0xd6a58a, { roughness: 0.72 }), sleeve = cloth(0x4b5a3f, 3), cuff = cloth(0x3a4531, 2);
-  const finger = (pts, r) => { for (let i = 0; i < pts.length - 1; i++) g.add(cap(pts[i], pts[i + 1], r * (1 - i * 0.1), sk)); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(r * 0.95, 8, 6), sk), ...pts[pts.length - 1])); };
-  const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), sk);
-  if (pose === 'grip') {
-    palm.scale.set(0.026, 0.05, 0.042); palm.position.set(0.07, 0, -0.004); g.add(palm);
-    const R = 0.057, arc = (th, y) => [R * Math.cos(th), y, -R * Math.sin(th)];
-    [[0.032, 2.35, 0.0095], [0.011, 2.45, 0.0095], [-0.01, 2.3, 0.009], [-0.03, 2.0, 0.008]].forEach(([y, end, r]) => { const t = [0.15, 0.15 + (end - 0.15) * 0.36, 0.15 + (end - 0.15) * 0.7, end]; finger(t.map((th, i) => arc(th, y - i * 0.002)), r); });
-    finger([[0.062, 0.036, 0.012], [0.046, 0.046, 0.032], [0.022, 0.05, 0.048], [-0.004, 0.051, 0.052]], 0.011);   // 엄지: 컵 앞쪽 위를 감쌈
-    g.add(cap([0.076, -0.05, 0.0], [0.17, -0.24, 0.17], 0.028, sk));                                             // 손목·팔뚝
-    const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.05, 0.42, 14), sleeve); sl.position.set(0.22, -0.36, 0.27); sl.lookAt(0.32, -0.56, 0.44); sl.rotateX(Math.PI / 2); g.add(sl);
-    const cf = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 20), cuff); cf.position.set(0.12, -0.16, 0.1); cf.lookAt(0.32, -0.56, 0.44); g.add(cf);
-    g.userData.itemPos = V(0, 0, 0);
-  } else {
-    palm.scale.set(0.046, 0.05, 0.02); palm.position.set(-0.005, -0.03, 0); g.add(palm);
-    finger([[0.016, 0.01, 0], [0.017, 0.042, -0.002], [0.018, 0.068, -0.004], [0.018, 0.09, -0.006]], 0.0085);      // 검지
-    finger([[-0.008, 0.012, 0], [-0.01, 0.046, -0.002], [-0.011, 0.074, -0.004], [-0.012, 0.097, -0.006]], 0.0085); // 중지
-    finger([[-0.027, 0.01, 0], [-0.029, 0.036, -0.012], [-0.03, 0.048, -0.03], [-0.03, 0.045, -0.046]], 0.008);      // 약지 (구부림)
-    finger([[-0.043, 0.004, 0], [-0.045, 0.026, -0.012], [-0.046, 0.034, -0.028], [-0.046, 0.03, -0.042]], 0.0072);  // 새끼
-    finger([[0.028, -0.02, 0.004], [0.044, 0.004, 0.014], [0.052, 0.03, 0.022], [0.054, 0.05, 0.026]], 0.0105);      // 엄지
-    g.add(cap([0, -0.075, 0], [0.09, -0.3, 0.16], 0.03, sk));
-    const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.064, 0.052, 0.42, 14), sleeve); sl.position.set(0.14, -0.42, 0.26); sl.lookAt(0.24, -0.64, 0.42); sl.rotateX(Math.PI / 2); g.add(sl);
-    const cf = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 20), cuff); cf.position.set(0.045, -0.2, 0.09); cf.lookAt(0.24, -0.64, 0.42); g.add(cf);
-    g.userData.itemPos = V(0.003, 0.077, 0.004);
-  }
-  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return g;
-}
-
+/* ── 랜턴: userData.setLit(bool) 로 심지 색과 유리 발광을 바꾼다 ── */
 export function makeLantern(lit) {
   const g = new THREE.Group(), frame = METAL();
   g.add(new THREE.Mesh(lathe([[0, 0], [0.075, 0], [0.08, 0.02], [0.07, 0.04], [0, 0.04]]), frame));
-  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.14, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xffe0b0, transparent: true, opacity: 0.35, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false })); glass.position.y = 0.09; g.add(glass);
-  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.1, 8), new THREE.MeshBasicMaterial({ color: lit ? 0xffd9a0 : 0x8a7a62 })); core.position.y = 0.09; g.add(core);
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.14, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xffe0b0, transparent: true, opacity: 0.35, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false, emissive: new THREE.Color(0xffc070), emissiveIntensity: 0 })); glass.position.y = 0.09; g.add(glass);
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.1, 8), new THREE.MeshBasicMaterial({ color: 0x8a7a62 })); core.position.y = 0.09; g.add(core);
   g.add(at(new THREE.Mesh(lathe([[0, 0], [0.078, 0], [0.06, 0.03], [0.03, 0.05], [0, 0.05]]), frame), 0, 0.16, 0));
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.005, 6, 16, Math.PI), frame); handle.position.y = 0.21; g.add(handle);
+  g.userData.setLit = on => { core.material.color.setHex(on ? 0xffd9a0 : 0x8a7a62); glass.material.emissiveIntensity = on ? 0.9 : 0; };
+  g.userData.setLit(!!lit);
   return g;
 }
 export function makeTent() {
-  const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6;
-  const clothM = cloth(0xe0783a, 8, { side: THREE.DoubleSide }), flyM = cloth(0xc4602a, 8, { side: THREE.DoubleSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
-  /* 벽면: 프레임 사이에서 안쪽·아래로 살짝 처진 천 */
-  const slab = (m, halfW, h, y0, len, sag) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => { const geo = sagPlane(side, len, -sag, 10); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w); }); };
-  slab(clothM, Wd / 2, H, 0, L, 0.05); slab(flyM, Wd / 2 + 0.12, H + 0.02, 0.06, L + 0.4, 0.07);
+  const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
+  /* 바깥 천은 앞면만 그리고(FrontSide), 안쪽에 3.5cm 들여 안감(BackSide)을 따로 둔다.
+     예전에는 DoubleSide 한 장이라 햇빛 반대편 벽의 안쪽 면이 해를 정면으로 보는 셈이 되어 밖의 그림자가 비쳐 보였다. */
+  const clothM = cloth(0xe0783a, 8), flyM = cloth(0xc4602a, 8), liningM = cloth(0xc9673a, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
+  const slab = (m, halfW, h, y0, len, sag, inner) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => {
+    const geo = sagPlane(side, len, -sag, 10); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w);
+    if (inner) { const li = new THREE.Mesh(geo, inner); li.position.copy(w.position); li.rotation.copy(w.rotation); li.translateY(-0.035); g.add(li); linings.push(li); }
+  }); };
+  slab(clothM, Wd / 2, H, 0, L, 0.05, liningM); slab(flyM, Wd / 2 + 0.12, H + 0.02, 0.06, L + 0.4, 0.07, null);
   g.add(bar([0, H + 0.04, -L / 2 - 0.28], [0, H + 0.04, L / 2 + 0.28], 0.025, pole, 8));
   [-L / 2 - 0.05, L / 2 + 0.05].forEach(z => [-1, 1].forEach(sx => g.add(bar([sx * (Wd / 2 + 0.12), 0, z], [0, H + 0.03, z], 0.018, pole, 8))));
   const sh = new THREE.Shape(); sh.moveTo(-Wd / 2, 0); sh.lineTo(Wd / 2, 0); sh.lineTo(0, H);
-  const back = new THREE.Mesh(new THREE.ShapeGeometry(sh), cloth(0xb8562a, 4, { side: THREE.DoubleSide })); back.position.z = L / 2; g.add(back);
+  const backGeo = new THREE.ShapeGeometry(sh);
+  const back = new THREE.Mesh(backGeo, cloth(0xb8562a, 4)); back.position.z = L / 2; g.add(back);
+  const backIn = new THREE.Mesh(backGeo, cloth(0xa8502a, 4, { side: THREE.BackSide })); backIn.position.z = L / 2 - 0.035; g.add(backIn); linings.push(backIn);
   [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, cloth(0xd46a30, 2), 8)));
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd, 0.05, L), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
-  const bag = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 1.3, 4, 12), cloth(0x2c4a7a, 4)); bag.rotation.x = Math.PI / 2; bag.scale.set(1.15, 0.4, 1); bag.position.set(0.55, 0.13, 0.1); g.add(bag);
-  const pillow = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.28, 4, 10), cloth(0xd9d2c5, 3)); pillow.rotation.z = Math.PI / 2; pillow.scale.set(1, 1, 0.55); pillow.position.set(0.55, 0.3, 0.9); g.add(pillow);
+  /* 펼쳐진 침낭: 납작한 캡슐 + 접힌 윗자락 + 베개 */
+  const bagM = cloth(0x2c4a7a, 4), bagIn = cloth(0x9db0cf, 3);
+  const bag = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 1.35, 4, 14), bagM); bag.rotation.x = Math.PI / 2; bag.scale.set(1.05, 1, 0.3); bag.position.set(0.5, 0.15, 0.05); g.add(bag);
+  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.045, 0.55), bagIn); flap.position.set(0.5, 0.24, 0.6); flap.rotation.set(-0.12, 0, 0.05); g.add(flap);
+  const pillow = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.28, 4, 10), cloth(0xd9d2c5, 3)); pillow.rotation.z = Math.PI / 2; pillow.scale.set(1, 1, 0.55); pillow.position.set(0.5, 0.3, 0.98); g.add(pillow);
   const mat2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.45), cloth(0x6b5a45, 3)); mat2.position.set(0, 0.01, -L / 2 - 0.4); g.add(mat2);
   [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * 1.95, 0.02, sz * 1.75], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * 1.95, 0.04, sz * 1.75); stake.rotation.z = -sx * 0.45; g.add(stake); });
-  const lamp = makeLantern(W.tm.tentLamp > 0); lamp.scale.setScalar(0.7); lamp.position.set(-0.75, 0.05, 0.9); g.add(lamp);
-  W.tentLamp = new THREE.PointLight(0xffc890, W.tm.tentLamp, 4.5, 2); W.tentLamp.position.set(-0.6, 0.35, 0.8); g.add(W.tentLamp);
-  return shadowed(g);
+  const lamp = makeLantern(W.tentLampLit); lamp.scale.setScalar(0.7); lamp.position.set(-0.75, 0.05, 0.9); g.add(lamp); W.tentLampObj = lamp;
+  W.tentLamp = new THREE.PointLight(0xffc890, W.tentLampLit ? W.tm.tentLamp : 0, 4.5, 2); W.tentLamp.position.set(-0.6, 0.35, 0.8); g.add(W.tentLamp);
+  shadowed(g); linings.forEach(li => { li.castShadow = false; }); return g;
 }
 export function makeChair() {
   const g = new THREE.Group(), fabric = cloth(0x2f4f6a, 3, { side: THREE.DoubleSide }), frame = METAL(), arm = wood(0x8a6a48, 2, 1);
@@ -89,11 +69,11 @@ export function makeChair() {
   return shadowed(g);
 }
 export function makeTable() {
-  const g = new THREE.Group(), frame = METAL();
+  const W = ctx.W, g = new THREE.Group(), frame = METAL();
   for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.9, 1.08)), 2, 0.5)); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
   [-0.26, 0.26].forEach(x => { g.add(bar([x, 0, -0.22], [x, 0.485, 0.22], 0.012, frame)); g.add(bar([x, 0, 0.22], [x, 0.485, -0.22], 0.012, frame)); });
   g.add(bar([-0.26, 0.24, 0], [0.26, 0.24, 0], 0.012, frame));
-  const lamp = makeLantern(ctx.W.tm.lantern > 0); lamp.position.set(0.05, 0.515, 0); g.add(lamp);
+  const lamp = makeLantern(W.lanternLit); lamp.position.set(0.05, 0.515, 0); g.add(lamp); W.lanternObj = lamp;
   return shadowed(g);
 }
 export function makeFire() {
@@ -119,6 +99,7 @@ export function makeCar() {
   const W = ctx.W, g = new THREE.Group(), body = std(0x8f2b28, { roughness: 0.45, metalness: 0.3 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x9dbfdc, transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.4, side: THREE.DoubleSide });
   const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
+  /* 외장 */
   add(new THREE.BoxGeometry(1.9, 0.5, 4.7), body, 0, 0.66, 0.05); add(new THREE.BoxGeometry(1.94, 0.12, 4.75), dark, 0, 0.44, 0.05);
   add(new THREE.BoxGeometry(1.85, 0.28, 1.5), body, 0, 1.0, -1.55); add(new THREE.BoxGeometry(1.8, 0.07, 2.35), body, 0, 1.86, 0.35); add(new THREE.BoxGeometry(1.7, 0.02, 2.25), dark, 0, 1.815, 0.35);
   add(new THREE.BoxGeometry(1.75, 0.05, 1.15), dark, 0, 0.9, 1.95); add(new THREE.BoxGeometry(1.75, 0.35, 0.08), body, 0, 1.06, 2.49);
@@ -135,11 +116,36 @@ export function makeCar() {
   add(new THREE.PlaneGeometry(1.7, 0.95), glass, 0, 1.48, -0.95, 0.6); add(new THREE.PlaneGeometry(1.6, 0.8), glass, 0, 1.5, 1.5, -0.35);
   add(new THREE.BoxGeometry(0.5, 0.12, 0.02), smoothM(0xe8e8e8), 0, 0.7, 2.56);
   add(new THREE.BoxGeometry(1.9, 0.12, 0.1), chrome, 0, 0.5, -2.33); add(new THREE.BoxGeometry(1.9, 0.12, 0.1), chrome, 0, 0.5, 2.55); add(new THREE.BoxGeometry(0.9, 0.22, 0.04), dark, 0, 0.82, -2.33);
-  add(new THREE.BoxGeometry(1.8, 0.35, 0.7), dark, 0, 1.0, -0.75); add(new THREE.BoxGeometry(0.42, 0.22, 0.02), new THREE.MeshBasicMaterial({ color: 0x8fc6ff }), 0, 1.06, -0.4);
-  add(new THREE.TorusGeometry(0.18, 0.025, 8, 24), dark, 0.45, 1.08, -0.5, 0.45); add(new THREE.BoxGeometry(0.3, 0.08, 0.03), dark, 0, 1.66, -0.55);
-  [[-0.45, 0.45], [0.45, 0.45]].forEach(([x, z]) => { add(new THREE.BoxGeometry(0.5, 0.45, 0.5), dark, x, 0.62, z); add(new THREE.BoxGeometry(0.5, 0.75, 0.15), dark, x, 1.15, z + 0.3); });
-  add(new THREE.BoxGeometry(1.4, 0.4, 0.5), dark, 0, 0.6, 1.3); add(new THREE.BoxGeometry(1.4, 0.7, 0.15), dark, 0, 1.12, 1.55);
   [[-1.02, -1.55], [1.02, -1.55], [-1.02, 1.55], [1.02, 1.55]].forEach(([x, z]) => { add(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 18), std(0x141414, { roughness: 0.95 }), x, 0.36, z, 0, 0, Math.PI / 2); add(new THREE.CylinderGeometry(0.2, 0.2, 0.28, 10), chrome, x, 0.36, z, 0, 0, Math.PI / 2); });
+
+  /* 실내 — 운전석(x=+0.45)에 앉아 둘러보는 시점 기준 */
+  const trim = std(0x2e3036, { roughness: 0.85 }), seatM = cloth(0x3a3f47, 2), carpet = cloth(0x1e2024, 4), ivory = std(0xd8dfe8, { roughness: 0.6 }), black = std(0x141416, { roughness: 0.5 });
+  add(new THREE.BoxGeometry(1.7, 0.02, 2.6), carpet, 0, 0.45, 0.35);                                                            // 바닥 카펫
+  [-0.45, 0.45].forEach(x => {
+    add(new THREE.BoxGeometry(0.5, 0.45, 0.5), seatM, x, 0.62, 0.45); add(new THREE.BoxGeometry(0.5, 0.75, 0.15), seatM, x, 1.15, 0.75);  // 앞좌석 방석·등받이
+    add(new THREE.BoxGeometry(0.26, 0.15, 0.1), seatM, x, 1.62, 0.76);                                                          // 머리받침
+    [-0.1, 0.1].forEach(dx => g.add(bar([x + dx, 1.52, 0.76], [x + dx, 1.56, 0.76], 0.008, chrome, 6)));                       // 머리받침 봉
+    add(new THREE.BoxGeometry(0.4, 0.02, 0.18), trim, x, 1.78, -0.55);                                                          // 선바이저
+  });
+  add(new THREE.BoxGeometry(1.4, 0.4, 0.5), seatM, 0, 0.6, 1.3); add(new THREE.BoxGeometry(1.4, 0.7, 0.15), seatM, 0, 1.12, 1.55);  // 뒷좌석
+  [-0.4, 0.4].forEach(x => add(new THREE.BoxGeometry(0.26, 0.15, 0.1), seatM, x, 1.55, 1.56));                                 // 뒷좌석 머리받침
+  add(new THREE.BoxGeometry(0.34, 0.32, 0.95), trim, 0, 0.61, 0.5);                                                             // 센터 콘솔
+  add(new THREE.BoxGeometry(0.3, 0.04, 0.3), seatM, 0, 0.79, 0.85);                                                              // 팔걸이
+  [-0.08, 0.08].forEach(x => add(new THREE.CylinderGeometry(0.04, 0.04, 0.02, 12), black, x, 0.775, 0.5));                       // 컵홀더
+  g.add(bar([0, 0.77, 0.2], [0.02, 0.98, 0.12], 0.012, chrome, 8)); add(new THREE.SphereGeometry(0.035, 10, 8), black, 0.02, 0.99, 0.12);  // 기어 레버
+  add(new THREE.BoxGeometry(1.8, 0.35, 0.7), dark, 0, 1.0, -0.75);                                                               // 대시보드
+  add(new THREE.BoxGeometry(0.55, 0.16, 0.02), trim, -0.45, 0.98, -0.41);                                                        // 글로브박스
+  add(new THREE.BoxGeometry(0.42, 0.22, 0.02), new THREE.MeshBasicMaterial({ color: 0x8fc6ff }), 0, 1.06, -0.4);                 // 센터 디스플레이
+  [-0.12, 0.12].forEach(x => add(new THREE.BoxGeometry(0.06, 0.06, 0.02), black, x, 1.22, -0.4));                                // 송풍구
+  add(new THREE.BoxGeometry(0.5, 0.18, 0.05), black, 0.45, 1.2, -0.6, 0.15);                                                     // 계기판
+  [0.33, 0.57].forEach(x => add(new THREE.CylinderGeometry(0.055, 0.055, 0.01, 16), ivory, x, 1.2, -0.575, Math.PI / 2 + 0.15)); // 계기 다이얼
+  add(new THREE.TorusGeometry(0.18, 0.025, 8, 24), dark, 0.45, 1.08, -0.5, 0.45);                                                // 핸들 림
+  add(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 12), dark, 0.45, 1.08, -0.5, Math.PI / 2 + 0.45);                           // 핸들 허브
+  [[0.27, 1.08, -0.5], [0.63, 1.08, -0.5], [0.45, 0.918, -0.578]].forEach(p => g.add(bar([0.45, 1.08, -0.5], p, 0.012, dark, 6)));  // 핸들 스포크
+  add(new THREE.BoxGeometry(0.3, 0.08, 0.03), dark, 0, 1.66, -0.55);                                                             // 룸미러
+  [-1, 1].forEach(s => { add(new THREE.BoxGeometry(0.1, 0.06, 0.55), trim, s * 0.85, 1.05, 0.3); add(new THREE.BoxGeometry(0.03, 0.03, 0.12), chrome, s * 0.83, 1.15, -0.1); });  // 도어 팔걸이·손잡이
+  add(new THREE.BoxGeometry(0.36, 0.06, 0.32), cloth(0x4b5a3f, 3), -0.45, 0.875, 0.42, 0, 0.2);                                  // 조수석에 놓인 재킷
+
   const lid = new THREE.Group(); lid.position.set(0, 1.245, 1.38); const lidM = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.06, 1.2), body); lidM.position.z = 0.6; lid.add(lidM); g.add(lid); W.trunkLid = lid;
   const cooler = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 0.35), smoothM(0x3d6f9e)); cooler.position.set(-0.4, 1.06, 1.9); g.add(cooler);
   const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.4), cloth(0x6b5a3e, 3)); bag.position.set(0.4, 1.04, 2.0); g.add(bag);
@@ -150,12 +156,13 @@ export function makeProps() {
   const cb = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.38, 0.38), smoothM(0x3d6f9e, { roughness: 0.6 })); cb.position.y = 0.19; cooler.add(cb);
   const cl = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.07, 0.4), smoothM(0xdde6ee, { roughness: 0.5 })); cl.position.y = 0.415; cooler.add(cl);
   cooler.add(bar([-0.2, 0.46, 0], [0.2, 0.46, 0], 0.012, METAL())); cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = 0.2; scene.add(shadowed(cooler));
+  /* 배낭: 쿨러 옆에 세워 살짝 기대 놓음 */
   const pack = new THREE.Group(), pm = cloth(0x4d6b3a, 3), pm2 = cloth(0x3e5730, 3);
   const pb = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.26, 4, 12), pm); pb.scale.set(1.1, 1, 0.65); pb.position.y = 0.28; pack.add(pb);
   const pl = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.14, 4, 12), pm2); pl.rotation.z = Math.PI / 2; pl.scale.set(1, 1, 0.7); pl.position.set(0, 0.5, 0.02); pack.add(pl);
   const pp = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.12, 4, 10), pm2); pp.scale.set(1.2, 1, 0.5); pp.position.set(0, 0.2, 0.14); pack.add(pp);
   [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
-  pack.position.set(-3.25, 0, 1.4); pack.rotation.set(0, 0.4, -0.3); scene.add(shadowed(pack));
+  pack.position.set(2.95, 0, 0.3); pack.rotation.set(0, -0.6, 0.12); scene.add(shadowed(pack));
   const logM = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5)));
   for (let i = 0; i < 6; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.7, 9), logM); l.rotation.z = Math.PI / 2; l.rotation.y = rnd(-0.08, 0.08); l.position.set(1.65 + (i % 3) * 0.13 - 0.13, 0.06 + Math.floor(i / 3) * 0.12, -2.45); scene.add(shadowed(l)); }
 }
