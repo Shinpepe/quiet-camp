@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { ctx, state } from './state.js';
+import { ctx, state, settings } from './state.js';
 import { $, rnd, smooth, wrapPI } from './util.js';
-import { buildScene } from './scene.js';
+import { buildScene, applyTime, rebakeEnv } from './scene.js';
+import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks } from './props.js';
-import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, resetHand } from './game.js';
+import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand } from './game.js';
 
 const canvas = $('#c');
 const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -18,12 +19,19 @@ ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
 ctx.post = createPost(renderer, camera);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); });
 
-let last = performance.now(), T = 0;
-const _c = new THREE.Color(), tmpV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
+let last = performance.now(), T = 0, lastSec = -1;
+const _c = new THREE.Color(), tmpV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4), sunV = new THREE.Vector3();
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene; if (!scene) return; T += dt; W.uTime.value = T; ctx.post.update(T);
   const hand = ctx.hand;
+
+  /* 시간 흐름: 하루 = settings.dayMin 분 */
+  if (settings.flow && !ctx.paused) state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
+  paramsAt(state.clock, W.tm); applyTime();
+  W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
+  if (Math.floor(T) !== lastSec) { lastSec = Math.floor(T); if (ctx.running) updateCaption(); }
+
   if (!ctx.running) { const a = T * 0.06; camera.position.set(Math.sin(a) * 9.5, 2.3 + Math.sin(T * 0.13) * 0.3, 2 + Math.cos(a) * 9.5); camera.lookAt(0, 0.9, 0.3); }
   else {
     if (cam.t < 1) {
@@ -35,14 +43,21 @@ function loop(now) {
     camera.rotation.y = player.yaw; camera.rotation.x = player.pitch + Math.sin(T * 0.7) * 0.003; camera.rotation.z = Math.sin(T * 0.5) * 0.002;
     updatePrompt();
   }
+  camera.updateMatrixWorld();
+
+  /* 빛줄기: 광원의 화면 위치와 세기 (해가 낮을수록, 화면 안에 있을수록 강하게) */
+  { const L = W.sunUp ? W.sunDir : W.moonDir; sunV.copy(L).multiplyScalar(1000).add(camera.position).project(camera);
+    let s = 0; if (sunV.z < 1) { const off = 1 - smooth(0.75, 1.6, Math.hypot(sunV.x, sunV.y)); const low = W.sunUp ? (1 - smooth(0.06, 0.55, W.sunDir.y)) * smooth(-0.02, 0.06, W.sunDir.y) : 0.3 * W.tm.stars; s = off * low * 0.9; }
+    ctx.post.setSun(sunV.x, sunV.y, s); }
+
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
-  if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = 0.45 + 0.4 * Math.sin(T * 1.7); }
-  W.clouds.forEach((c, i) => { c.position.x += (0.8 + i * 0.08) * dt; if (c.position.x > 1400) c.position.x = -1400; });
-  if (W.cfg.birds && W.tm.key !== 'night') { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
+  if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = (0.45 + 0.4 * Math.sin(T * 1.7)) * Math.min(1, W.tm.stars * 2.5); }
+  if (W.cfg.birds && W.sunUp) { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
   updateFlocks(dt, T);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) W.lantern.intensity = W.tm.lantern * flick;
+  if (W.tentLamp) W.tentLamp.intensity = W.tm.tentLamp * flick;
   if (W.dockLight) W.dockLight.intensity = W.tm.lantern * 0.8 * (0.92 + 0.06 * Math.sin(T * 11 + 1));
   if (W.stars) W.stars.material.opacity = W.tm.stars * (0.85 + 0.15 * Math.sin(T * 2.3));
   if (W.fireLight) {
@@ -74,4 +89,4 @@ function loop(now) {
 
 bindInput();
 $('#loading').classList.add('on');
-setTimeout(() => { buildScene(state.bg, state.time); $('#loading').classList.remove('on'); requestAnimationFrame(loop); }, 50);
+setTimeout(() => { buildScene(state.bg); $('#loading').classList.remove('on'); requestAnimationFrame(loop); }, 50);

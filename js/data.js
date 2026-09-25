@@ -1,7 +1,3 @@
-/*
-  r165 물리 조명 단위 기준. 방향광·반구광·환경광은 이전(r128)의 약 π배, 점광원은 거리 제곱 감쇠라 훨씬 큰 값.
-  화면 보고 튜닝할 때 건드릴 곳: sunI(태양), amb(균일 보조광), hemi(하늘색 보조광), fireI/lantern/tentLamp(점광원), exposure(전체 노출)
-*/
 export const BG = {
   beach: { key: 'beach', name: '바다가 보이는 모래사장', ic: '🌊', ds: '파도 소리, 야자수, 갈매기', ground: 0xead9ad, rock: 0x8a7a66, amp: 0.7, mtAmp: 120, mtBase: 6,
     water: { deep: 0x1c6d9c, shallow: 0x62c3d9, z: -9, size: 1200, wave: 1.0 }, grass: { n: 2600, color: 0xbdaa6c, zmin: -4 }, palms: 16, bushes: 14, bushZmin: 6, rocks: 0, pines: 0, leafs: 0, birds: true, snow: false, fireflies: false, ambience: 'waves' },
@@ -11,14 +7,19 @@ export const BG = {
     water: null, grass: null, palms: 0, bushes: 0, rocks: 12, pines: 480, leafs: 0, birds: false, snow: true, fireflies: false, ambience: 'wind' },
 };
 
+/* 시간대 키프레임. clock 은 메뉴에서 고를 때의 시작 시각. 값들은 KEYS 순서대로 부드럽게 보간된다. */
 export const TIME = {
-  afternoon: { key: 'afternoon', name: '화창한 오후', ic: '☀️', top: 0x2b6fd6, bottom: 0xd8edff, sun: [0.45, 0.8, -0.35], sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogFar: 950, exposure: 1.0, waterMul: 1, cloud: 0xffffff, cloudOp: 0.85,
+  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: '🌄', clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogFar: 650, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a, mist: 0.85,
+    grade: { tint: [1.0, 0.98, 1.02], sat: 0.95, con: 1.0, bloom: 0.35 } },
+  afternoon: { key: 'afternoon', name: '화창한 오후', ic: '☀️', clock: 0.58, top: 0x2b6fd6, bottom: 0xd8edff, sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogFar: 950, exposure: 1.0, waterMul: 1, cloudCover: 0.45, cloudLit: 0xffffff, cloudShade: 0x8a96a8, mist: 0.05,
     grade: { tint: [1, 1, 1], sat: 1.04, con: 1.0, bloom: 0.25 } },
-  sunset:    { key: 'sunset', name: '노을지는 저녁', ic: '🌇', top: 0x2b2557, bottom: 0xff8c4c, sun: [0.35, 0.14, -1], sunColor: 0xffa25a, sunI: 3.4, amb: 0.5, hemi: 0.75, ibl: 0.5, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 6, tentLamp: 3, fireI: 18, fog: 0xf7925e, fogFar: 880, exposure: 1.0, waterMul: 0.75, cloud: 0xffb896, cloudOp: 0.8,
+  sunset: { key: 'sunset', name: '노을지는 저녁', ic: '🌇', clock: 0.735, top: 0x2b2557, bottom: 0xff8c4c, sunColor: 0xffa25a, sunI: 3.4, amb: 0.5, hemi: 0.75, ibl: 0.5, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 6, tentLamp: 3, fireI: 18, fog: 0xf7925e, fogFar: 880, exposure: 1.0, waterMul: 0.75, cloudCover: 0.5, cloudLit: 0xffb08a, cloudShade: 0x5a4a6a, mist: 0.22,
     grade: { tint: [1.03, 0.99, 0.96], sat: 1.08, con: 1.02, bloom: 0.4 } },
-  night:     { key: 'night', name: '별이 빛나는 밤', ic: '🌌', top: 0x030614, bottom: 0x18243b, sun: [-0.4, 0.55, -0.6], sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogFar: 720, exposure: 1.0, waterMul: 0.3, cloud: 0x2e3a58, cloudOp: 0.35,
+  night: { key: 'night', name: '별이 빛나는 밤', ic: '🌌', clock: 0.0, top: 0x030614, bottom: 0x18243b, sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogFar: 720, exposure: 1.0, waterMul: 0.3, cloudCover: 0.35, cloudLit: 0x2a3550, cloudShade: 0x05070f, mist: 0.4,
     grade: { tint: [0.96, 0.98, 1.05], sat: 0.97, con: 1.02, bloom: 0.55 } },
 };
+/* 하루의 어느 지점에 어떤 키프레임이 오는지 (0..1). 마지막은 첫 항목으로 이어진다. */
+export const KEYS = [[0.0, 'night'], [0.27, 'dawn'], [0.58, 'afternoon'], [0.735, 'sunset'], [0.86, 'night'], [1.0, 'night']];
 
 export const ITEMS = {
   coffee: { name: '커피', ic: '☕', act: '한 모금', ds: '따뜻한 김이 천천히 올라온다' },

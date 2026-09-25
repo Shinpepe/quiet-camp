@@ -5,6 +5,7 @@ import { $, clamp, wrapPI, isTouch } from './util.js';
 import { terrainH } from './terrain.js';
 import { makeItem } from './props.js';
 import { buildScene } from './scene.js';
+import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
 
 export const player = { x: 2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
@@ -51,10 +52,12 @@ export function bindInput() {
   const bindRange = (id, key, fmt, apply) => { const el = $('#' + id); el.dataset.k = key; el.oninput = () => { settings[key] = +el.value; document.querySelectorAll('input[data-k=' + key + ']').forEach(o => { o.value = el.value; }); document.querySelectorAll('[id^=' + key + 'V]').forEach(l => l.textContent = fmt(settings[key])); apply && apply(settings[key]); }; };
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
-  bindToggle('shadow', 'shadow', on => { ctx.renderer.shadowMap.enabled = on; previewRebuild(); });
+  bindToggle('flow', 'flow', () => {});
+  bindToggle('shadow', 'shadow', on => { ctx.renderer.shadowMap.enabled = on; if (ctx.W.sun) ctx.W.sun.castShadow = on; });
   bindToggle('bloom', 'bloom', on => ctx.post.setBloom(on));
   bindToggle('ao', 'ao', on => ctx.post.setAO(on));
   bindToggle('reflect', 'reflect', on => { if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on ? 1 : 0; });
+  bindToggle('rays', 'rays', on => ctx.post.setRays(on));
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
@@ -92,8 +95,9 @@ export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { 
 function sip() { anim.sipT = 0; if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); }
 
 export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
+export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
 export function updateHUD() {
-  $('#capText').textContent = BG[state.bg].name + ' — ' + TIME[state.time].name;
+  updateCaption();
   const ib = $('#itembox'); ib.classList.toggle('on', !!state.item && state.mode !== 'trunk');
   if (state.item) { ib.querySelector('.ic').textContent = ITEMS[state.item].ic; ib.querySelector('.nm').textContent = ITEMS[state.item].name; ib.querySelector('.hn').textContent = (isTouch ? '버튼' : '클릭') + ' · ' + ITEMS[state.item].act; }
   $('#mSip').style.display = state.item && state.mode !== 'trunk' ? '' : 'none';
@@ -108,35 +112,35 @@ export function updatePrompt() {
   const p = $('#prompt'); if (t) { p.innerHTML = `<kbd class="a">E</kbd>${t.label()}`; p.classList.add('on'); } else p.classList.remove('on');
   $('#cross').classList.toggle('hot', !!t);
 }
-function showPause() { ctx.paused = true; $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' · ' + TIME[state.time].name; }
+function showPause() { ctx.paused = true; $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' · ' + clockLabel(state.clock); }
 function hidePause() { ctx.paused = false; $('#pause').classList.remove('on'); }
 
-/* 사진: 화면 중앙에 있는 것(손에 든 컵이면 컵)에 초점 */
 const rc = new THREE.Raycaster(), center = new THREE.Vector2(0, 0);
 function takePhoto() {
   if (!ctx.running) return; const hud = $('#hud'); hud.classList.add('photo');
   let focus = 8;
-  try { rc.setFromCamera(center, ctx.camera); const h = rc.intersectObjects(ctx.scene.children, true).find(h => h.object.visible && !h.object.isSprite && !h.object.isPoints && h.distance < 1000); if (h) focus = h.distance; } catch (e) {}
+  try { rc.setFromCamera(center, ctx.camera); const h = rc.intersectObjects(ctx.scene.children, true).find(h => h.object.visible && !h.object.isSprite && !h.object.isPoints && !h.object.userData.noAO && h.distance < 1000); if (h) focus = h.distance; } catch (e) {}
   ctx.post.renderPhoto(focus); const url = canvas().toDataURL('image/png');
-  const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${state.time}.png`; a.click();
+  const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${clockLabel(state.clock).replace(':', '')}.png`; a.click();
   setTimeout(() => { hud.classList.remove('photo'); showToast('사진을 저장했다'); }, 250);
 }
 function renderMenu() {
   const bl = $('#bgList'); bl.innerHTML = '';
   Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div><div class="nm">${b.name}</div><div class="ds">${b.ds}</div></div>`; d.onclick = () => { if (state.bg === b.key) return; state.bg = b.key; renderMenu(); previewRebuild(); }; bl.append(d); });
   const tl = $('#timeList'); tl.innerHTML = '';
-  Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { if (state.time === t.key) return; state.time = t.key; renderMenu(); previewRebuild(); }; tl.append(d); });
+  /* 시각 칩은 씬을 다시 만들지 않고 시계만 옮긴다 — 조명이 바로 따라온다 */
+  Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { state.time = t.key; state.clock = t.clock; renderMenu(); }; tl.append(d); });
 }
 let rebuildT = null;
-export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => { buildScene(state.bg, state.time); f.style.opacity = 0; }, 420); }
+export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => { buildScene(state.bg); f.style.opacity = 0; }, 420); }
 export function startGame() {
   initAudio(); resumeAudio();
   const fade = $('#fade'); fade.style.opacity = 1; $('#menu').classList.add('hidden');
   setTimeout(() => {
-    buildScene(state.bg, state.time);
+    buildScene(state.bg);
     putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false;
     ctx.camera.position.set(...SEAT.car.pos); ctx.camera.rotation.set(0, 0, 0);
-    startAmbience(BG[state.bg].ambience, state.time);
+    startAmbience(BG[state.bg].ambience, (state.clock < 0.22 || state.clock > 0.8) ? 'night' : 'day');
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
     ctx.running = true; updateHUD(); fade.style.opacity = 0;
     $('#lockmsg').style.opacity = isTouch ? 0 : 0.85;

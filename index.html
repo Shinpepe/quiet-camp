@@ -25,17 +25,19 @@
     <div class="tag">아무것도 하지 않아도 되는 곳.<br>차에서 내려, 짐을 꺼내고, 잠시 앉아 있다 가세요.</div>
     <div class="sec">장소</div>
     <div id="bgList"></div>
-    <div class="sec">시간</div>
+    <div class="sec">시작 시각</div>
     <div class="chips" id="timeList"></div>
     <button class="go" id="start">떠나기 <span>Enter ↵</span></button>
     <div class="sec">설정</div>
     <div class="settings">
       <span>소리</span><input type="range" id="vol" min="0" max="1" step="0.05" value="0.5"><span id="volV">50%</span>
       <span>시선 감도</span><input type="range" id="sens" min="0.3" max="2" step="0.1" value="1"><span id="sensV">1.0</span>
-      <span>그림자</span><div class="toggle on" id="shadow"></div><span id="shadowV">켜짐</span>
-      <span>블룸</span><div class="toggle on" id="bloom"></div><span id="bloomV">켜짐</span>
+      <span>시간 흐름</span><div class="toggle" id="flow"></div><span id="flowV"></span>
+      <span>그림자</span><div class="toggle" id="shadow"></div><span id="shadowV"></span>
+      <span>블룸</span><div class="toggle" id="bloom"></div><span id="bloomV"></span>
       <span>주변광 차폐</span><div class="toggle" id="ao"></div><span id="aoV"></span>
       <span>물 반사</span><div class="toggle" id="reflect"></div><span id="reflectV"></span>
+      <span>빛줄기</span><div class="toggle" id="rays"></div><span id="raysV"></span>
     </div>
     <div class="legend"><b>W A S D</b> 걷기 &nbsp; <b>마우스</b> 둘러보기 &nbsp; <b>E</b> 상호작용<br><b>클릭</b> 한 모금 &nbsp; <b>P</b> 사진 &nbsp; <b>ESC</b> 잠시 멈춤<br>모바일 — 왼쪽 드래그 이동 · 오른쪽 드래그 시선</div>
   </div>
