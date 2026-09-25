@@ -10,7 +10,8 @@ import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCr
 
 export const player = { x: 2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0 };
-export const anim = { sipT: null, lastSteam: 0, lastTargetId: null };
+/* sipT: 0→1 한 모금 진행. holding 이면 0.5(입에 닿은 순간)에서 멈춰 계속 마신다. exhale: 남은 내뱉기 시간 */
+export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, lastSipSfx: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
@@ -35,12 +36,14 @@ export function bindInput() {
   addEventListener('keyup', e => { keys[e.code] = false; });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
   document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (state.mode !== 'trunk') showPause(); });
+  /* 클릭: 포인터 잠금 / 상호작용. 마시기·피우기는 mousedown~mouseup 으로 (길게 누르면 계속) */
   canvas().addEventListener('click', () => {
     if (!ctx.running) return;
     if (!isTouch && !locked()) { canvas().requestPointerLock(); return; }
-    if (state.mode === 'walk' && currentTarget()) { interact(); return; }
-    if (state.item && anim.sipT === null && state.mode !== 'trunk') sip();
+    if (state.mode === 'walk' && currentTarget()) interact();
   });
+  addEventListener('mousedown', e => { if (e.button !== 0 || !ctx.running || isTouch || !locked()) return; if (state.mode === 'walk' && currentTarget()) return; startSip(); });
+  addEventListener('mouseup', e => { if (e.button === 0) endSip(); });
   canvas().addEventListener('touchstart', e => { for (const t of e.changedTouches) { if (t.clientX < innerWidth * 0.42 && !tMove) tMove = { id: t.identifier, sx: t.clientX, sy: t.clientY, dx: 0, dy: 0 }; else if (!tLook) tLook = { id: t.identifier, lx: t.clientX, ly: t.clientY }; } }, { passive: true });
   canvas().addEventListener('touchmove', e => { for (const t of e.changedTouches) { if (tMove && t.identifier === tMove.id) { tMove.dx = clamp((t.clientX - tMove.sx) / 60, -1, 1); tMove.dy = clamp((t.clientY - tMove.sy) / 60, -1, 1); } if (tLook && t.identifier === tLook.id) { look(t.clientX - tLook.lx, t.clientY - tLook.ly, 0.005 * settings.sens); tLook.lx = t.clientX; tLook.ly = t.clientY; } } }, { passive: true });
   canvas().addEventListener('touchend', e => { for (const t of e.changedTouches) { if (tMove && t.identifier === tMove.id) tMove = null; if (tLook && t.identifier === tLook.id) tLook = null; } }, { passive: true });
@@ -50,7 +53,8 @@ export function bindInput() {
   $('#pausebtn').onclick = () => { if (ctx.paused) $('#resume').onclick(); else if (!isTouch && locked()) document.exitPointerLock(); else showPause(); };
   $('#toMenu').onclick = () => { hidePause(); ctx.running = false; $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); if (!isTouch) canvas().requestPointerLock(); };
-  $('#mAct').onclick = interact; $('#mSip').onclick = () => { if (state.item && anim.sipT === null) sip(); };
+  $('#mAct').onclick = interact;
+  const ms = $('#mSip'); ms.onpointerdown = e => { e.preventDefault(); startSip(); }; ms.onpointerup = ms.onpointercancel = ms.onpointerleave = endSip; ms.oncontextmenu = e => e.preventDefault();
   $('#mLamp').onclick = () => { const l = lampForSeat(); if (l && cam.t >= 1 && !ctx.paused) toggleLamp(l); };
   $('#start').onclick = startGame;
   const bindRange = (id, key, fmt, apply) => { const el = $('#' + id); el.dataset.k = key; el.oninput = () => { settings[key] = +el.value; document.querySelectorAll('input[data-k=' + key + ']').forEach(o => { o.value = el.value; }); document.querySelectorAll('[id^=' + key + 'V]').forEach(l => l.textContent = fmt(settings[key])); apply && apply(settings[key]); }; };
@@ -103,18 +107,36 @@ function renderTrunk() {
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
   if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
-/* 손 없이 아이템만 시야 오른쪽 아래에 든다 */
-function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
-export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; }
+/* 손 없이 아이템만 시야 오른쪽 아래에 든다. 트렁크에서 꺼낼 때마다 새 것(가득) */
+function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
+export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
 export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); } }
-function sip() { anim.sipT = 0; if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); }
+
+/* ── 마시기 / 피우기 ── */
+function startSip() {
+  if (!state.item || !ctx.W.item || anim.sipT !== null || state.mode === 'trunk' || ctx.paused || cam.t < 1) return;
+  if (ctx.W.item.userData.amount <= 0) { showToast('잔이 비었다'); return; }
+  anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.lastSipSfx = -9;
+  if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip');
+}
+function endSip() { anim.holding = false; }
+/* 다 마셨거나 다 탔을 때 (main.js 에서 호출) */
+export function itemEmptied() {
+  if (state.item === 'smoke') { putBack(); showToast('담배를 다 피웠다'); }
+  else showToast(state.item === 'coffee' ? '커피를 다 마셨다' : '위스키를 다 마셨다');
+  updateHUD();
+}
 
 export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
 export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
 export function updateHUD() {
   updateCaption();
   const ib = $('#itembox'); ib.classList.toggle('on', !!state.item && state.mode !== 'trunk');
-  if (state.item) { ib.querySelector('.ic').textContent = ITEMS[state.item].ic; ib.querySelector('.nm').textContent = ITEMS[state.item].name; ib.querySelector('.hn').textContent = (isTouch ? '버튼' : '클릭') + ' · ' + ITEMS[state.item].act; }
+  if (state.item) {
+    const empty = ctx.W.item && ctx.W.item.userData.amount <= 0;
+    ib.querySelector('.ic').textContent = ITEMS[state.item].ic; ib.querySelector('.nm').textContent = ITEMS[state.item].name;
+    ib.querySelector('.hn').textContent = empty ? '비었다 · 트렁크에서 새로 꺼내기' : (isTouch ? '버튼' : '클릭') + ' · ' + ITEMS[state.item].act + ' · 길게 누르면 계속';
+  }
   $('#mSip').style.display = state.item && state.mode !== 'trunk' ? '' : 'none';
   const lamp = lampForSeat(), ml = $('#mLamp'); ml.style.display = lamp ? '' : 'none'; if (lamp) ml.textContent = lampLabel(lamp);
   const p = $('#prompt');
@@ -128,7 +150,7 @@ export function updatePrompt() {
   const p = $('#prompt'); if (t) { p.innerHTML = `<kbd class="a">E</kbd>${t.label()}`; p.classList.add('on'); } else p.classList.remove('on');
   $('#cross').classList.toggle('hot', !!t);
 }
-function showPause() { ctx.paused = true; $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' · ' + clockLabel(state.clock); }
+function showPause() { ctx.paused = true; anim.holding = false; $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' · ' + clockLabel(state.clock); }
 function hidePause() { ctx.paused = false; $('#pause').classList.remove('on'); }
 
 const rc = new THREE.Raycaster(), center = new THREE.Vector2(0, 0);
@@ -154,7 +176,7 @@ export function startGame() {
   const fade = $('#fade'); fade.style.opacity = 1; $('#menu').classList.add('hidden');
   setTimeout(() => {
     buildScene(state.bg);
-    putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false;
+    putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false; anim.exhale = 0;
     ctx.camera.position.set(...SEAT.car.pos); ctx.camera.rotation.set(0, 0, 0);
     const night = isNightClock(state.clock);
     ctx.W.wasNight = night;

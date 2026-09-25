@@ -47,7 +47,8 @@ export function sfx(type) {
   if (!AC) return; const t = AC.currentTime;
   if (type === 'clink') { [2400, 3150].forEach((fq, i) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = fq; g.gain.setValueAtTime(0.08 - i * 0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.4); }); return; }
   const s = AC.createBufferSource(); s.buffer = noiseBuf(false); const f = AC.createBiquadFilter(), g = AC.createGain();
-  const cfgs = { step: ['lowpass', ctx.W.cfg.snow ? 900 : 500, 0.05, 0.12], sip: ['bandpass', 1100, 0.06, 0.32], lighter: ['highpass', 3000, 0.12, 0.14], trunk: ['lowpass', 300, 0.15, 0.3], sit: ['lowpass', 400, 0.06, 0.25] }[type];
-  f.type = cfgs[0]; f.frequency.value = cfgs[1]; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(cfgs[2], t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + cfgs[3]);
-  s.connect(f); f.connect(g); g.connect(master); s.start(t, off()); s.stop(t + 0.5);
+  const cfgs = { step: ['lowpass', ctx.W.cfg.snow ? 900 : 500, 0.05, 0.12], sip: ['bandpass', 1100, 0.06, 0.32], lighter: ['highpass', 3000, 0.12, 0.14], trunk: ['lowpass', 300, 0.15, 0.3], sit: ['lowpass', 400, 0.06, 0.25], exhale: ['bandpass', 520, 0.035, 0.7] }[type];
+  if (!cfgs) return;
+  f.type = cfgs[0]; f.frequency.value = cfgs[1]; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(cfgs[2], t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + cfgs[3]);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t, off()); s.stop(t + 0.8);
 }

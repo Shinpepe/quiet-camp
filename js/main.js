@@ -5,8 +5,8 @@ import { buildScene, applyTime, rebakeEnv } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks } from './props.js';
-import { startAmbience } from './audio.js';
-import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock } from './game.js';
+import { startAmbience, sfx } from './audio.js';
+import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied } from './game.js';
 
 const canvas = $('#c');
 const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -21,9 +21,12 @@ ctx.post = createPost(renderer, camera);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); });
 
 let last = performance.now(), T = 0, lastSec = -1;
-const _c = new THREE.Color(), tmpV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
+const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
 /* 랜턴 밝기: 켜졌으면 시간대 값(최소치 보장)으로, 꺼졌으면 0 으로 부드럽게 */
 const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
+/* 담배: 빨아들인 시간(h)에 비례해 길고 진하게 내뱉는다 */
+function startExhale(h) { const k = Math.min(h, 3) / 3; anim.exhale = 0.35 + k * 0.75; anim.exhaleStr = 0.6 + k * 0.8; sfx('exhale'); }
+
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene; if (!scene) return; T += dt; W.uTime.value = T; ctx.post.update(T);
@@ -71,18 +74,35 @@ function loop(now) {
       if (Math.random() < 0.22) W.smoke.spawn(tmpV.copy(firePos).setY(1.0), { x: 0.05, y: 0.5, z: 0 }, 0.3, 4.5, 0.2);
     }
   }
+
+  /* ── 손에 든 것: 한 모금 / 길게 마시기 / 양 감소 ── */
   if (W.item && ctx.running) {
-    const type = state.item;
+    const type = state.item, ud = W.item.userData;
     if (anim.sipT !== null) {
-      anim.sipT += dt / 1.7; const k = Math.sin(Math.PI * Math.min(anim.sipT, 1));
+      const atMouth = anim.holding && anim.sipT >= 0.5 && ud.amount > 0 && !ctx.paused;
+      if (atMouth) { anim.sipT = 0.5; anim.holdT += dt; } else anim.sipT += dt / 1.7;
+      const k = Math.sin(Math.PI * Math.min(anim.sipT, 1));
       if (type === 'smoke') { basePos.set(0.2, -0.13, -0.4); sipPos.set(0.04, -0.045, -0.2); hand.rotation.set(0, 0.6 + k * 0.5, 0.15 + k * 0.1); }
       else { basePos.set(0.22, -0.2, -0.45); sipPos.set(0.06, -0.08, -0.27); hand.rotation.set(k * 0.55, 0, k * -0.1); }
       hand.position.lerpVectors(basePos, sipPos, k);
-      if (anim.sipT >= 1) { anim.sipT = null; resetHand(); }
+      if (k > 0.85 && ud.amount > 0) {
+        const rate = type === 'smoke' ? 0.07 : type === 'coffee' ? 0.22 : 0.28;   // 초당 소비량: 담배 ~15초, 커피 ~4.5초, 위스키 ~3.5초
+        ud.amount = Math.max(0, ud.amount - rate * dt); ud.setAmount(ud.amount);
+        if (type !== 'smoke' && T - anim.lastSipSfx > 0.75) { anim.lastSipSfx = T; sfx('sip'); }
+        if (ud.amount === 0) { if (type === 'smoke') startExhale(anim.holdT); itemEmptied(); }
+      }
+      if (W.item && anim.sipT >= 1) { anim.sipT = null; anim.holding = false; if (type === 'smoke') startExhale(anim.holdT); resetHand(); }
     }
-    W.item.userData.emitter.getWorldPosition(tmpV);
-    if (type === 'coffee' && T - anim.lastSteam > 0.07) { anim.lastSteam = T; W.steam.spawn(tmpV, { x: 0, y: 0.22, z: 0 }, 0.02, 2.2); }
-    if (type === 'smoke') { const puff = anim.sipT !== null && anim.sipT > 0.35; W.item.userData.tip.material.color.setHex(puff ? 0xffb060 : 0xff5a1a); W.item.userData.glow.material.opacity = puff ? 0.95 : 0.5 + 0.1 * Math.sin(T * 6); if (T - anim.lastSteam > (puff ? 0.02 : 0.09)) { anim.lastSteam = T; W.smoke.spawn(tmpV, { x: 0.02, y: 0.18, z: 0 }, 0.01, 3.2); } }
+    if (W.item) {
+      W.item.userData.emitter.getWorldPosition(tmpV);
+      if (type === 'coffee' && ud.amount > 0.02 && T - anim.lastSteam > 0.07) { anim.lastSteam = T; W.steam.spawn(tmpV, { x: 0, y: 0.22, z: 0 }, 0.02, 2.2); }
+      if (type === 'smoke') { const puff = anim.sipT !== null && anim.sipT > 0.35; ud.tip.material.color.setHex(puff ? 0xffb060 : 0xff5a1a); ud.glow.material.opacity = puff ? 0.95 : 0.5 + 0.1 * Math.sin(T * 6); if (T - anim.lastSteam > (puff ? 0.02 : 0.09)) { anim.lastSteam = T; W.smoke.spawn(tmpV, { x: 0.02, y: 0.18, z: 0 }, 0.01, 3.2); } }
+    }
+  }
+  /* 내뱉는 연기: 시야 앞 22cm 아래쪽에서 앞으로 퍼진다 */
+  if (anim.exhale > 0 && ctx.running) {
+    anim.exhale -= dt; camera.getWorldDirection(fwdV); tmpV.copy(camera.position).addScaledVector(fwdV, 0.22); tmpV.y -= 0.06;
+    for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18);
   }
   W.steam.update(dt, 0.03); W.smoke.update(dt, 0.04); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
   ctx.post.render();
