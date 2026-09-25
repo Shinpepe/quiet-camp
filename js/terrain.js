@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { ctx, settings } from './state.js';
 import { smooth, fbm, ridge, NOISE_GLSL } from './util.js';
+import { T, tex } from './textures.js';
 
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 
@@ -52,20 +53,22 @@ function groundColor(cfg, x, z, h, ny, d) {
   return _c;
 }
 
+/* 지면: 월드 좌표 기반 uv 로 텍스처를 타일링 (2m 마다 한 타일) */
 export function makeGround(cfg) {
   const R = 116, S = 200, radii = [];
   for (let i = 0; i < R; i++) radii.push(i < 50 ? i * 1.2 : 60 * Math.pow(1.05, i - 50));
-  const pos = new Float32Array(R * S * 3), col = new Float32Array(R * S * 3), idx = [];
+  const pos = new Float32Array(R * S * 3), col = new Float32Array(R * S * 3), uv = new Float32Array(R * S * 2), idx = [];
   for (let i = 0; i < R; i++) for (let j = 0; j < S; j++) {
-    const a = j / S * Math.PI * 2, x = Math.cos(a) * radii[i], z = Math.sin(a) * radii[i], k = (i * S + j) * 3;
-    pos[k] = x; pos[k + 1] = terrainH(x, z, cfg); pos[k + 2] = z;
+    const a = j / S * Math.PI * 2, x = Math.cos(a) * radii[i], z = Math.sin(a) * radii[i], k = (i * S + j) * 3, n = i * S + j;
+    pos[k] = x; pos[k + 1] = terrainH(x, z, cfg); pos[k + 2] = z; uv[n * 2] = x * 0.5; uv[n * 2 + 1] = z * 0.5;
   }
   for (let i = 0; i < R - 1; i++) for (let j = 0; j < S; j++) { const a = i * S + j, b = i * S + (j + 1) % S, c = (i + 1) * S + (j + 1) % S, d = (i + 1) * S + j; idx.push(a, b, c, a, c, d); }
-  const geo = new THREE.BufferGeometry(); geo.setIndex(idx); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.computeVertexNormals();
+  const geo = new THREE.BufferGeometry(); geo.setIndex(idx); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.computeVertexNormals();
   const nor = geo.attributes.normal;
   for (let i = 0; i < R * S; i++) { const x = pos[i * 3], z = pos[i * 3 + 2]; const c = groundColor(cfg, x, z, pos[i * 3 + 1], nor.getY(i), Math.hypot(x, z)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+  const tx = cfg.key === 'beach' ? tex('sand', 1, 1, 0.7) : cfg.key === 'snow' ? tex('snow', 1, 1, 0.45) : tex('dirt', 1, 1, 0.55);
+  const mat = new THREE.MeshStandardMaterial(Object.assign({ vertexColors: true, roughness: 1 }, tx));
   mat.onBeforeCompile = sh => {
     sh.uniforms.uRock = { value: new THREE.Color(cfg.rock) };
     sh.vertexShader = 'varying vec3 vWPos;varying vec3 vWNorm;\n' + sh.vertexShader
@@ -73,21 +76,15 @@ export function makeGround(cfg) {
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
-        float n1=vnoise(vWPos.xz*0.35);float n2=vnoise(vWPos.xz*1.7);float n3=vnoise(vWPos.xz*7.0);
-        float det=(n1-0.5)*0.22+(n2-0.5)*0.12+(n3-0.5)*0.07;
+        float n1=vnoise(vWPos.xz*0.35);float n2=vnoise(vWPos.xz*1.7);
+        float det=(n1-0.5)*0.2+(n2-0.5)*0.1;
         float up=clamp(vWNorm.y,0.0,1.0);float rockK=1.0-smoothstep(0.6,0.82,up+(n2-0.5)*0.18);
         diffuseColor.rgb=mix(diffuseColor.rgb,uRock*(0.8+n2*0.4),rockK);
-        diffuseColor.rgb*=1.0+det;`)
-      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
-        normal=normalize(normal+vec3(n2-0.5,0.0,n3-0.5)*0.14);`);
+        diffuseColor.rgb*=1.0+det;`);
   };
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
 }
 
-/*
-  물 — Reflector 가 매 프레임 거울 카메라로 씬을 렌더 타깃에 그리고, 그 텍스처를 내 물 셰이더가 물결에 맞춰 일그러뜨려 합성.
-  Reflector 는 메시의 로컬 +Z 를 법선으로 보므로 지오메트리가 아니라 메시를 회전시킨다.
-*/
 export function makeWater(w, tm, uTime) {
   const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180);
   const refl = new Reflector(geo, { clipBias: 0.03, textureWidth: Math.max(256, Math.floor(innerWidth * 0.5)), textureHeight: Math.max(256, Math.floor(innerHeight * 0.5)) });
@@ -97,7 +94,7 @@ export function makeWater(w, tm, uTime) {
     transparent: true,
     uniforms: {
       uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z },
-      tReflect: { value: tRef }, uTexMat: { value: texMat }, uReflect: { value: settings.reflect ? 1 : 0 },
+      tReflect: { value: tRef }, uTexMat: { value: texMat }, uReflect: { value: settings.reflect ? 1 : 0 }, tRipple: { value: T.ripple.normalMap },
       deep: { value: new THREE.Color(w.deep).multiplyScalar(tm.waterMul) }, shallow: { value: new THREE.Color(w.shallow).multiplyScalar(tm.waterMul) },
       skyTop: { value: new THREE.Color(tm.top) }, skyBottom: { value: new THREE.Color(tm.bottom) },
       sunDir: { value: new THREE.Vector3(...tm.sun).normalize() }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI * 0.5) },
@@ -107,9 +104,14 @@ export function makeWater(w, tm, uTime) {
       float wave(vec2 p){float k=smoothstep(0.0,10.0,shoreZ-p.y);return waveAmp*k*(0.18*sin(p.x*0.25+uTime*1.1)+0.12*sin(p.y*0.35+uTime*0.8+p.x*0.1)+0.06*sin((p.x+p.y)*0.8-uTime*2.0)+0.035*sin(p.x*1.7-p.y*0.6-uTime*2.6));}
       void main(){vec4 wp=modelMatrix*vec4(position,1.0);vec2 p=wp.xz;float h=wave(p);float e=0.6;float hx=wave(p+vec2(e,0.0));float hz=wave(p+vec2(0.0,e));
         vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));vRef=uTexMat*vec4(position,1.0);wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
-    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uReflect;uniform sampler2D tReflect;varying vec3 vW,vN;varying vec4 vRef;
-      void main(){vec3 V=normalize(cameraPosition-vW);vec3 N=normalize(vN);float fres=pow(1.0-max(dot(N,V),0.0),3.0);
-        float dist=shoreZ-vW.z;float depth=clamp(dist/14.0,0.0,1.0);vec3 base=mix(shallow,deep,depth);
+    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uReflect;uniform sampler2D tReflect,tRipple;varying vec3 vW,vN;varying vec4 vRef;
+      void main(){vec3 V=normalize(cameraPosition-vW);
+        vec3 r1=texture2D(tRipple,vW.xz*0.12+vec2(uTime*0.015,uTime*0.01)).xyz*2.0-1.0;
+        vec3 r2=texture2D(tRipple,vW.xz*0.31-vec2(uTime*0.02,-uTime*0.013)).xyz*2.0-1.0;
+        float dist=shoreZ-vW.z;float calm=smoothstep(0.0,5.0,dist);
+        vec3 N=normalize(vN+vec3(r1.x+r2.x,0.0,r1.y+r2.y)*0.22*calm);
+        float fres=pow(1.0-max(dot(N,V),0.0),3.0);
+        float depth=clamp(dist/14.0,0.0,1.0);vec3 base=mix(shallow,deep,depth);
         vec3 sky=mix(skyBottom,skyTop,0.4);
         vec4 rp=vRef;rp.xy+=N.xz*0.35*rp.w;vec3 refl=mix(sky,texture2DProj(tReflect,rp).rgb,uReflect);
         vec3 col=mix(base,refl,fres*0.75+0.08);
@@ -121,8 +123,8 @@ export function makeWater(w, tm, uTime) {
   refl.material = mat; refl.rotation.x = -Math.PI / 2; refl.position.set(0, 0, w.z - w.size / 2 + 1); refl.frustumCulled = false;
   const orig = refl.onBeforeRender;
   refl.onBeforeRender = function (r, s, c, g, m, gr) {
-    if (!settings.reflect || s.overrideMaterial) return;              // 반사 꺼짐 / AO·깊이 패스 중엔 거울 렌더 생략
-    const hv = ctx.hand.visible; ctx.hand.visible = false;           // 손에 든 컵이 물에 비치지 않게
+    if (!settings.reflect || s.overrideMaterial) return;
+    const hv = ctx.hand.visible; ctx.hand.visible = false;
     orig.call(this, r, s, c, g, m, gr); ctx.hand.visible = hv;
   };
   return refl;

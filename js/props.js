@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { ctx } from './state.js';
 import { rnd, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex } from './util.js';
 import { terrainH } from './terrain.js';
+import { tex } from './textures.js';
+
+const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.5), extra || {}));
+const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.4), extra || {}));
 
 export function contactShadow(x, z, sx, sz, op) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, opacity: op || 0.9, depthWrite: false }));
@@ -18,43 +22,43 @@ export function makeLantern(lit) {
 }
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6;
-  const cloth = std(0xe0783a, { side: THREE.DoubleSide, roughness: 0.95 }), flyM = std(0xc4602a, { side: THREE.DoubleSide, roughness: 0.9 }), pole = METAL(), cord = smoothM(0xbfb7a8);
+  const clothM = cloth(0xe0783a, 8, { side: THREE.DoubleSide }), flyM = cloth(0xc4602a, 8, { side: THREE.DoubleSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
   const slab = (m, halfW, h, y0, len, thick) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => { const w = new THREE.Mesh(new THREE.BoxGeometry(side, thick, len), m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w); }); };
-  slab(cloth, Wd / 2, H, 0, L, 0.02); slab(flyM, Wd / 2 + 0.12, H + 0.02, 0.06, L + 0.4, 0.02);
+  slab(clothM, Wd / 2, H, 0, L, 0.02); slab(flyM, Wd / 2 + 0.12, H + 0.02, 0.06, L + 0.4, 0.02);
   g.add(bar([0, H + 0.04, -L / 2 - 0.28], [0, H + 0.04, L / 2 + 0.28], 0.025, pole, 8));
   [-L / 2 - 0.05, L / 2 + 0.05].forEach(z => [-1, 1].forEach(sx => g.add(bar([sx * (Wd / 2 + 0.12), 0, z], [0, H + 0.03, z], 0.018, pole, 8))));
   const sh = new THREE.Shape(); sh.moveTo(-Wd / 2, 0); sh.lineTo(Wd / 2, 0); sh.lineTo(0, H);
-  const back = new THREE.Mesh(new THREE.ShapeGeometry(sh), std(0xb8562a, { side: THREE.DoubleSide })); back.position.z = L / 2; g.add(back);
-  [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, std(0xd46a30), 8)));
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd, 0.05, L), std(0x3a2d24)); floor.position.y = 0.025; g.add(floor);
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 1.8), smoothM(0x2c4a7a, { roughness: 0.9 })); bag.position.set(0.55, 0.16, 0.1); g.add(bag);
-  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.35), smoothM(0xd9d2c5, { roughness: 1 })); pillow.position.set(0.55, 0.33, 0.85); g.add(pillow);
-  const mat2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.45), std(0x6b5a45)); mat2.position.set(0, 0.01, -L / 2 - 0.4); g.add(mat2);
+  const back = new THREE.Mesh(new THREE.ShapeGeometry(sh), cloth(0xb8562a, 4, { side: THREE.DoubleSide })); back.position.z = L / 2; g.add(back);
+  [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, cloth(0xd46a30, 2), 8)));
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd, 0.05, L), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 1.8), cloth(0x2c4a7a, 4)); bag.position.set(0.55, 0.16, 0.1); g.add(bag);
+  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.35), cloth(0xd9d2c5, 3)); pillow.position.set(0.55, 0.33, 0.85); g.add(pillow);
+  const mat2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.45), cloth(0x6b5a45, 3)); mat2.position.set(0, 0.01, -L / 2 - 0.4); g.add(mat2);
   [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * 1.95, 0.02, sz * 1.75], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * 1.95, 0.04, sz * 1.75); stake.rotation.z = -sx * 0.45; g.add(stake); });
   const lamp = makeLantern(W.tm.tentLamp > 0); lamp.scale.setScalar(0.7); lamp.position.set(-0.75, 0.05, 0.9); g.add(lamp);
   W.tentLamp = new THREE.PointLight(0xffc890, W.tm.tentLamp, 4.5, 2); W.tentLamp.position.set(-0.6, 0.35, 0.8); g.add(W.tentLamp);
   return shadowed(g);
 }
 export function makeChair() {
-  const g = new THREE.Group(), fabric = smoothM(0x2f4f6a, { roughness: 0.95 }), frame = METAL(), wood = smoothM(0x8a6a48, { roughness: 0.7 });
+  const g = new THREE.Group(), fabric = cloth(0x2f4f6a, 3), frame = METAL(), arm = wood(0x8a6a48, 2, 1);
   const seat = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.04, 0.5), fabric); seat.position.set(0, 0.45, 0); seat.rotation.x = 0.08; g.add(seat);
   const back = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.62, 0.04), fabric); back.position.set(0, 0.76, 0.28); back.rotation.x = 0.28; g.add(back);
-  [-0.29, 0.29].forEach(x => { g.add(bar([x, 0.02, -0.26], [x, 0.66, 0.26], 0.015, frame)); g.add(bar([x, 0.02, 0.26], [x, 0.66, -0.26], 0.015, frame)); g.add(bar([x, 0.66, -0.26], [x, 0.66, 0.26], 0.015, frame)); const arm = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.5), wood); arm.position.set(x, 0.685, 0); g.add(arm); g.add(bar([x, 0.66, 0.26], [x, 1.06, 0.38], 0.015, frame)); });
+  [-0.29, 0.29].forEach(x => { g.add(bar([x, 0.02, -0.26], [x, 0.66, 0.26], 0.015, frame)); g.add(bar([x, 0.02, 0.26], [x, 0.66, -0.26], 0.015, frame)); g.add(bar([x, 0.66, -0.26], [x, 0.66, 0.26], 0.015, frame)); const a = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.5), arm); a.position.set(x, 0.685, 0); g.add(a); g.add(bar([x, 0.66, 0.26], [x, 1.06, 0.38], 0.015, frame)); });
   g.add(bar([-0.29, 0.02, -0.26], [0.29, 0.02, -0.26], 0.015, frame)); g.add(bar([-0.29, 0.02, 0.26], [0.29, 0.02, 0.26], 0.015, frame)); g.add(bar([-0.29, 1.06, 0.38], [0.29, 1.06, 0.38], 0.015, frame));
   return shadowed(g);
 }
 export function makeTable() {
   const g = new THREE.Group(), frame = METAL();
-  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), smoothM(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.88, 1.1)), { roughness: 0.7 })); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
+  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.88, 1.1)), 2, 0.5)); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
   [-0.26, 0.26].forEach(x => { g.add(bar([x, 0, -0.22], [x, 0.485, 0.22], 0.012, frame)); g.add(bar([x, 0, 0.22], [x, 0.485, -0.22], 0.012, frame)); });
   g.add(bar([-0.26, 0.24, 0], [0.26, 0.24, 0], 0.012, frame));
   const lamp = makeLantern(ctx.W.tm.lantern > 0); lamp.position.set(0.05, 0.515, 0); g.add(lamp);
   return shadowed(g);
 }
 export function makeFire() {
-  const W = ctx.W, g = new THREE.Group(), char = std(0x3d2a1c, { roughness: 1 });
-  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const s = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(0.11, 0.16), 0), 0.3), std(new THREE.Color(0x6f6a64).multiplyScalar(rnd(0.85, 1.1)))); s.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5); s.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(s); }
-  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.3; g.add(bar([Math.cos(a) * 0.32, 0.05, Math.sin(a) * 0.32], [Math.cos(a + 2.4) * 0.05, 0.42, Math.sin(a + 2.4) * 0.05], 0.045, char, 6)); }
+  const W = ctx.W, g = new THREE.Group(), char = smoothM(0x3d2a1c, Object.assign({ roughness: 1 }, tex('bark', 1, 1, 0.7)));
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const s = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(0.11, 0.16), 0), 0.3), std(new THREE.Color(0x6f6a64).multiplyScalar(rnd(0.85, 1.1)), tex('rock', 1, 1, 0.6))); s.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5); s.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(s); }
+  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.3; g.add(bar([Math.cos(a) * 0.32, 0.05, Math.sin(a) * 0.32], [Math.cos(a + 2.4) * 0.05, 0.42, Math.sin(a + 2.4) * 0.05], 0.045, char, 8)); }
   const ash = new THREE.Mesh(new THREE.CircleGeometry(0.34, 14), std(0x2b2724)); ash.rotation.x = -Math.PI / 2; ash.position.y = 0.03; g.add(ash);
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0x2a1c14 })); core.position.y = 0.15; core.scale.y = 0.6; g.add(core); W.emberCore = core;
   W.fireLight = new THREE.PointLight(0xff8a3a, 0, 13, 2); W.fireLight.position.y = 0.55; g.add(W.fireLight);
@@ -96,7 +100,7 @@ export function makeCar() {
   [[-1.02, -1.55], [1.02, -1.55], [-1.02, 1.55], [1.02, 1.55]].forEach(([x, z]) => { add(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 18), std(0x141414, { roughness: 0.95 }), x, 0.36, z, 0, 0, Math.PI / 2); add(new THREE.CylinderGeometry(0.2, 0.2, 0.28, 10), chrome, x, 0.36, z, 0, 0, Math.PI / 2); });
   const lid = new THREE.Group(); lid.position.set(0, 1.245, 1.38); const lidM = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.06, 1.2), body); lidM.position.z = 0.6; lid.add(lidM); g.add(lid); W.trunkLid = lid;
   const cooler = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 0.35), smoothM(0x3d6f9e)); cooler.position.set(-0.4, 1.06, 1.9); g.add(cooler);
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.4), smoothM(0x6b5a3e, { roughness: 0.95 })); bag.position.set(0.4, 1.04, 2.0); g.add(bag);
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.4), cloth(0x6b5a3e, 3)); bag.position.set(0.4, 1.04, 2.0); g.add(bag);
   shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); return g;
 }
 export function makeProps() {
@@ -104,20 +108,21 @@ export function makeProps() {
   const cb = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.38, 0.38), smoothM(0x3d6f9e, { roughness: 0.6 })); cb.position.y = 0.19; cooler.add(cb);
   const cl = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.07, 0.4), smoothM(0xdde6ee, { roughness: 0.5 })); cl.position.y = 0.415; cooler.add(cl);
   cooler.add(bar([-0.2, 0.46, 0], [0.2, 0.46, 0], 0.012, METAL())); cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = 0.2; scene.add(shadowed(cooler));
-  const pack = new THREE.Group(), pm = smoothM(0x4d6b3a, { roughness: 0.95 }), pm2 = smoothM(0x3e5730, { roughness: 0.95 });
+  const pack = new THREE.Group(), pm = cloth(0x4d6b3a, 3), pm2 = cloth(0x3e5730, 3);
   const pb = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.22), pm); pb.position.y = 0.27; pack.add(pb);
   const pl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.26), pm2); pl.position.set(0, 0.55, 0.01); pl.rotation.x = 0.15; pack.add(pl);
   const pp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.06), pm2); pp.position.set(0, 0.2, 0.13); pack.add(pp);
   [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
   pack.position.set(-3.25, 0, 1.4); pack.rotation.set(0, 0.4, -0.3); scene.add(shadowed(pack));
-  for (let i = 0; i < 6; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.7, 7), std(new THREE.Color(0x5a3d28).multiplyScalar(rnd(0.8, 1.15)))); l.rotation.z = Math.PI / 2; l.rotation.y = rnd(-0.08, 0.08); l.position.set(1.65 + (i % 3) * 0.13 - 0.13, 0.06 + Math.floor(i / 3) * 0.12, -2.45); scene.add(shadowed(l)); }
+  const logM = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.8)));
+  for (let i = 0; i < 6; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.7, 9), logM); l.rotation.z = Math.PI / 2; l.rotation.y = rnd(-0.08, 0.08); l.position.set(1.65 + (i % 3) * 0.13 - 0.13, 0.06 + Math.floor(i / 3) * 0.12, -2.45); scene.add(shadowed(l)); }
 }
 export function makeDock() {
-  const W = ctx.W, g = new THREE.Group(), wood = smoothM(0x7a5636, { roughness: 0.8 }), post = smoothM(0x55402e, { roughness: 0.9 }), rope = smoothM(0xc9b48a, { roughness: 1 });
-  for (let i = 0; i < 13; i++) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.8), smoothM(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.82, 1.1)), { roughness: 0.8 })); p.position.set(5.7, 0.33, -8.3 - i * 0.87); g.add(p); }
-  for (let i = 0; i < 5; i++) [4.98, 6.42].forEach(x => { const po = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.6, 7), post); po.position.set(x, -0.4, -8.5 - i * 2.6); g.add(po); });
-  g.add(bar([6.42, 0.95, -8.2], [6.42, 0.95, -19.0], 0.025, wood, 6));
-  for (let i = 0; i < 5; i++) g.add(bar([6.42, 0.36, -8.5 - i * 2.6], [6.42, 0.95, -8.5 - i * 2.6], 0.025, wood, 6));
+  const W = ctx.W, g = new THREE.Group(), rail = wood(0x7a5636, 6, 1), post = smoothM(0x55402e, Object.assign({ roughness: 0.9 }, tex('bark', 1, 2, 0.7))), rope = smoothM(0xc9b48a, { roughness: 1 });
+  for (let i = 0; i < 13; i++) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.8), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.82, 1.1)), 2, 1)); p.position.set(5.7, 0.33, -8.3 - i * 0.87); g.add(p); }
+  for (let i = 0; i < 5; i++) [4.98, 6.42].forEach(x => { const po = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.6, 9), post); po.position.set(x, -0.4, -8.5 - i * 2.6); g.add(po); });
+  g.add(bar([6.42, 0.95, -8.2], [6.42, 0.95, -19.0], 0.025, rail, 6));
+  for (let i = 0; i < 5; i++) g.add(bar([6.42, 0.36, -8.5 - i * 2.6], [6.42, 0.95, -8.5 - i * 2.6], 0.025, rail, 6));
   g.add(bar([6.42, 0.36, -19.1], [6.42, 1.55, -19.1], 0.03, post, 7));
   const lamp = makeLantern(W.tm.lantern > 0); lamp.scale.setScalar(0.8); lamp.position.set(6.42, 1.57, -19.1); g.add(lamp);
   W.dockLight = new THREE.PointLight(0xffc07a, W.tm.lantern * 0.8, 8, 2); W.dockLight.position.set(6.42, 1.7, -19.1); g.add(W.dockLight);
