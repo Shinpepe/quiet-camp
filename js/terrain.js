@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import { ctx, settings } from './state.js';
 import { smooth, fbm, ridge, NOISE_GLSL } from './util.js';
 
 const _c = new THREE.Color(), _c2 = new THREE.Color();
@@ -82,30 +84,46 @@ export function makeGround(cfg) {
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
 }
 
-/* 물 — r165 는 Color 가 자동으로 선형이라 셰이더 안에서 색공간 변환 불필요. 출력은 OutputPass 가 처리. */
+/*
+  물 — Reflector 가 매 프레임 거울 카메라로 씬을 렌더 타깃에 그리고, 그 텍스처를 내 물 셰이더가 물결에 맞춰 일그러뜨려 합성.
+  Reflector 는 메시의 로컬 +Z 를 법선으로 보므로 지오메트리가 아니라 메시를 회전시킨다.
+*/
 export function makeWater(w, tm, uTime) {
-  const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180); geo.rotateX(-Math.PI / 2);
+  const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180);
+  const refl = new Reflector(geo, { clipBias: 0.03, textureWidth: Math.max(256, Math.floor(innerWidth * 0.5)), textureHeight: Math.max(256, Math.floor(innerHeight * 0.5)) });
+  const tRef = refl.material.uniforms.tDiffuse.value, texMat = refl.material.uniforms.textureMatrix.value;
+  refl.material.dispose();
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     uniforms: {
       uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z },
+      tReflect: { value: tRef }, uTexMat: { value: texMat }, uReflect: { value: settings.reflect ? 1 : 0 },
       deep: { value: new THREE.Color(w.deep).multiplyScalar(tm.waterMul) }, shallow: { value: new THREE.Color(w.shallow).multiplyScalar(tm.waterMul) },
       skyTop: { value: new THREE.Color(tm.top) }, skyBottom: { value: new THREE.Color(tm.bottom) },
       sunDir: { value: new THREE.Vector3(...tm.sun).normalize() }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI * 0.5) },
       fogColor: { value: new THREE.Color(tm.fog) }, fogNear: { value: 40 }, fogFar: { value: tm.fogFar },
     },
-    vertexShader: `uniform float uTime,waveAmp,shoreZ;varying vec3 vW,vN;
+    vertexShader: `uniform float uTime,waveAmp,shoreZ;uniform mat4 uTexMat;varying vec3 vW,vN;varying vec4 vRef;
       float wave(vec2 p){float k=smoothstep(0.0,10.0,shoreZ-p.y);return waveAmp*k*(0.18*sin(p.x*0.25+uTime*1.1)+0.12*sin(p.y*0.35+uTime*0.8+p.x*0.1)+0.06*sin((p.x+p.y)*0.8-uTime*2.0)+0.035*sin(p.x*1.7-p.y*0.6-uTime*2.6));}
       void main(){vec4 wp=modelMatrix*vec4(position,1.0);vec2 p=wp.xz;float h=wave(p);float e=0.6;float hx=wave(p+vec2(e,0.0));float hz=wave(p+vec2(0.0,e));
-        vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
-    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime;varying vec3 vW,vN;
+        vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));vRef=uTexMat*vec4(position,1.0);wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
+    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uReflect;uniform sampler2D tReflect;varying vec3 vW,vN;varying vec4 vRef;
       void main(){vec3 V=normalize(cameraPosition-vW);vec3 N=normalize(vN);float fres=pow(1.0-max(dot(N,V),0.0),3.0);
         float dist=shoreZ-vW.z;float depth=clamp(dist/14.0,0.0,1.0);vec3 base=mix(shallow,deep,depth);
-        vec3 sky=mix(skyBottom,skyTop,0.4);vec3 col=mix(base,sky,fres*0.7+0.08);
+        vec3 sky=mix(skyBottom,skyTop,0.4);
+        vec4 rp=vRef;rp.xy+=N.xz*0.35*rp.w;vec3 refl=mix(sky,texture2DProj(tReflect,rp).rgb,uReflect);
+        vec3 col=mix(base,refl,fres*0.75+0.08);
         vec3 H=normalize(sunDir+V);float spec=pow(max(dot(N,H),0.0),160.0);col+=sunColor*spec;
         float foam=smoothstep(2.4,0.0,dist)*(0.55+0.45*sin(vW.x*0.6+uTime*1.4+sin(vW.x*0.13)*3.0));col=mix(col,vec3(0.9),clamp(foam,0.0,1.0)*0.5);
         float f=smoothstep(fogNear,fogFar,length(cameraPosition-vW));col=mix(col,fogColor,f);
         gl_FragColor=vec4(col,mix(0.78,0.97,depth));}`,
   });
-  const m = new THREE.Mesh(geo, mat); m.position.set(0, 0, w.z - w.size / 2 + 1); m.frustumCulled = false; return m;
+  refl.material = mat; refl.rotation.x = -Math.PI / 2; refl.position.set(0, 0, w.z - w.size / 2 + 1); refl.frustumCulled = false;
+  const orig = refl.onBeforeRender;
+  refl.onBeforeRender = function (r, s, c, g, m, gr) {
+    if (!settings.reflect || s.overrideMaterial) return;              // 반사 꺼짐 / AO·깊이 패스 중엔 거울 렌더 생략
+    const hv = ctx.hand.visible; ctx.hand.visible = false;           // 손에 든 컵이 물에 비치지 않게
+    orig.call(this, r, s, c, g, m, gr); ctx.hand.visible = hv;
+  };
+  return refl;
 }

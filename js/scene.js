@@ -9,6 +9,7 @@ import { startCrackle } from './audio.js';
 
 function disposeScene() {
   const scene = ctx.scene; if (!scene) return;
+  if (ctx.W.water && ctx.W.water.getRenderTarget) ctx.W.water.getRenderTarget().dispose();
   scene.traverse(o => { if (o === ctx.camera || o.parent === ctx.camera || (o.parent && o.parent.parent === ctx.camera)) return; if (o.geometry && o.geometry !== wingGeo) o.geometry.dispose(); if (o.material && o.material !== birdMat) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose && m.dispose()); });
   if (scene.environment) scene.environment.dispose();
 }
@@ -22,7 +23,6 @@ export function buildScene(bgKey, timeKey) {
   ctx.renderer.toneMappingExposure = tm.exposure;
   const sunDir = new THREE.Vector3(...tm.sun).normalize();
 
-  /* 하늘 — 색은 Color 가 선형으로 넘겨주고, OutputPass 가 톤매핑·sRGB 처리 */
   const skyMat = new THREE.ShaderMaterial({
     uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow } },
     vertexShader: 'varying vec3 vP;void main(){vP=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
@@ -33,7 +33,6 @@ export function buildScene(bgKey, timeKey) {
     side: THREE.BackSide, depthWrite: false });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat));
 
-  /* 환경광 (IBL): 하늘을 큐브맵으로 구워 재질 반사·간접광에 사용. 세기는 TIME.ibl */
   try {
     const pm = new THREE.PMREMGenerator(ctx.renderer), envScene = new THREE.Scene();
     envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), skyMat));

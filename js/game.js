@@ -14,6 +14,12 @@ const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
 
+function bindToggle(id, key, onChange) {
+  const el = $('#' + id), lab = $('#' + id + 'V');
+  const paint = () => { el.classList.toggle('on', settings[key]); lab.textContent = settings[key] ? '켜짐' : '꺼짐'; };
+  el.onclick = () => { settings[key] = !settings[key]; paint(); onChange(settings[key]); }; paint();
+}
+
 export function bindInput() {
   addEventListener('keydown', e => {
     keys[e.code] = true;
@@ -45,8 +51,10 @@ export function bindInput() {
   const bindRange = (id, key, fmt, apply) => { const el = $('#' + id); el.dataset.k = key; el.oninput = () => { settings[key] = +el.value; document.querySelectorAll('input[data-k=' + key + ']').forEach(o => { o.value = el.value; }); document.querySelectorAll('[id^=' + key + 'V]').forEach(l => l.textContent = fmt(settings[key])); apply && apply(settings[key]); }; };
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
-  $('#shadow').onclick = () => { settings.shadow = !settings.shadow; $('#shadow').classList.toggle('on', settings.shadow); $('#shadowV').textContent = settings.shadow ? '켜짐' : '꺼짐'; ctx.renderer.shadowMap.enabled = settings.shadow; previewRebuild(); };
-  $('#bloom').onclick = () => { settings.bloom = !settings.bloom; $('#bloom').classList.toggle('on', settings.bloom); $('#bloomV').textContent = settings.bloom ? '켜짐' : '꺼짐'; ctx.post.setBloom(settings.bloom); };
+  bindToggle('shadow', 'shadow', on => { ctx.renderer.shadowMap.enabled = on; previewRebuild(); });
+  bindToggle('bloom', 'bloom', on => ctx.post.setBloom(on));
+  bindToggle('ao', 'ao', on => ctx.post.setAO(on));
+  bindToggle('reflect', 'reflect', on => { if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on ? 1 : 0; });
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
@@ -102,9 +110,14 @@ export function updatePrompt() {
 }
 function showPause() { ctx.paused = true; $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' · ' + TIME[state.time].name; }
 function hidePause() { ctx.paused = false; $('#pause').classList.remove('on'); }
+
+/* 사진: 화면 중앙에 있는 것(손에 든 컵이면 컵)에 초점 */
+const rc = new THREE.Raycaster(), center = new THREE.Vector2(0, 0);
 function takePhoto() {
   if (!ctx.running) return; const hud = $('#hud'); hud.classList.add('photo');
-  ctx.post.render(); const url = canvas().toDataURL('image/png');
+  let focus = 8;
+  try { rc.setFromCamera(center, ctx.camera); const h = rc.intersectObjects(ctx.scene.children, true).find(h => h.object.visible && !h.object.isSprite && !h.object.isPoints && h.distance < 1000); if (h) focus = h.distance; } catch (e) {}
+  ctx.post.renderPhoto(focus); const url = canvas().toDataURL('image/png');
   const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${state.time}.png`; a.click();
   setTimeout(() => { hud.classList.remove('photo'); showToast('사진을 저장했다'); }, 250);
 }
