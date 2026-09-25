@@ -12,7 +12,7 @@ const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: tru
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;            // sRGB 변환은 post.js의 최종 패스에서
+renderer.toneMapping = THREE.NoToneMapping;   // 톤매핑은 post.js 최종 패스에서
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
 ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
