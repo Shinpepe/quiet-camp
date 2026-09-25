@@ -3,7 +3,7 @@ import { ctx, state } from './state.js';
 import { $, rnd, smooth, wrapPI } from './util.js';
 import { buildScene } from './scene.js';
 import { createPost } from './post.js';
-import { spawnFlock } from './props.js';
+import { spawnFlock, updateFlocks } from './props.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, resetHand } from './game.js';
 
 const canvas = $('#c');
@@ -11,7 +11,7 @@ const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: tru
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;   // OutputPass 가 이 설정을 읽어 최종 단계에서 적용
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
 ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
@@ -40,7 +40,7 @@ function loop(now) {
   if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = 0.45 + 0.4 * Math.sin(T * 1.7); }
   W.clouds.forEach((c, i) => { c.position.x += (0.8 + i * 0.08) * dt; if (c.position.x > 1400) c.position.x = -1400; });
   if (W.cfg.birds && W.tm.key !== 'night') { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
-  W.flocks = W.flocks.filter(g => { g.position.addScaledVector(g.userData.vel, dt); g.userData.birds.forEach(b => { const a = Math.sin(T * 9 + b.userData.ph) * 0.7; b.userData.l.rotation.z = a; b.userData.r.rotation.z = -a; }); if (Math.abs(g.position.x) > 200) { scene.remove(g); return false; } return true; });
+  updateFlocks(dt, T);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) W.lantern.intensity = W.tm.lantern * flick;
   if (W.dockLight) W.dockLight.intensity = W.tm.lantern * 0.8 * (0.92 + 0.06 * Math.sin(T * 11 + 1));

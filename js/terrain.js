@@ -53,7 +53,6 @@ function groundColor(cfg, x, z, h, ny, d) {
   return _c;
 }
 
-/* 지면: 월드 좌표 기반 uv 로 텍스처를 타일링 (2m 마다 한 타일) */
 export function makeGround(cfg) {
   const R = 116, S = 200, radii = [];
   for (let i = 0; i < R; i++) radii.push(i < 50 ? i * 1.2 : 60 * Math.pow(1.05, i - 50));
@@ -67,7 +66,7 @@ export function makeGround(cfg) {
   const nor = geo.attributes.normal;
   for (let i = 0; i < R * S; i++) { const x = pos[i * 3], z = pos[i * 3 + 2]; const c = groundColor(cfg, x, z, pos[i * 3 + 1], nor.getY(i), Math.hypot(x, z)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const tx = cfg.key === 'beach' ? tex('sand', 1, 1, 0.7) : cfg.key === 'snow' ? tex('snow', 1, 1, 0.45) : tex('dirt', 1, 1, 0.55);
+  const tx = cfg.key === 'beach' ? tex('sand', 1, 1, 0.5) : cfg.key === 'snow' ? tex('snow', 1, 1, 0.4) : tex('dirt', 1, 1, 0.4);
   const mat = new THREE.MeshStandardMaterial(Object.assign({ vertexColors: true, roughness: 1 }, tx));
   mat.onBeforeCompile = sh => {
     sh.uniforms.uRock = { value: new THREE.Color(cfg.rock) };
@@ -75,9 +74,14 @@ export function makeGround(cfg) {
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvWNorm=normalize(mat3(modelMatrix)*objectNormal);')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.0)).xyz;');
     sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock;\n' + sh.fragmentShader
+      /* 텍스처를 두 배율로 섞어 타일 반복이 눈에 띄지 않게 */
+      .replace('#include <map_fragment>', `#ifdef USE_MAP
+        vec4 sampledDiffuseColor=mix(texture2D(map,vMapUv),texture2D(map,vMapUv*0.37+vec2(0.31,0.17)),0.5);
+        diffuseColor*=sampledDiffuseColor;
+        #endif`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float n1=vnoise(vWPos.xz*0.35);float n2=vnoise(vWPos.xz*1.7);
-        float det=(n1-0.5)*0.2+(n2-0.5)*0.1;
+        float det=(n1-0.5)*0.16+(n2-0.5)*0.08;
         float up=clamp(vWNorm.y,0.0,1.0);float rockK=1.0-smoothstep(0.6,0.82,up+(n2-0.5)*0.18);
         diffuseColor.rgb=mix(diffuseColor.rgb,uRock*(0.8+n2*0.4),rockK);
         diffuseColor.rgb*=1.0+det;`);

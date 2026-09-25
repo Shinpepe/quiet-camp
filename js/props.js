@@ -4,8 +4,8 @@ import { rnd, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex } f
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 
-const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.5), extra || {}));
-const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.4), extra || {}));
+const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.25), extra || {}));
+const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.3), extra || {}));
 
 export function contactShadow(x, z, sx, sz, op) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, opacity: op || 0.9, depthWrite: false }));
@@ -49,15 +49,15 @@ export function makeChair() {
 }
 export function makeTable() {
   const g = new THREE.Group(), frame = METAL();
-  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.88, 1.1)), 2, 0.5)); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
+  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.9, 1.08)), 2, 0.5)); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
   [-0.26, 0.26].forEach(x => { g.add(bar([x, 0, -0.22], [x, 0.485, 0.22], 0.012, frame)); g.add(bar([x, 0, 0.22], [x, 0.485, -0.22], 0.012, frame)); });
   g.add(bar([-0.26, 0.24, 0], [0.26, 0.24, 0], 0.012, frame));
   const lamp = makeLantern(ctx.W.tm.lantern > 0); lamp.position.set(0.05, 0.515, 0); g.add(lamp);
   return shadowed(g);
 }
 export function makeFire() {
-  const W = ctx.W, g = new THREE.Group(), char = smoothM(0x3d2a1c, Object.assign({ roughness: 1 }, tex('bark', 1, 1, 0.7)));
-  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const s = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(0.11, 0.16), 0), 0.3), std(new THREE.Color(0x6f6a64).multiplyScalar(rnd(0.85, 1.1)), tex('rock', 1, 1, 0.6))); s.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5); s.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(s); }
+  const W = ctx.W, g = new THREE.Group(), char = smoothM(0x3d2a1c, Object.assign({ roughness: 1 }, tex('bark', 1, 1, 0.5)));
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const s = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(0.11, 0.16), 0), 0.3), std(new THREE.Color(0x6f6a64).multiplyScalar(rnd(0.85, 1.1)), tex('rock', 1, 1, 0.45))); s.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5); s.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(s); }
   for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.3; g.add(bar([Math.cos(a) * 0.32, 0.05, Math.sin(a) * 0.32], [Math.cos(a + 2.4) * 0.05, 0.42, Math.sin(a + 2.4) * 0.05], 0.045, char, 8)); }
   const ash = new THREE.Mesh(new THREE.CircleGeometry(0.34, 14), std(0x2b2724)); ash.rotation.x = -Math.PI / 2; ash.position.y = 0.03; g.add(ash);
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0x2a1c14 })); core.position.y = 0.15; core.scale.y = 0.6; g.add(core); W.emberCore = core;
@@ -114,12 +114,12 @@ export function makeProps() {
   const pp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.06), pm2); pp.position.set(0, 0.2, 0.13); pack.add(pp);
   [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
   pack.position.set(-3.25, 0, 1.4); pack.rotation.set(0, 0.4, -0.3); scene.add(shadowed(pack));
-  const logM = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.8)));
+  const logM = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5)));
   for (let i = 0; i < 6; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.7, 9), logM); l.rotation.z = Math.PI / 2; l.rotation.y = rnd(-0.08, 0.08); l.position.set(1.65 + (i % 3) * 0.13 - 0.13, 0.06 + Math.floor(i / 3) * 0.12, -2.45); scene.add(shadowed(l)); }
 }
 export function makeDock() {
-  const W = ctx.W, g = new THREE.Group(), rail = wood(0x7a5636, 6, 1), post = smoothM(0x55402e, Object.assign({ roughness: 0.9 }, tex('bark', 1, 2, 0.7))), rope = smoothM(0xc9b48a, { roughness: 1 });
-  for (let i = 0; i < 13; i++) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.8), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.82, 1.1)), 2, 1)); p.position.set(5.7, 0.33, -8.3 - i * 0.87); g.add(p); }
+  const W = ctx.W, g = new THREE.Group(), rail = wood(0x7a5636, 6, 1), post = smoothM(0x55402e, Object.assign({ roughness: 0.9 }, tex('bark', 1, 2, 0.5))), rope = smoothM(0xc9b48a, { roughness: 1 });
+  for (let i = 0; i < 13; i++) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.8), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.88, 1.08)), 2, 1)); p.position.set(5.7, 0.33, -8.3 - i * 0.87); g.add(p); }
   for (let i = 0; i < 5; i++) [4.98, 6.42].forEach(x => { const po = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.6, 9), post); po.position.set(x, -0.4, -8.5 - i * 2.6); g.add(po); });
   g.add(bar([6.42, 0.95, -8.2], [6.42, 0.95, -19.0], 0.025, rail, 6));
   for (let i = 0; i < 5; i++) g.add(bar([6.42, 0.36, -8.5 - i * 2.6], [6.42, 0.95, -8.5 - i * 2.6], 0.025, rail, 6));
@@ -183,11 +183,46 @@ export class Particles {
     this.mesh.geometry.attributes.position.needsUpdate = true;
   }
 }
-export const wingGeo = (() => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0.6, 0.04, 0.24, 0.6, 0.04, -0.24]), 3)); g.computeVertexNormals(); return g; })();
-export const birdMat = new THREE.MeshBasicMaterial({ color: 0x1c1c22, side: THREE.DoubleSide });
+
+/* ── 새: 몸통·머리·부리·꼬리·2마디 날개. 활공과 날갯짓이 섞임 ── */
+export const birdMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.9, side: THREE.DoubleSide });
+export const wingGeo = null;   // (이전 버전 호환용 — 더 이상 사용하지 않음)
+function wingPart(len, c0, c1) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -c0 * 0.35, len, 0, -c1 * 0.3 - len * 0.12, len, 0, c1 * 0.7 - len * 0.12, 0, 0, -c0 * 0.35, len, 0, c1 * 0.7 - len * 0.12, 0, 0, c0 * 0.65], 3));
+  g.computeVertexNormals(); return g;
+}
+function makeBird() {
+  const b = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), birdMat); body.scale.set(0.75, 0.7, 2.4); b.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.038, 8, 6), birdMat); head.position.set(0, 0.025, -0.16); b.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.05, 5), birdMat); beak.rotation.x = -Math.PI / 2; beak.position.set(0, 0.02, -0.21); b.add(beak);
+  const tail = new THREE.Mesh(wingPart(0.14, 0.05, 0.1), birdMat); tail.rotation.y = -Math.PI / 2; tail.position.set(0, 0.01, 0.12); b.add(tail);
+  const wings = [];
+  [1, -1].forEach(sx => {
+    const inner = new THREE.Mesh(wingPart(0.24, 0.16, 0.12), birdMat); inner.position.set(sx * 0.03, 0.02, -0.02);
+    const outer = new THREE.Mesh(wingPart(0.3, 0.12, 0.03), birdMat); outer.position.x = 0.24; inner.add(outer);
+    inner.scale.x = sx; b.add(inner); wings.push({ inner, outer, sx });
+  });
+  b.userData = { ph: rnd(0, 6), glide: rnd(0, 6), wings, body }; return b;
+}
 export function spawnFlock() {
   const g = new THREE.Group(), n = 3 + Math.floor(Math.random() * 5), side = Math.random() < 0.5 ? -1 : 1;
-  g.position.set(side * 170, rnd(22, 42), rnd(-90, -15)); g.userData.vel = new THREE.Vector3(-side * rnd(5, 8), 0, rnd(-1, 1)); g.userData.birds = [];
-  for (let i = 0; i < n; i++) { const b = new THREE.Group(); b.position.set(i * 1.6 * side + rnd(-0.4, 0.4), rnd(-0.6, 0.6), Math.abs(i - n / 2) * 1.4 + rnd(-0.3, 0.3)); const l = new THREE.Mesh(wingGeo, birdMat), r = new THREE.Mesh(wingGeo, birdMat); r.scale.x = -1; b.add(l, r); b.userData = { ph: Math.random() * 6, l, r }; b.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2; g.add(b); g.userData.birds.push(b); }
+  g.position.set(side * 170, rnd(22, 42), rnd(-90, -15));
+  const vel = new THREE.Vector3(-side * rnd(5, 8), 0, rnd(-1.5, 1.5)); g.userData.vel = vel; g.rotation.y = Math.atan2(-vel.x, -vel.z); g.userData.birds = [];
+  for (let i = 0; i < n; i++) { const b = makeBird(); const k = Math.ceil(i / 2), sx = i % 2 ? 1 : -1; b.position.set(sx * k * 1.3 + rnd(-0.2, 0.2), rnd(-0.5, 0.5), k * 1.1 + rnd(-0.2, 0.2)); b.scale.setScalar(rnd(0.9, 1.3)); g.add(b); g.userData.birds.push(b); }
   ctx.scene.add(g); ctx.W.flocks.push(g);
+}
+export function updateFlocks(dt, T) {
+  const W = ctx.W;
+  W.flocks = W.flocks.filter(g => {
+    g.position.addScaledVector(g.userData.vel, dt);
+    g.userData.birds.forEach(b => {
+      const u = b.userData, amp = 0.3 + 0.7 * Math.max(0, Math.min(1, Math.sin(T * 0.35 + u.glide) * 1.5 + 0.5));   // 가끔 활공
+      const a = Math.sin(T * 8 + u.ph) * 0.6 * amp, a2 = Math.sin(T * 8 + u.ph - 0.7) * 0.55 * amp;
+      u.wings.forEach(w => { w.inner.rotation.z = w.sx * a; w.outer.rotation.z = w.sx * a2; });
+      u.body.position.y = Math.sin(T * 8 + u.ph) * 0.012 * amp;
+    });
+    if (Math.abs(g.position.x) > 200) { ctx.scene.remove(g); return false; } return true;
+  });
 }
