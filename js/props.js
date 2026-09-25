@@ -7,6 +7,8 @@ import { tex } from './textures.js';
 const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.25), extra || {}));
 const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.3), extra || {}));
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
+/* 최신 three 는 position 이 읽기 전용이라 Object.assign 으로 덮어쓸 수 없다 → set 으로 옮기고 그대로 반환 */
+const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 /* 두 점 사이 캡슐 */
 function cap(a, b, r, mat) { const from = V(...a), to = V(...b), len = from.distanceTo(to); const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.002, len - r * 0.4), 3, 10), mat); m.position.copy(from).add(to).multiplyScalar(0.5); m.lookAt(to); m.rotateX(Math.PI / 2); return m; }
 /* 회전체: [[r,y],...] 프로파일 */
@@ -22,7 +24,7 @@ export function contactShadow(x, z, sx, sz, op) {
 /* ── 손 (오른손) — pose: 'grip' 컵을 쥠 / 'pinch' 담배를 검지·중지 사이에 ── */
 export function makeHand(pose) {
   const g = new THREE.Group(), sk = smoothM(0xd6a58a, { roughness: 0.72 }), sleeve = cloth(0x4b5a3f, 3), cuff = cloth(0x3a4531, 2);
-  const finger = (pts, r) => { for (let i = 0; i < pts.length - 1; i++) g.add(cap(pts[i], pts[i + 1], r * (1 - i * 0.1), sk)); g.add(Object.assign(new THREE.Mesh(new THREE.SphereGeometry(r * 0.95, 8, 6), sk), { position: V(...pts[pts.length - 1]) })); };
+  const finger = (pts, r) => { for (let i = 0; i < pts.length - 1; i++) g.add(cap(pts[i], pts[i + 1], r * (1 - i * 0.1), sk)); g.add(at(new THREE.Mesh(new THREE.SphereGeometry(r * 0.95, 8, 6), sk), ...pts[pts.length - 1])); };
   const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), sk);
   if (pose === 'grip') {
     palm.scale.set(0.026, 0.05, 0.042); palm.position.set(0.07, 0, -0.004); g.add(palm);
@@ -54,7 +56,7 @@ export function makeLantern(lit) {
   g.add(new THREE.Mesh(lathe([[0, 0], [0.075, 0], [0.08, 0.02], [0.07, 0.04], [0, 0.04]]), frame));
   const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.14, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xffe0b0, transparent: true, opacity: 0.35, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false })); glass.position.y = 0.09; g.add(glass);
   const core = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.1, 8), new THREE.MeshBasicMaterial({ color: lit ? 0xffd9a0 : 0x8a7a62 })); core.position.y = 0.09; g.add(core);
-  g.add(Object.assign(new THREE.Mesh(lathe([[0, 0], [0.078, 0], [0.06, 0.03], [0.03, 0.05], [0, 0.05]]), frame), { position: V(0, 0.16, 0) }));
+  g.add(at(new THREE.Mesh(lathe([[0, 0], [0.078, 0], [0.06, 0.03], [0.03, 0.05], [0, 0.05]]), frame), 0, 0.16, 0));
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.005, 6, 16, Math.PI), frame); handle.position.y = 0.21; g.add(handle);
   return g;
 }
@@ -107,7 +109,7 @@ export function makeFire() {
   /* 주전자: 회전체 — 볼록한 몸통 + 목 + 뚜껑 */
   const kettle = new THREE.Group();
   kettle.add(new THREE.Mesh(lathe([[0, 0], [0.075, 0], [0.105, 0.02], [0.115, 0.07], [0.1, 0.12], [0.06, 0.145], [0.045, 0.15], [0.045, 0.165], [0, 0.165]]), iron));
-  kettle.add(Object.assign(new THREE.Mesh(lathe([[0, 0], [0.05, 0], [0.055, 0.01], [0.02, 0.03], [0.012, 0.045], [0, 0.045]]), iron), { position: V(0, 0.165, 0) }));
+  kettle.add(at(new THREE.Mesh(lathe([[0, 0], [0.05, 0], [0.055, 0.01], [0.02, 0.03], [0.012, 0.045], [0, 0.045]]), iron), 0, 0.165, 0));
   kettle.add(bar([0.1, 0.04, 0], [0.19, 0.12, 0], 0.014, iron, 8));
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.006, 6, 16, Math.PI), pole); handle.position.y = 0.16; kettle.add(handle);
   kettle.position.y = 0.85; g.add(kettle);
