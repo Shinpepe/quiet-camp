@@ -82,13 +82,13 @@ export function makeGround(cfg) {
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
 }
 
-/* 물 — 단일 파일과 같은 색이 나오도록 출력 직전에 sRGB→선형 (최종 패스가 다시 sRGB로 되돌림) */
-export function makeWater(w, tm, uTime) {
+/* 물. lin=0 이면 단일 파일과 같은 원본 출력, lin=1 이면 포스트 패스용으로 sRGB→선형 */
+export function makeWater(w, tm, uTime, lin) {
   const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180); geo.rotateX(-Math.PI / 2);
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     uniforms: {
-      uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z },
+      uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z }, uLin: { value: lin || 0 },
       deep: { value: new THREE.Color(w.deep).multiplyScalar(tm.waterMul) }, shallow: { value: new THREE.Color(w.shallow).multiplyScalar(tm.waterMul) },
       skyTop: { value: new THREE.Color(tm.top) }, skyBottom: { value: new THREE.Color(tm.bottom) },
       sunDir: { value: new THREE.Vector3(...tm.sun).normalize() }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI) },
@@ -98,14 +98,14 @@ export function makeWater(w, tm, uTime) {
       float wave(vec2 p){float k=smoothstep(0.0,10.0,shoreZ-p.y);return waveAmp*k*(0.18*sin(p.x*0.25+uTime*1.1)+0.12*sin(p.y*0.35+uTime*0.8+p.x*0.1)+0.06*sin((p.x+p.y)*0.8-uTime*2.0)+0.035*sin(p.x*1.7-p.y*0.6-uTime*2.6));}
       void main(){vec4 wp=modelMatrix*vec4(position,1.0);vec2 p=wp.xz;float h=wave(p);float e=0.6;float hx=wave(p+vec2(e,0.0));float hz=wave(p+vec2(0.0,e));
         vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
-    fragmentShader: SRGB_GLSL + `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime;varying vec3 vW,vN;
+    fragmentShader: SRGB_GLSL + `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uLin;varying vec3 vW,vN;
       void main(){vec3 V=normalize(cameraPosition-vW);vec3 N=normalize(vN);float fres=pow(1.0-max(dot(N,V),0.0),3.0);
         float dist=shoreZ-vW.z;float depth=clamp(dist/14.0,0.0,1.0);vec3 base=mix(shallow,deep,depth);
         vec3 sky=mix(skyBottom,skyTop,0.4);vec3 col=mix(base,sky,fres*0.7+0.08);
         vec3 H=normalize(sunDir+V);float spec=pow(max(dot(N,H),0.0),160.0);col+=sunColor*spec*1.1;
         float foam=smoothstep(2.4,0.0,dist)*(0.55+0.45*sin(vW.x*0.6+uTime*1.4+sin(vW.x*0.13)*3.0));col=mix(col,vec3(0.95),clamp(foam,0.0,1.0)*0.5);
         float f=smoothstep(fogNear,fogFar,length(cameraPosition-vW));col=mix(col,fogColor,f);
-        gl_FragColor=vec4(srgb2lin(clamp(col,0.0,1.0)),mix(0.78,0.97,depth));}`,
+        vec3 o=clamp(col,0.0,1.0);gl_FragColor=vec4(uLin>0.5?srgb2lin(o):o,mix(0.78,0.97,depth));}`,
   });
   const m = new THREE.Mesh(geo, mat); m.position.set(0, 0, w.z - w.size / 2 + 1); m.frustumCulled = false; return m;
 }
