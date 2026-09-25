@@ -6,33 +6,72 @@ import { tex } from './textures.js';
 
 const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.25), extra || {}));
 const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.3), extra || {}));
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+/* 두 점 사이 캡슐 */
+function cap(a, b, r, mat) { const from = V(...a), to = V(...b), len = from.distanceTo(to); const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.002, len - r * 0.4), 3, 10), mat); m.position.copy(from).add(to).multiplyScalar(0.5); m.lookAt(to); m.rotateX(Math.PI / 2); return m; }
+/* 회전체: [[r,y],...] 프로파일 */
+const lathe = (pts, seg) => new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg || 28);
+/* 처진 천: 폭 w × 길이 h 판을 가운데가 sag 만큼 꺼지게 */
+function sagPlane(w, h, sag, seg = 8) { const g = new THREE.PlaneGeometry(w, h, seg, seg); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getX(i) / w + 0.5, v = p.getY(i) / h + 0.5; p.setZ(i, sag * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)); } g.computeVertexNormals(); return g; }
 
 export function contactShadow(x, z, sx, sz, op) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, opacity: op || 0.9, depthWrite: false }));
   m.rotation.x = -Math.PI / 2; m.position.set(x, terrainH(x, z, ctx.W.cfg) + 0.02, z); ctx.scene.add(m);
 }
+
+/* ── 손 (오른손) — pose: 'grip' 컵을 쥠 / 'pinch' 담배를 검지·중지 사이에 ── */
+export function makeHand(pose) {
+  const g = new THREE.Group(), sk = smoothM(0xd6a58a, { roughness: 0.72 }), sleeve = cloth(0x4b5a3f, 3), cuff = cloth(0x3a4531, 2);
+  const finger = (pts, r) => { for (let i = 0; i < pts.length - 1; i++) g.add(cap(pts[i], pts[i + 1], r * (1 - i * 0.1), sk)); g.add(Object.assign(new THREE.Mesh(new THREE.SphereGeometry(r * 0.95, 8, 6), sk), { position: V(...pts[pts.length - 1]) })); };
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), sk);
+  if (pose === 'grip') {
+    palm.scale.set(0.026, 0.05, 0.042); palm.position.set(0.07, 0, -0.004); g.add(palm);
+    const R = 0.057, arc = (th, y) => [R * Math.cos(th), y, -R * Math.sin(th)];
+    [[0.032, 2.35, 0.0095], [0.011, 2.45, 0.0095], [-0.01, 2.3, 0.009], [-0.03, 2.0, 0.008]].forEach(([y, end, r]) => { const t = [0.15, 0.15 + (end - 0.15) * 0.36, 0.15 + (end - 0.15) * 0.7, end]; finger(t.map((th, i) => arc(th, y - i * 0.002)), r); });
+    finger([[0.062, 0.036, 0.012], [0.046, 0.046, 0.032], [0.022, 0.05, 0.048], [-0.004, 0.051, 0.052]], 0.011);   // 엄지: 컵 앞쪽 위를 감쌈
+    g.add(cap([0.076, -0.05, 0.0], [0.17, -0.24, 0.17], 0.028, sk));                                             // 손목·팔뚝
+    const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.05, 0.42, 14), sleeve); sl.position.set(0.22, -0.36, 0.27); sl.lookAt(0.32, -0.56, 0.44); sl.rotateX(Math.PI / 2); g.add(sl);
+    const cf = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 20), cuff); cf.position.set(0.12, -0.16, 0.1); cf.lookAt(0.32, -0.56, 0.44); g.add(cf);
+    g.userData.itemPos = V(0, 0, 0);
+  } else {
+    palm.scale.set(0.046, 0.05, 0.02); palm.position.set(-0.005, -0.03, 0); g.add(palm);
+    finger([[0.016, 0.01, 0], [0.017, 0.042, -0.002], [0.018, 0.068, -0.004], [0.018, 0.09, -0.006]], 0.0085);      // 검지
+    finger([[-0.008, 0.012, 0], [-0.01, 0.046, -0.002], [-0.011, 0.074, -0.004], [-0.012, 0.097, -0.006]], 0.0085); // 중지
+    finger([[-0.027, 0.01, 0], [-0.029, 0.036, -0.012], [-0.03, 0.048, -0.03], [-0.03, 0.045, -0.046]], 0.008);      // 약지 (구부림)
+    finger([[-0.043, 0.004, 0], [-0.045, 0.026, -0.012], [-0.046, 0.034, -0.028], [-0.046, 0.03, -0.042]], 0.0072);  // 새끼
+    finger([[0.028, -0.02, 0.004], [0.044, 0.004, 0.014], [0.052, 0.03, 0.022], [0.054, 0.05, 0.026]], 0.0105);      // 엄지
+    g.add(cap([0, -0.075, 0], [0.09, -0.3, 0.16], 0.03, sk));
+    const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.064, 0.052, 0.42, 14), sleeve); sl.position.set(0.14, -0.42, 0.26); sl.lookAt(0.24, -0.64, 0.42); sl.rotateX(Math.PI / 2); g.add(sl);
+    const cf = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 8, 20), cuff); cf.position.set(0.045, -0.2, 0.09); cf.lookAt(0.24, -0.64, 0.42); g.add(cf);
+    g.userData.itemPos = V(0.003, 0.077, 0.004);
+  }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
 export function makeLantern(lit) {
   const g = new THREE.Group(), frame = METAL();
-  g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.04, 14), frame));
-  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.14, 14), new THREE.MeshStandardMaterial({ color: 0xffe0b0, transparent: true, opacity: 0.35, roughness: 0.1 })); glass.position.y = 0.09; g.add(glass);
+  g.add(new THREE.Mesh(lathe([[0, 0], [0.075, 0], [0.08, 0.02], [0.07, 0.04], [0, 0.04]]), frame));
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.14, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xffe0b0, transparent: true, opacity: 0.35, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false })); glass.position.y = 0.09; g.add(glass);
   const core = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.1, 8), new THREE.MeshBasicMaterial({ color: lit ? 0xffd9a0 : 0x8a7a62 })); core.position.y = 0.09; g.add(core);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.078, 0.05, 14), frame); cap.position.y = 0.185; g.add(cap);
+  g.add(Object.assign(new THREE.Mesh(lathe([[0, 0], [0.078, 0], [0.06, 0.03], [0.03, 0.05], [0, 0.05]]), frame), { position: V(0, 0.16, 0) }));
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.005, 6, 16, Math.PI), frame); handle.position.y = 0.21; g.add(handle);
   return g;
 }
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6;
   const clothM = cloth(0xe0783a, 8, { side: THREE.DoubleSide }), flyM = cloth(0xc4602a, 8, { side: THREE.DoubleSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
-  const slab = (m, halfW, h, y0, len, thick) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => { const w = new THREE.Mesh(new THREE.BoxGeometry(side, thick, len), m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w); }); };
-  slab(clothM, Wd / 2, H, 0, L, 0.02); slab(flyM, Wd / 2 + 0.12, H + 0.02, 0.06, L + 0.4, 0.02);
+  /* 벽면: 프레임 사이에서 안쪽·아래로 살짝 처진 천 */
+  const slab = (m, halfW, h, y0, len, sag) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => { const geo = sagPlane(side, len, -sag, 10); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w); }); };
+  slab(clothM, Wd / 2, H, 0, L, 0.05); slab(flyM, Wd / 2 + 0.12, H + 0.02, 0.06, L + 0.4, 0.07);
   g.add(bar([0, H + 0.04, -L / 2 - 0.28], [0, H + 0.04, L / 2 + 0.28], 0.025, pole, 8));
   [-L / 2 - 0.05, L / 2 + 0.05].forEach(z => [-1, 1].forEach(sx => g.add(bar([sx * (Wd / 2 + 0.12), 0, z], [0, H + 0.03, z], 0.018, pole, 8))));
   const sh = new THREE.Shape(); sh.moveTo(-Wd / 2, 0); sh.lineTo(Wd / 2, 0); sh.lineTo(0, H);
   const back = new THREE.Mesh(new THREE.ShapeGeometry(sh), cloth(0xb8562a, 4, { side: THREE.DoubleSide })); back.position.z = L / 2; g.add(back);
   [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, cloth(0xd46a30, 2), 8)));
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd, 0.05, L), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 1.8), cloth(0x2c4a7a, 4)); bag.position.set(0.55, 0.16, 0.1); g.add(bag);
-  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.35), cloth(0xd9d2c5, 3)); pillow.position.set(0.55, 0.33, 0.85); g.add(pillow);
+  const bag = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 1.3, 4, 12), cloth(0x2c4a7a, 4)); bag.rotation.x = Math.PI / 2; bag.scale.set(1.15, 0.4, 1); bag.position.set(0.55, 0.13, 0.1); g.add(bag);
+  const pillow = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.28, 4, 10), cloth(0xd9d2c5, 3)); pillow.rotation.z = Math.PI / 2; pillow.scale.set(1, 1, 0.55); pillow.position.set(0.55, 0.3, 0.9); g.add(pillow);
   const mat2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.45), cloth(0x6b5a45, 3)); mat2.position.set(0, 0.01, -L / 2 - 0.4); g.add(mat2);
   [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * 1.95, 0.02, sz * 1.75], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * 1.95, 0.04, sz * 1.75); stake.rotation.z = -sx * 0.45; g.add(stake); });
   const lamp = makeLantern(W.tm.tentLamp > 0); lamp.scale.setScalar(0.7); lamp.position.set(-0.75, 0.05, 0.9); g.add(lamp);
@@ -40,11 +79,11 @@ export function makeTent() {
   return shadowed(g);
 }
 export function makeChair() {
-  const g = new THREE.Group(), fabric = cloth(0x2f4f6a, 3), frame = METAL(), arm = wood(0x8a6a48, 2, 1);
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.04, 0.5), fabric); seat.position.set(0, 0.45, 0); seat.rotation.x = 0.08; g.add(seat);
-  const back = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.62, 0.04), fabric); back.position.set(0, 0.76, 0.28); back.rotation.x = 0.28; g.add(back);
+  const g = new THREE.Group(), fabric = cloth(0x2f4f6a, 3, { side: THREE.DoubleSide }), frame = METAL(), arm = wood(0x8a6a48, 2, 1);
+  const seatG = sagPlane(0.56, 0.5, -0.035); seatG.rotateX(-Math.PI / 2); const seat = new THREE.Mesh(seatG, fabric); seat.position.set(0, 0.46, 0); g.add(seat);
+  const back = new THREE.Mesh(sagPlane(0.56, 0.62, 0.03), fabric); back.position.set(0, 0.76, 0.28); back.rotation.x = 0.28; g.add(back);
   [-0.29, 0.29].forEach(x => { g.add(bar([x, 0.02, -0.26], [x, 0.66, 0.26], 0.015, frame)); g.add(bar([x, 0.02, 0.26], [x, 0.66, -0.26], 0.015, frame)); g.add(bar([x, 0.66, -0.26], [x, 0.66, 0.26], 0.015, frame)); const a = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.5), arm); a.position.set(x, 0.685, 0); g.add(a); g.add(bar([x, 0.66, 0.26], [x, 1.06, 0.38], 0.015, frame)); });
-  g.add(bar([-0.29, 0.02, -0.26], [0.29, 0.02, -0.26], 0.015, frame)); g.add(bar([-0.29, 0.02, 0.26], [0.29, 0.02, 0.26], 0.015, frame)); g.add(bar([-0.29, 1.06, 0.38], [0.29, 1.06, 0.38], 0.015, frame));
+  g.add(bar([-0.29, 0.02, -0.26], [0.29, 0.02, -0.26], 0.015, frame)); g.add(bar([-0.29, 0.02, 0.26], [0.29, 0.02, 0.26], 0.015, frame)); g.add(bar([-0.29, 1.06, 0.38], [0.29, 1.06, 0.38], 0.015, frame)); g.add(bar([-0.29, 0.46, -0.25], [0.29, 0.46, -0.25], 0.012, frame)); g.add(bar([-0.29, 0.46, 0.25], [0.29, 0.46, 0.25], 0.012, frame));
   return shadowed(g);
 }
 export function makeTable() {
@@ -62,14 +101,15 @@ export function makeFire() {
   const ash = new THREE.Mesh(new THREE.CircleGeometry(0.34, 14), std(0x2b2724)); ash.rotation.x = -Math.PI / 2; ash.position.y = 0.03; g.add(ash);
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0x2a1c14 })); core.position.y = 0.15; core.scale.y = 0.6; g.add(core); W.emberCore = core;
   W.fireLight = new THREE.PointLight(0xff8a3a, 0, 13, 2); W.fireLight.position.y = 0.55; g.add(W.fireLight);
-  const pole = METAL(), iron = std(0x3b3b3f, { metalness: 0.7, roughness: 0.4, flatShading: false });
+  const pole = METAL(), iron = smoothM(0x3b3b3f, { metalness: 0.7, roughness: 0.4 });
   for (let i = 0; i < 3; i++) { const a = i / 3 * Math.PI * 2 + 0.5; g.add(bar([Math.cos(a) * 0.62, 0.02, Math.sin(a) * 0.62], [0, 1.28, 0], 0.012, pole)); }
-  g.add(bar([0, 1.28, 0], [0, 0.92, 0], 0.005, pole, 4));
-  const kettle = new THREE.Group(); kettle.add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.14, 14), iron));
-  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 0.03, 14), iron); lid.position.y = 0.085; kettle.add(lid);
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 8), iron); knob.position.y = 0.11; kettle.add(knob);
-  kettle.add(bar([0.09, 0.0, 0], [0.19, 0.08, 0], 0.014, iron, 6));
-  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.006, 6, 16, Math.PI), pole); handle.position.y = 0.09; kettle.add(handle);
+  g.add(bar([0, 1.28, 0], [0, 1.0, 0], 0.005, pole, 4));
+  /* 주전자: 회전체 — 볼록한 몸통 + 목 + 뚜껑 */
+  const kettle = new THREE.Group();
+  kettle.add(new THREE.Mesh(lathe([[0, 0], [0.075, 0], [0.105, 0.02], [0.115, 0.07], [0.1, 0.12], [0.06, 0.145], [0.045, 0.15], [0.045, 0.165], [0, 0.165]]), iron));
+  kettle.add(Object.assign(new THREE.Mesh(lathe([[0, 0], [0.05, 0], [0.055, 0.01], [0.02, 0.03], [0.012, 0.045], [0, 0.045]]), iron), { position: V(0, 0.165, 0) }));
+  kettle.add(bar([0.1, 0.04, 0], [0.19, 0.12, 0], 0.014, iron, 8));
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.006, 6, 16, Math.PI), pole); handle.position.y = 0.16; kettle.add(handle);
   kettle.position.y = 0.85; g.add(kettle);
   return shadowed(g);
 }
@@ -109,9 +149,9 @@ export function makeProps() {
   const cl = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.07, 0.4), smoothM(0xdde6ee, { roughness: 0.5 })); cl.position.y = 0.415; cooler.add(cl);
   cooler.add(bar([-0.2, 0.46, 0], [0.2, 0.46, 0], 0.012, METAL())); cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = 0.2; scene.add(shadowed(cooler));
   const pack = new THREE.Group(), pm = cloth(0x4d6b3a, 3), pm2 = cloth(0x3e5730, 3);
-  const pb = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.22), pm); pb.position.y = 0.27; pack.add(pb);
-  const pl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.26), pm2); pl.position.set(0, 0.55, 0.01); pl.rotation.x = 0.15; pack.add(pl);
-  const pp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.06), pm2); pp.position.set(0, 0.2, 0.13); pack.add(pp);
+  const pb = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.26, 4, 12), pm); pb.scale.set(1.1, 1, 0.65); pb.position.y = 0.28; pack.add(pb);
+  const pl = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.14, 4, 12), pm2); pl.rotation.z = Math.PI / 2; pl.scale.set(1, 1, 0.7); pl.position.set(0, 0.5, 0.02); pack.add(pl);
+  const pp = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.12, 4, 10), pm2); pp.scale.set(1.2, 1, 0.5); pp.position.set(0, 0.2, 0.14); pack.add(pp);
   [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
   pack.position.set(-3.25, 0, 1.4); pack.rotation.set(0, 0.4, -0.3); scene.add(shadowed(pack));
   const logM = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5)));
@@ -130,31 +170,28 @@ export function makeDock() {
   const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.06), METAL()); cleat.position.set(5.05, 0.39, -12.0); g.add(cleat);
   return shadowed(g);
 }
+/* ── 손에 드는 것: 회전체로 형태를 잡음 ── */
 export function makeItem(type) {
   const g = new THREE.Group(); const emitter = new THREE.Object3D(); g.userData.emitter = emitter;
   if (type === 'coffee') {
-    const cer = smoothM(0xf2ede4, { roughness: 0.35, side: THREE.DoubleSide });
-    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.038, 0.09, 24, 1, true), cer));
-    const bottom = new THREE.Mesh(new THREE.CircleGeometry(0.038, 24), cer); bottom.rotation.x = Math.PI / 2; bottom.position.y = -0.045; g.add(bottom);
-    const inner = new THREE.Mesh(new THREE.CircleGeometry(0.042, 24), cer); inner.rotation.x = -Math.PI / 2; inner.position.y = -0.03; g.add(inner);
-    const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.043, 24), smoothM(0x2c1a10, { roughness: 0.25 })); coffee.rotation.x = -Math.PI / 2; coffee.position.y = 0.032; g.add(coffee);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.004, 8, 24), cer); rim.rotation.x = Math.PI / 2; rim.position.y = 0.045; g.add(rim);
-    const h = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.007, 8, 16), cer); h.position.set(0.05, 0, 0); g.add(h);
+    const cer = smoothM(0xf2ede4, { roughness: 0.3, side: THREE.DoubleSide });
+    g.add(new THREE.Mesh(lathe([[0, -0.045], [0.034, -0.045], [0.04, -0.041], [0.044, -0.02], [0.046, 0.02], [0.047, 0.045], [0.042, 0.045], [0.041, 0.02], [0.039, -0.02], [0.036, -0.033], [0, -0.033]], 30), cer));
+    const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.041, 30), smoothM(0x2c1a10, { roughness: 0.2 })); coffee.rotation.x = -Math.PI / 2; coffee.position.y = 0.03; g.add(coffee);
+    const h = new THREE.Mesh(new THREE.TorusGeometry(0.027, 0.0075, 10, 18, Math.PI * 1.15), cer); h.position.set(0.049, -0.002, 0); h.rotation.z = -0.55; g.add(h);
     emitter.position.y = 0.04;
   } else if (type === 'whisky') {
-    const gm = new THREE.MeshStandardMaterial({ color: 0xdfefff, transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false });
-    const wall = new THREE.Mesh(new THREE.CylinderGeometry(0.041, 0.037, 0.085, 24, 1, true), gm); wall.renderOrder = 3; g.add(wall);
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.037, 0.035, 0.018, 24), smoothM(0xbfd3e0, { roughness: 0.1, metalness: 0.1 })); base.position.y = -0.036; g.add(base);
-    const liq = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.034, 0.038, 24), smoothM(0xb8641a, { roughness: 0.15 })); liq.position.y = -0.005; liq.renderOrder = 1; g.add(liq);
+    const gm = new THREE.MeshStandardMaterial({ color: 0xdfefff, transparent: true, opacity: 0.32, roughness: 0.04, metalness: 0.05, side: THREE.DoubleSide, depthWrite: false });
+    const glass = new THREE.Mesh(lathe([[0, -0.042], [0.034, -0.042], [0.04, -0.036], [0.041, 0.043], [0.037, 0.043], [0.036, -0.024], [0, -0.024]], 30), gm); glass.renderOrder = 3; g.add(glass);
+    const liq = new THREE.Mesh(new THREE.CylinderGeometry(0.0355, 0.034, 0.038, 30), smoothM(0xb8641a, { roughness: 0.12 })); liq.position.y = -0.004; liq.renderOrder = 1; g.add(liq);
     const ice = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, roughness: 0.05, depthWrite: false });
-    [[0.008, 0.012, 0.005, 0.4, 0.5], [-0.012, 0.018, -0.006, 0.9, 1.6]].forEach(([x, y, z, rx, ry]) => { const c = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.026, 0.026), ice); c.position.set(x, y, z); c.rotation.set(rx, ry, 0.2); c.renderOrder = 2; g.add(c); });
+    [[0.008, 0.012, 0.005, 0.4, 0.5], [-0.012, 0.018, -0.006, 0.9, 1.6]].forEach(([x, y, z, rx, ry]) => { const c = new THREE.Mesh(jitter(new THREE.BoxGeometry(0.026, 0.026, 0.026, 2, 2, 2), 0.15), ice); c.position.set(x, y, z); c.rotation.set(rx, ry, 0.2); c.renderOrder = 2; g.add(c); });
     emitter.position.y = 0.04;
   } else {
     const paper = smoothM(0xf4f1ea, { roughness: 0.9 });
-    const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 10), paper); cig.rotation.z = Math.PI / 2; cig.position.x = 0.005; g.add(cig);
-    const filt = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.022, 10), smoothM(0xd9a15a, { roughness: 0.9 })); filt.rotation.z = Math.PI / 2; filt.position.x = -0.041; g.add(filt);
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.002, 10), smoothM(0xc08a3a)); ring.rotation.z = Math.PI / 2; ring.position.x = -0.03; g.add(ring);
-    const ash = new THREE.Mesh(new THREE.CylinderGeometry(0.0038, 0.004, 0.008, 10), smoothM(0x8e8a84, { roughness: 1 })); ash.rotation.z = Math.PI / 2; ash.position.x = 0.044; g.add(ash);
+    const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 12), paper); cig.rotation.z = Math.PI / 2; cig.position.x = 0.005; g.add(cig);
+    const filt = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.022, 12), smoothM(0xd9a15a, { roughness: 0.9 })); filt.rotation.z = Math.PI / 2; filt.position.x = -0.041; g.add(filt);
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.002, 12), smoothM(0xc08a3a)); ring.rotation.z = Math.PI / 2; ring.position.x = -0.03; g.add(ring);
+    const ash = new THREE.Mesh(new THREE.CylinderGeometry(0.0038, 0.004, 0.008, 12), smoothM(0x8e8a84, { roughness: 1 })); ash.rotation.z = Math.PI / 2; ash.position.x = 0.044; g.add(ash);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.0042, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff5a1a })); tip.position.x = 0.048; g.add(tip); g.userData.tip = tip;
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xff7a2a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })); glow.scale.setScalar(0.022); glow.position.x = 0.048; g.add(glow); g.userData.glow = glow;
     emitter.position.set(0.048, 0.003, 0);
@@ -184,9 +221,8 @@ export class Particles {
   }
 }
 
-/* ── 새: 몸통·머리·부리·꼬리·2마디 날개. 활공과 날갯짓이 섞임 ── */
+/* ── 새 ── */
 export const birdMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.9, side: THREE.DoubleSide });
-export const wingGeo = null;   // (이전 버전 호환용 — 더 이상 사용하지 않음)
 function wingPart(len, c0, c1) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -c0 * 0.35, len, 0, -c1 * 0.3 - len * 0.12, len, 0, c1 * 0.7 - len * 0.12, 0, 0, -c0 * 0.35, len, 0, c1 * 0.7 - len * 0.12, 0, 0, c0 * 0.65], 3));
@@ -218,7 +254,7 @@ export function updateFlocks(dt, T) {
   W.flocks = W.flocks.filter(g => {
     g.position.addScaledVector(g.userData.vel, dt);
     g.userData.birds.forEach(b => {
-      const u = b.userData, amp = 0.3 + 0.7 * Math.max(0, Math.min(1, Math.sin(T * 0.35 + u.glide) * 1.5 + 0.5));   // 가끔 활공
+      const u = b.userData, amp = 0.3 + 0.7 * Math.max(0, Math.min(1, Math.sin(T * 0.35 + u.glide) * 1.5 + 0.5));
       const a = Math.sin(T * 8 + u.ph) * 0.6 * amp, a2 = Math.sin(T * 8 + u.ph - 0.7) * 0.55 * amp;
       u.wings.forEach(w => { w.inner.rotation.z = w.sx * a; w.outer.rotation.z = w.sx * a2; });
       u.body.position.y = Math.sin(T * 8 + u.ph) * 0.012 * amp;

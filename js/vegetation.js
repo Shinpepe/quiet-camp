@@ -18,6 +18,20 @@ export function instanced(geo, mat, list, cast) {
   list.forEach((t, i) => { d.position.set(t.x, t.y, t.z); d.rotation.set(0, t.rot || 0, 0); d.scale.set(t.s, t.s * (t.sy || 1), t.s); d.updateMatrix(); im.setMatrixAt(i, d.matrix); im.setColorAt(i, c.setRGB(t.tint[0], t.tint[1], t.tint[2])); });
   im.castShadow = !!cast; im.receiveShadow = true; im.frustumCulled = false; return im;
 }
+/* 행렬로 배치한 파츠 병합 (정점색·uv 유지) */
+function mergeGeos(list) {
+  const pos = [], col = [], uv = [], c = new THREE.Color();
+  list.forEach(p => {
+    const g = p.geo.toNonIndexed(); g.applyMatrix4(p.matrix);
+    const pa = g.attributes.position, ua = g.attributes.uv, k = p.uvs || 1; let minY = 1e9, maxY = -1e9;
+    if (p.grad) for (let i = 0; i < pa.count; i++) { minY = Math.min(minY, pa.getY(i)); maxY = Math.max(maxY, pa.getY(i)); }
+    c.set(p.color);
+    for (let i = 0; i < pa.count; i++) { const sh = p.grad ? 0.72 + 0.4 * (pa.getY(i) - minY) / (maxY - minY + 1e-6) : 1; col.push(c.r * sh, c.g * sh, c.b * sh); uv.push(ua ? ua.getX(i) * k : 0, ua ? ua.getY(i) * k : 0); }
+    pos.push(...pa.array);
+  });
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); return g;
+}
+
 function pineGeo(color, snowy) {
   const parts = [{ geo: new THREE.CylinderGeometry(0.16, 0.26, 1.8, 6), color: 0x4a3325, y: 0.9, uvs: 2 }];
   [[1.45, 2.8, 2.3], [1.15, 2.6, 3.4], [0.85, 2.3, 4.5], [0.5, 2.0, 5.5]].forEach(([r, h, y], i) => {
@@ -26,10 +40,24 @@ function pineGeo(color, snowy) {
   });
   return mergeParts(parts);
 }
-function leafGeo(color) {
-  const parts = [{ geo: new THREE.CylinderGeometry(0.14, 0.24, 2.4, 6), color: 0x5a4030, y: 1.2, uvs: 2 }];
-  [[1.5, 3.3, 0, 0], [1.1, 3.9, 0.8, 0.3], [1.0, 3.7, -0.7, -0.4], [0.9, 4.4, 0.1, 0.5]].forEach(([r, y, x, z], i) => parts.push({ geo: jitter(new THREE.IcosahedronGeometry(r, 1), 0.3), color: new THREE.Color(color).multiplyScalar(0.9 + i * 0.08).getHex(), y, x, z, sy: 0.85, grad: true, uvs: 3 }));
-  return mergeParts(parts);
+
+/* ── L-시스템 활엽수: 줄기 → 가지가 3단계로 갈라지고 끝마다 잎 덩어리 ── */
+const UP = new THREE.Vector3(0, 1, 0);
+function treeGeo(color) {
+  const list = [], q = new THREE.Quaternion(), ONE = new THREE.Vector3(1, 1, 1);
+  const seg = (a, b, r0, r1) => { const dir = b.clone().sub(a), len = dir.length(); dir.normalize(); const rot = new THREE.Quaternion().setFromUnitVectors(UP, dir); list.push({ geo: new THREE.CylinderGeometry(r1, r0, len, 7), matrix: new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), rot, ONE), color: 0x5a4030, uvs: 2 }); };
+  const grow = (p0, dir, len, r, depth) => {
+    const p1 = p0.clone().addScaledVector(dir, len); seg(p0, p1, r, r * 0.65);
+    if (depth === 0) { const s = len * 0.95; list.push({ geo: jitter(new THREE.IcosahedronGeometry(1, 1), 0.32), matrix: new THREE.Matrix4().compose(p1, new THREE.Quaternion(), new THREE.Vector3(s, s * 0.8, s)), color: new THREE.Color(color).multiplyScalar(rnd(0.85, 1.15)).getHex(), grad: true, uvs: 3 }); return; }
+    const n = depth >= 2 ? 3 : 2 + (Math.random() < 0.5 ? 1 : 0), base = rnd(0, 6.3), rot = q.setFromUnitVectors(UP, dir).clone();
+    for (let i = 0; i < n; i++) {
+      const az = base + i * 6.28 / n + rnd(-0.4, 0.4), tilt = rnd(0.5, 0.95);
+      const nd = new THREE.Vector3(Math.sin(tilt) * Math.cos(az), Math.cos(tilt), Math.sin(tilt) * Math.sin(az)).applyQuaternion(rot); nd.y += 0.25; nd.normalize();
+      grow(p1.clone().addScaledVector(dir, -len * rnd(0, 0.2)), nd, len * rnd(0.6, 0.75), r * 0.62, depth - 1);
+    }
+  };
+  grow(new THREE.Vector3(0, 0, 0), UP.clone(), 2.2, 0.17, 3);
+  return mergeGeos(list);
 }
 function bushGeo(color) { return mergeParts([{ geo: jitter(new THREE.IcosahedronGeometry(1, 1), 0.35), color, y: 0.6, sy: 0.7, grad: true, uvs: 2 }, { geo: jitter(new THREE.IcosahedronGeometry(0.7, 1), 0.35), color, y: 0.7, x: 0.7, z: 0.3, sy: 0.7, grad: true, uvs: 2 }]); }
 function grassGeo() {
@@ -37,7 +65,7 @@ function grassGeo() {
   return mergeParts([{ geo: blade(), color: 0xffffff, grad: true }, { geo: blade(), color: 0xffffff, ry: Math.PI / 2, grad: true }]);
 }
 
-/* ── 야자수 잎: 잎줄기 + 양옆으로 어긋난 잎조각 36개, 끝으로 갈수록 짧고 아래로 처짐 ── */
+/* ── 야자수 ── */
 function frondGeo(L, dead) {
   const pos = [], col = [], uv = [];
   const rib = t => new THREE.Vector3(L * t, L * (0.32 * t - 0.62 * t * t), 0);
@@ -89,11 +117,14 @@ export function makeVegetation(cfg) {
   const near = Math.round(cfg.pines * 0.45);
   for (let i = 0; i < near * 5 && pines.length < near; i++) tryPlace(10, 65, pines, 0.3, 60, 0.32, 0.68, cfg.key === 'lake' ? 0.34 : 0.42);
   for (let i = 0; i < cfg.pines * 4 && pines.length < cfg.pines; i++) tryPlace(55, 180, pines, 0.3, 130, 0.32, 0.7, cfg.key === 'lake' ? 0.4 : 0.45);
-  for (let i = 0; i < cfg.leafs * 4 && leafs.length < cfg.leafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.3, 0.72, 0.36);
+  for (let i = 0; i < cfg.leafs * 4 && leafs.length < cfg.leafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.35, 0.72, 0.36);
   for (let i = 0; i < cfg.bushes * 4 && bushes.length < cfg.bushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin);
   const treeColor = cfg.key === 'snow' ? 0x2f4f46 : 0x2b5a2b, fol = () => tex('foliage', 1, 1, 0.3);
   if (pines.length) scene.add(instanced(pineGeo(treeColor, cfg.snow), swayMat(fol(), 0.012, 1.5), pines, true));
-  if (leafs.length) scene.add(instanced(leafGeo(0x4c8a3a), swayMat(fol(), 0.018, 1.5), leafs, true));
+  if (leafs.length) {   // 3가지 변형을 섞어 심는다
+    const groups = [[], [], []]; leafs.forEach((t, i) => groups[i % 3].push(t));
+    groups.forEach(list => { if (list.length) scene.add(instanced(treeGeo(0x4c8a3a), swayMat(fol(), 0.02, 2.0), list, true)); });
+  }
   if (bushes.length) scene.add(instanced(bushGeo(cfg.key === 'beach' ? 0x7a8a4e : 0x3f7a35), swayMat(fol(), 0.03, 0.2), bushes.map(b => Object.assign(b, { s: b.s * 0.6, y: b.y + 0.1 })), true));
   for (let i = 0; i < cfg.palms; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(5, 42), z = rnd(-2, 34); if (reserved(x, z)) continue; const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); }
   for (let i = 0; i < (cfg.rocks || 0); i++) { const a = rnd(0, 6.3), r = rnd(9, 70), x = Math.cos(a) * r, z = Math.sin(a) * r; if (reserved(x, z)) continue; const h = terrainH(x, z, cfg); if (h < 0.05) continue; const s = rnd(0.35, 1.4), rk = makeRock(s, cfg.snow ? 0xa8b3c0 : 0x6f7276); rk.position.set(x, h + s * 0.15, z); scene.add(rk); W.trees.push([x, z, s * 0.9]); }
