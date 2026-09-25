@@ -83,7 +83,7 @@ export function makeGround(cfg) {
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
 }
 
-/* 물 — 포스트 프로세싱 파이프라인에 맞춰 출력 직전 pow(2.2)로 선형화 */
+/* 물 — 최종 패스의 ACES를 미리 역보정 */
 export function makeWater(w, tm, uTime) {
   const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180); geo.rotateX(-Math.PI / 2);
   const mat = new THREE.ShaderMaterial({
@@ -95,11 +95,12 @@ export function makeWater(w, tm, uTime) {
       sunDir: { value: new THREE.Vector3(...tm.sun).normalize() }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI) },
       fogColor: { value: new THREE.Color(tm.fog) }, fogNear: { value: 40 }, fogFar: { value: tm.fogFar }, uExp: { value: tm.exposure },
     },
-    vertexShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uExp;varying vec3 vW,vN;
-      vec3 unaces(vec3 y){y=clamp(y,0.0,0.985);vec3 a=2.51-2.43*y;vec3 b=0.03-0.59*y;return (-b+sqrt(b*b+0.56*a*y))/(2.0*a);}
+    vertexShader: `uniform float uTime,waveAmp,shoreZ;varying vec3 vW,vN;
+      float wave(vec2 p){float k=smoothstep(0.0,10.0,shoreZ-p.y);return waveAmp*k*(0.18*sin(p.x*0.25+uTime*1.1)+0.12*sin(p.y*0.35+uTime*0.8+p.x*0.1)+0.06*sin((p.x+p.y)*0.8-uTime*2.0)+0.035*sin(p.x*1.7-p.y*0.6-uTime*2.6));}
       void main(){vec4 wp=modelMatrix*vec4(position,1.0);vec2 p=wp.xz;float h=wave(p);float e=0.6;float hx=wave(p+vec2(e,0.0));float hz=wave(p+vec2(0.0,e));
         vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
-    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime;varying vec3 vW,vN;
+    fragmentShader: `uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor;uniform float shoreZ,fogNear,fogFar,uTime,uExp;varying vec3 vW,vN;
+      vec3 unaces(vec3 y){y=clamp(y,0.0,0.985);vec3 a=2.51-2.43*y;vec3 b=0.03-0.59*y;return (-b+sqrt(b*b+0.56*a*y))/(2.0*a);}
       void main(){vec3 V=normalize(cameraPosition-vW);vec3 N=normalize(vN);float fres=pow(1.0-max(dot(N,V),0.0),3.0);
         float dist=shoreZ-vW.z;float depth=clamp(dist/14.0,0.0,1.0);vec3 base=mix(shallow,deep,depth);
         vec3 sky=mix(skyBottom,skyTop,0.4);vec3 col=mix(base,sky,fres*0.7+0.08);
