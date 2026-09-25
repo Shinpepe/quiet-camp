@@ -3,7 +3,7 @@ import { ctx, state, settings } from './state.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch } from './util.js';
 import { terrainH } from './terrain.js';
-import { makeItem } from './props.js';
+import { makeItem, makeHand } from './props.js';
 import { buildScene } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
@@ -89,7 +89,7 @@ function renderTrunk() {
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
   if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
-function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
+function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type), hd = makeHand(type === 'smoke' ? 'pinch' : 'grip'); it.position.copy(hd.userData.itemPos); hd.add(it); ctx.hand.add(hd); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; }
 export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.2, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.22, -0.45); h.rotation.set(0, 0, 0); } }
 function sip() { anim.sipT = 0; if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); }
