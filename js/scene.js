@@ -1,12 +1,20 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { BG } from './data.js';
-import { rnd, smooth, std, shadowed, softTex, NOISE_GLSL } from './util.js';
+import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL } from './util.js';
 import { makeGround, makeWater, terrainH } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, contactShadow, Particles, birdMat } from './props.js';
 import { startCrackle } from './audio.js';
 import { paramsAt, sunDirAt } from './time.js';
+
+/* 별똥별 줄무늬: 오른쪽(머리)이 밝고 왼쪽(꼬리)으로 사라지며, 위아래도 부드럽게 */
+const streakTex = canvasTex(128, 16, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.7, 'rgba(255,255,255,.5)'); gr.addColorStop(1, 'rgba(255,255,255,1)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  const v = g.createLinearGradient(0, 0, 0, h); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.5, 'rgba(0,0,0,1)'); v.addColorStop(1, 'rgba(0,0,0,0)');
+  g.globalCompositeOperation = 'destination-in'; g.fillStyle = v; g.fillRect(0, 0, w, h);
+});
 
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
@@ -49,11 +57,47 @@ export function applyTime() {
   if (ctx.post) ctx.post.setTime(cur);
 }
 
+/* ── 별똥별 ── */
+const _r = new THREE.Vector3(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4();
+function spawnMeteor(m) {
+  /* 하늘 돔(반지름 1650) 위, 고도 17°~70° 어딘가에서 시작 */
+  const az = rnd(0, Math.PI * 2), el = rnd(0.3, 1.22);
+  _r.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
+  m.head.copy(_r).multiplyScalar(1650);
+  /* 진행 방향: 구면 접선 중 아래로 향하는 쪽 */
+  _x.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)); m.dir.crossVectors(_r, _x).normalize();
+  if (m.dir.y > 0) m.dir.multiplyScalar(-1);
+  if (m.dir.y > -0.3) { m.dir.y -= 0.5; m.dir.normalize(); }
+  m.speed = rnd(380, 650); m.life = rnd(0.5, 1.1); m.t = 0; m.len = rnd(45, 120); m.width = rnd(2.2, 4.2);
+  m.mesh.material.color.setHex(Math.random() < 0.3 ? 0xd8e6ff : 0xf4f6ff); m.mesh.visible = true;
+}
+export function updateMeteors(dt) {
+  const W = ctx.W; if (!W.meteors) return;
+  const night = W.tm.stars > 0.5 && !W.sunUp;
+  if (night && !ctx.paused) {
+    W.meteorT -= dt;
+    if (W.meteorT <= 0) {
+      const free = W.meteors.find(m => m.life <= 0); if (free) spawnMeteor(free);
+      W.meteorT = Math.random() < 0.25 ? rnd(0.4, 1.6) : rnd(7, 22);   // 가끔은 연달아
+    }
+  }
+  W.meteors.forEach(m => {
+    if (m.life <= 0) return;
+    m.t += dt; if (m.t >= m.life) { m.life = 0; m.mesh.visible = false; return; }
+    m.head.addScaledVector(m.dir, m.speed * dt);
+    _p.copy(m.head).addScaledVector(m.dir, -m.len * 0.5); m.mesh.position.copy(_p);
+    /* 줄무늬 판을 카메라 쪽으로 세우고, 긴 축(x)을 진행 방향에 맞춘다 */
+    _z.copy(ctx.camera.position).sub(_p).normalize(); _y.crossVectors(_z, m.dir).normalize(); _x.crossVectors(_y, _z).normalize();
+    m.mesh.quaternion.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
+    const k = m.t / m.life; m.mesh.material.opacity = Math.pow(Math.sin(Math.PI * k), 0.6) * 0.95 * W.tm.stars; m.mesh.scale.set(m.len, m.width, 1);
+  });
+}
+
 export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12) };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
@@ -89,6 +133,12 @@ export function buildScene(bgKey) {
     for (let i = 0; i < n; i++) { const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 0.97), r = 1700; sp[i * 3] = r * Math.sin(ph) * Math.cos(th); sp[i * 3 + 1] = r * Math.cos(ph); sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th); }
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0, fog: false })); scene.add(W.stars); }
+  /* 별똥별 풀 3개 (동시에 최대 3개) */
+  for (let i = 0; i < 3; i++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: streakTex, color: 0xf4f6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+    m.visible = false; m.frustumCulled = false; scene.add(m);
+    W.meteors.push({ mesh: m, t: 0, life: 0, head: new THREE.Vector3(), dir: new THREE.Vector3(), speed: 0, len: 0, width: 0 });
+  }
 
   scene.add(makeGround(cfg));
   if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime); scene.add(W.water); }
