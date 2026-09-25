@@ -5,6 +5,8 @@ import { T } from './textures.js';
 
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 export const HMAP_R = 160;
+/* 수면 높이. 캠프 바닥(y=0)이 수면보다 위에 있어야 파도가 땅을 뚫고 올라오지 않는다 (호수 파도 4cm, 바다 15cm) */
+export const WATER_Y = -0.25;
 
 /* 해안선 흔들림: x 방향 노이즈. 캠프 주변(|x|<6, 부두 포함)은 흔들지 않는다 */
 const wobbleOf = cfg => cfg.water.wobble !== undefined ? cfg.water.wobble : (cfg.key === 'lake' ? 9 : 5);
@@ -61,16 +63,17 @@ export function bakeShoreTex(cfg) {
 
 function groundColor(cfg, x, z, h, ny, d) {
   _c.set(cfg.ground); const n = fbm(x * 0.06 + 7, z * 0.06 + 3, 3), n2 = fbm(x * 0.012 + 90, z * 0.012 + 40, 3);
+  /* s: 흔들린 해안선 기준 거리. 물가(h = WATER_Y)는 s ≈ -2.3 */
   const s = cfg.water ? z - cfg.water.z - shoreOff(x, cfg) : 99;
   if (cfg.key === 'lake') {
     _c.lerp(_c2.set(0x8c7a46), smooth(0.5, 0.72, n) * 0.55);
     if (d > 120) _c.lerp(_c2.set(0x2f4a30), smooth(120, 200, d) * (0.4 + 0.5 * smooth(0.4, 0.7, n2)));
     _c.lerp(_c2.set(0x6a6d70), smooth(110, 170, h));
     _c.lerp(_c2.set(0xe3e9f0), smooth(185, 240, h) * smooth(0.45, 0.8, ny));
-    if (cfg.water && d < 150) _c.lerp(_c2.set(0x5c4c3a), 1 - smooth(-1.5, 2.5, s));
+    if (cfg.water && d < 150) _c.lerp(_c2.set(0x5c4c3a), 1 - smooth(-2.6, 1.4, s));
   } else if (cfg.key === 'beach') {
     _c.multiplyScalar(0.92 + n * 0.16);
-    if (cfg.water && d < 150) _c.multiplyScalar(1 - 0.22 * (1 - smooth(-1.5, 3, s)));
+    if (cfg.water && d < 150) _c.multiplyScalar(1 - 0.22 * (1 - smooth(-2.6, 2, s)));
     _c.lerp(_c2.set(0x7c8a55), smooth(2.5, 12, h) * (0.5 + 0.5 * n2));
     _c.lerp(_c2.set(0x8a7a66), smooth(45, 90, h) * 0.6);
   } else {
@@ -103,12 +106,13 @@ export function makeGround(cfg, uTime, shoreTex) {
     sh.uniforms.uShore = { value: shoreTex || null };
     sh.uniforms.uShoreZ = { value: cfg.water ? cfg.water.z : 0 };
     sh.uniforms.uWaterEdge = { value: cfg.water ? waterEdge(cfg) : -9999 };
+    sh.uniforms.uWaterY = { value: WATER_Y };
     sh.uniforms.uHR = { value: HMAP_R };
     mat.userData.shader = sh;
     sh.vertexShader = 'varying vec3 vWPos;varying vec3 vWNorm;\n' + sh.vertexShader
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvWNorm=normalize(mat3(modelMatrix)*objectNormal);')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.0)).xyz;');
-    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock;uniform float uTime,uHasWater,uCaust,uShoreZ,uWaterEdge,uHR;uniform sampler2D uShore;\n' + sh.fragmentShader
+    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock;uniform float uTime,uHasWater,uCaust,uShoreZ,uWaterEdge,uWaterY,uHR;uniform sampler2D uShore;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         float n1=vnoise(vWPos.xz*0.35);float n2=vnoise(vWPos.xz*1.7);float n3=vnoise(vWPos.xz*7.0);
         float det=(n1-0.5)*0.22+(n2-0.5)*0.12+(n3-0.5)*0.07;
@@ -119,9 +123,9 @@ export function makeGround(cfg, uTime, shoreTex) {
           float off=texture2D(uShore,vec2(clamp(vWPos.x/(2.0*uHR)+0.5,0.0,1.0),0.5)).r*32.0-16.0;
           float s=vWPos.z-(uShoreZ+off);
           float surge=0.5+0.5*sin(uTime*1.1+vWPos.x*0.21+vnoise(vWPos.xz*0.3)*3.0);
-          float wet=(1.0-smoothstep(-1.2,0.3+0.8*surge,s))*(1.0-smoothstep(0.35,0.7,vWPos.y));
+          float wet=(1.0-smoothstep(-2.4,-0.9+0.8*surge,s))*(1.0-smoothstep(0.55,0.9,vWPos.y-uWaterY));
           diffuseColor.rgb*=1.0-0.3*wet;
-          float dpt=-vWPos.y;
+          float dpt=uWaterY-vWPos.y;
           if(dpt>0.0&&vWPos.z<uWaterEdge){float c1=vnoise(vWPos.xz*2.6+vec2(uTime*0.35,uTime*0.2));float c2=vnoise(vWPos.xz*4.1-vec2(uTime*0.25,uTime*0.3));
             float ca=pow(c1*c2,1.6)*4.0;
             diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(0.72,0.88,1.0),smoothstep(0.0,2.0,dpt));
@@ -140,7 +144,7 @@ export function makeWater(w, tm, uTime, heightTex, edgeZ) {
     transparent: true,
     uniforms: {
       uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z }, uReflect: { value: settings.reflect ? 1 : 0 },
-      uHeight: { value: heightTex }, uHR: { value: HMAP_R }, uRipple: { value: ripple }, uRip: { value: 0.45 + 0.55 * w.wave },
+      uHeight: { value: heightTex }, uHR: { value: HMAP_R }, uWaterY: { value: WATER_Y }, uRipple: { value: ripple }, uRip: { value: 0.45 + 0.55 * w.wave },
       deep: { value: new THREE.Color(w.deep).multiplyScalar(tm.waterMul) }, shallow: { value: new THREE.Color(w.shallow).multiplyScalar(tm.waterMul) },
       skyTop: { value: new THREE.Color(tm.top) }, skyBottom: { value: new THREE.Color(tm.bottom) },
       sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunColor: { value: new THREE.Color(tm.sunColor).multiplyScalar(tm.sunI) },
@@ -154,7 +158,7 @@ export function makeWater(w, tm, uTime, heightTex, edgeZ) {
         vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
     fragmentShader: NOISE_GLSL + SKY_GLSL + FOG_GLSL + `
       uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor,uSunD,moonDir,disc,cloudLit,cloudShade;
-      uniform float shoreZ,uTime,uReflect,uHR,uRip,glow,uMoon,uCover;uniform vec4 uFog[3];
+      uniform float shoreZ,uTime,uReflect,uHR,uWaterY,uRip,glow,uMoon,uCover;uniform vec4 uFog[3];
       uniform sampler2D uHeight,uRipple;varying vec3 vW,vN;
       void main(){
         vec3 V=normalize(cameraPosition-vW);float dist=length(cameraPosition-vW);
@@ -163,7 +167,7 @@ export function makeWater(w, tm, uTime, heightTex, edgeZ) {
         float det=(1.0-smoothstep(25.0,160.0,dist))*uRip;
         vec3 N=normalize(normalize(vN)+vec3(r1.x+r2.x,0.0,r1.y+r2.y)*0.28*det);
         vec2 hu=vW.xz/(2.0*uHR)+0.5;bool inH=hu.x>0.0&&hu.x<1.0&&hu.y>0.0&&hu.y<1.0;
-        float ground=inH?texture2D(uHeight,hu).r*16.0-8.0:-6.0;float dpt=max(0.0,-ground);
+        float ground=inH?texture2D(uHeight,hu).r*16.0-8.0:-6.0;float dpt=max(0.0,uWaterY-ground);
         float dk=1.0-exp(-dpt*0.5);vec3 base=mix(shallow,deep,dk);
         vec3 R=reflect(-V,N);R.y=max(R.y,0.04);R=normalize(R);
         vec3 sky=skyColor(R,skyTop,skyBottom,uSunD,moonDir,disc,cloudLit,cloudShade,glow,uMoon,uCover,uTime,0.45);
@@ -178,5 +182,5 @@ export function makeWater(w, tm, uTime, heightTex, edgeZ) {
         float alpha=mix(0.5,0.96,dk);alpha=max(alpha,foam*0.9);alpha=mix(alpha,1.0,f);
         gl_FragColor=vec4(col,alpha);}`,
   });
-  const m = new THREE.Mesh(geo, mat); m.position.set(0, 0, edgeZ - w.size / 2); m.frustumCulled = false; return m;
+  const m = new THREE.Mesh(geo, mat); m.position.set(0, WATER_Y, edgeZ - w.size / 2); m.frustumCulled = false; return m;
 }
