@@ -32,6 +32,21 @@ vec3 skyColor(vec3 d,vec3 top,vec3 bottom,vec3 sunDir,vec3 moonDir,vec3 sunCol,v
     vec3 cc=mix(cloudShade,cloudLit,1.0-0.75*d2);col=mix(col,cc,dens*smoothstep(0.0,0.2,h)*cloudK);}
   return col;}`;
 
+/* ── 대기 원근 안개 ──
+   three 의 fog 셰이더 조각을 통째로 바꿔 모든 재질(표준·포인트·스프라이트)에 적용한다.
+   값은 FOG 배열 하나를 모든 재질이 참조로 공유하므로 scene.js 의 applyTime() 이 이 배열만 갱신하면 된다.
+   uFog[0]=(광원 방향 xyz, 산란 세기)  uFog[1]=(밀도, 1/높이스케일, 기준 높이, 0)  uFog[2]=(산란 색 rgb, 0)
+   - 낮은 곳일수록 짙고(높이 감쇠), 산 정상은 맑고, 해/달 쪽을 볼 때 안개가 밝게 빛난다(산란). */
+export const FOG = new Float32Array(12);
+export const FOG_GLSL = `
+float fogAmount(vec3 wpos,vec4 f1){vec3 d=wpos-cameraPosition;float dist=length(d);float y0=clamp(cameraPosition.y-f1.z,-20.0,600.0),y1=clamp(wpos.y-f1.z,-20.0,600.0);float dy=y1-y0;float hi=abs(dy)>0.05?(exp(-f1.y*y0)-exp(-f1.y*y1))/(f1.y*dy):exp(-f1.y*y0);return clamp(1.0-exp(-f1.x*dist*hi),0.0,1.0);}
+vec3 fogTint(vec3 wpos,vec3 fc,vec4 f0,vec4 f2){vec3 dir=normalize(wpos-cameraPosition);float s=max(dot(dir,f0.xyz),0.0);return mix(fc,f2.rgb,pow(s,8.0)*f0.w);}`;
+THREE.UniformsLib.fog.uFog = { value: FOG };
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\nvarying vec3 vFogW;\n#endif';
+THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\nvFogW=cameraPosition+transpose(mat3(viewMatrix))*mvPosition.xyz;\n#endif';
+THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\nuniform vec3 fogColor;varying vec3 vFogW;uniform vec4 uFog[3];\n#ifdef FOG_EXP2\nuniform float fogDensity;\n#else\nuniform float fogNear;uniform float fogFar;\n#endif\n' + FOG_GLSL + '\n#endif';
+THREE.ShaderChunk.fog_fragment = '#ifdef USE_FOG\ngl_FragColor.rgb=mix(gl_FragColor.rgb,fogTint(vFogW,fogColor,uFog[0],uFog[2]),fogAmount(vFogW,uFog[1]));\n#endif';
+
 export function canvasTex(w, h, draw) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); return new THREE.CanvasTexture(cv); }
 export const softTex = canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
 export const shadowTex = canvasTex(128, 128, (g) => { const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(0.5, 'rgba(0,0,0,.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); });
