@@ -8,7 +8,7 @@ import { buildScene } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
 
-export const player = { x: 2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
+export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0 };
 /* sipT: 0→1 한 모금 진행. holding 이면 0.5(입에 닿은 순간)에서 멈춰 계속 마신다. exhale: 남은 내뱉기 시간 */
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, lastSipSfx: 0, lastTargetId: null };
