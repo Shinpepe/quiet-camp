@@ -4,7 +4,7 @@ import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch } from './util.js';
 import { terrainH } from './terrain.js';
 import { makeItem } from './props.js';
-import { buildScene } from './scene.js';
+import { buildScene, IBL_STRENGTH } from './scene.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
 
 export const player = { x: 2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
@@ -14,7 +14,6 @@ const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
 
-/* ── 입력 ── */
 export function bindInput() {
   addEventListener('keydown', e => {
     keys[e.code] = true;
@@ -52,7 +51,6 @@ export function bindInput() {
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
 
-/* ── 상호작용 ── */
 const fwd = new THREE.Vector3(), toT = new THREE.Vector3();
 export function currentTarget() {
   if (state.mode !== 'walk' || cam.t < 1) return null;
@@ -80,12 +78,15 @@ function renderTrunk() {
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
   if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
-function pickItem(type) { state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
+function pickItem(type) {
+  state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand();
+  it.traverse(o => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = IBL_STRENGTH; });
+  if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다');
+}
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; }
 export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.2, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.22, -0.45); h.rotation.set(0, 0, 0); } }
 function sip() { anim.sipT = 0; if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); }
 
-/* ── HUD ── */
 export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
 export function updateHUD() {
   $('#capText').textContent = BG[state.bg].name + ' — ' + TIME[state.time].name;
@@ -111,8 +112,6 @@ function takePhoto() {
   const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${state.time}.png`; a.click();
   setTimeout(() => { hud.classList.remove('photo'); showToast('사진을 저장했다'); }, 250);
 }
-
-/* ── 메뉴 ── */
 function renderMenu() {
   const bl = $('#bgList'); bl.innerHTML = '';
   Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div><div class="nm">${b.name}</div><div class="ds">${b.ds}</div></div>`; d.onclick = () => { if (state.bg === b.key) return; state.bg = b.key; renderMenu(); previewRebuild(); }; bl.append(d); });
@@ -136,7 +135,6 @@ export function startGame() {
   }, 700);
 }
 
-/* ── 이동 / 충돌 ── */
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }
 function blockedAt(x, z) {

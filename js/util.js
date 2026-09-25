@@ -8,24 +8,23 @@ export const wrapPI = a => Math.atan2(Math.sin(a), Math.cos(a));
 export const isTouch = 'ontouchstart' in window && !matchMedia('(pointer:fine)').matches;
 export const SEED = Math.random() * 100;
 
-/* ── CPU 노이즈 ── */
 export function hash(x, y) { const n = Math.sin(x * 127.1 + y * 311.7 + SEED) * 43758.5453; return n - Math.floor(n); }
 export function vnoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf); const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
 export function fbm(x, y, o) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < (o || 4); i++) { s += a * vnoise(x * f, y * f); a *= 0.5; f *= 2.1; } return s; }
 export function ridge(x, y) { let s = 0, a = 0.55, f = 1, w = 1; for (let i = 0; i < 5; i++) { let n = 1 - Math.abs(2 * vnoise(x * f + 31, y * f + 17) - 1); n *= n; s += n * a * w; w = clamp(n * 1.2, 0, 1); a *= 0.5; f *= 2.05; } return s; }
 
-/* ── GPU 노이즈 (셰이더에 삽입) ── */
 export const NOISE_GLSL = `
 float hashg(vec2 p){vec3 p3=fract(vec3(p.xyx)*0.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float vnoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hashg(i),hashg(i+vec2(1,0)),f.x),mix(hashg(i+vec2(0,1)),hashg(i+vec2(1,1)),f.x),f.y);}`;
+/* sRGB ↔ 선형 변환 (하늘·물 셰이더가 최종 패스의 sRGB 변환을 상쇄하는 데 사용) */
+export const SRGB_GLSL = `
+vec3 srgb2lin(vec3 c){return mix(c/12.92,pow((c+0.055)/1.055,vec3(2.4)),step(0.04045,c));}`;
 
-/* ── 캔버스 텍스처 ── */
 export function canvasTex(w, h, draw) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); return new THREE.CanvasTexture(cv); }
 export const softTex = canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
 export const shadowTex = canvasTex(128, 128, (g) => { const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(0.5, 'rgba(0,0,0,.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); });
 export const cloudTex = canvasTex(256, 128, (g) => { for (let i = 0; i < 14; i++) { const x = 40 + Math.random() * 176, y = 50 + Math.random() * 40, r = 22 + Math.random() * 30; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 128); } });
 
-/* ── 재질 / 지오메트리 헬퍼 ── */
 export const std = (color, extra) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.9, flatShading: true }, extra || {}));
 export const smoothM = (color, extra) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.6 }, extra || {}));
 export const METAL = () => new THREE.MeshStandardMaterial({ color: 0x2a2b2e, metalness: 0.65, roughness: 0.35 });

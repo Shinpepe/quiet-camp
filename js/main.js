@@ -6,27 +6,24 @@ import { createPost } from './post.js';
 import { spawnFlock } from './props.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, resetHand } from './game.js';
 
-/* ── 렌더러 ── */
 const canvas = $('#c');
 const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.NoToneMapping;   // 톤매핑은 post.js 최종 패스에서
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 단일 파일과 동일. sRGB 변환만 post.js 에서.
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
 ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
 ctx.post = createPost(renderer, camera);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); });
 
-/* ── 루프 ── */
 let last = performance.now(), T = 0;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene; if (!scene) return; T += dt; W.uTime.value = T; ctx.post.update(T);
   const hand = ctx.hand;
-
   if (!ctx.running) { const a = T * 0.06; camera.position.set(Math.sin(a) * 9.5, 2.3 + Math.sin(T * 0.13) * 0.3, 2 + Math.cos(a) * 9.5); camera.lookAt(0, 0.9, 0.3); }
   else {
     if (cam.t < 1) {
@@ -75,7 +72,6 @@ function loop(now) {
   ctx.post.render();
 }
 
-/* ── 부팅 ── */
 bindInput();
 $('#loading').classList.add('on');
 setTimeout(() => { buildScene(state.bg, state.time); $('#loading').classList.remove('on'); requestAnimationFrame(loop); }, 50);

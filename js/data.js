@@ -7,14 +7,14 @@ export const BG = {
     water: null, grass: null, palms: 0, bushes: 0, rocks: 12, pines: 480, leafs: 0, birds: false, snow: true, fireflies: false, ambience: 'wind' },
 };
 
-// amb/hemi 는 하늘 기반 환경광(IBL)이 추가되면서 이전보다 낮춰둔 값
+/* amb/hemi 는 단일 파일 버전과 동일 */
 export const TIME = {
-  afternoon: { key: 'afternoon', name: '화창한 오후', ic: '☀️', top: 0x2b6fd6, bottom: 0xd8edff, sun: [0.45, 0.8, -0.35], sunColor: 0xfff3dc, sunI: 1.3, amb: 0.3, hemi: 0.35, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 0.5, fog: 0xd8edff, fogFar: 950, exposure: 1.0, waterMul: 1, cloud: 0xffffff, cloudOp: 0.85,
-    grade: { tint: [1, 1, 1], sat: 1.05, con: 1.02, bloom: 0.35 } },
-  sunset:    { key: 'sunset', name: '노을지는 저녁', ic: '🌇', top: 0x2b2557, bottom: 0xff8c4c, sun: [0.35, 0.14, -1], sunColor: 0xffa25a, sunI: 1.2, amb: 0.16, hemi: 0.18, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 0.7, tentLamp: 0.45, fireI: 1.5, fog: 0xf7925e, fogFar: 880, exposure: 0.95, waterMul: 0.75, cloud: 0xffb896, cloudOp: 0.8,
-    grade: { tint: [1.04, 0.98, 0.94], sat: 1.1, con: 1.04, bloom: 0.55 } },
-  night:     { key: 'night', name: '별이 빛나는 밤', ic: '🌌', top: 0x030614, bottom: 0x18243b, sun: [-0.4, 0.55, -0.6], sunColor: 0x93aaff, sunI: 0.35, amb: 0.05, hemi: 0.09, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 1.8, tentLamp: 0.9, fireI: 2.4, fog: 0x0c1426, fogFar: 720, exposure: 0.9, waterMul: 0.3, cloud: 0x2e3a58, cloudOp: 0.35,
-    grade: { tint: [0.93, 0.97, 1.08], sat: 0.95, con: 1.05, bloom: 0.7 } },
+  afternoon: { key: 'afternoon', name: '화창한 오후', ic: '☀️', top: 0x2b6fd6, bottom: 0xd8edff, sun: [0.45, 0.8, -0.35], sunColor: 0xfff3dc, sunI: 1.3, amb: 0.42, hemi: 0.5, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 0.5, fog: 0xd8edff, fogFar: 950, exposure: 1.0, waterMul: 1, cloud: 0xffffff, cloudOp: 0.85,
+    grade: { tint: [1, 1, 1], sat: 1.04, con: 1.0, bloom: 0.3 } },
+  sunset:    { key: 'sunset', name: '노을지는 저녁', ic: '🌇', top: 0x2b2557, bottom: 0xff8c4c, sun: [0.35, 0.14, -1], sunColor: 0xffa25a, sunI: 1.2, amb: 0.22, hemi: 0.26, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 0.7, tentLamp: 0.45, fireI: 1.5, fog: 0xf7925e, fogFar: 880, exposure: 0.95, waterMul: 0.75, cloud: 0xffb896, cloudOp: 0.8,
+    grade: { tint: [1.03, 0.99, 0.96], sat: 1.08, con: 1.02, bloom: 0.45 } },
+  night:     { key: 'night', name: '별이 빛나는 밤', ic: '🌌', top: 0x030614, bottom: 0x18243b, sun: [-0.4, 0.55, -0.6], sunColor: 0x93aaff, sunI: 0.35, amb: 0.07, hemi: 0.12, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 1.8, tentLamp: 0.9, fireI: 2.4, fog: 0x0c1426, fogFar: 720, exposure: 0.9, waterMul: 0.3, cloud: 0x2e3a58, cloudOp: 0.35,
+    grade: { tint: [0.96, 0.98, 1.05], sat: 0.97, con: 1.02, bloom: 0.6 } },
 };
 
 export const ITEMS = {

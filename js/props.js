@@ -157,7 +157,6 @@ export function makeItem(type) {
   g.add(emitter); return g;
 }
 
-/* ── 파티클 ── */
 export class Particles {
   constructor(n, opt) {
     this.n = n; this.pos = new Float32Array(n * 3); this.vel = new Float32Array(n * 3); this.life = new Float32Array(n); this.max = new Float32Array(n); this.i = 0;
@@ -179,8 +178,6 @@ export class Particles {
     this.mesh.geometry.attributes.position.needsUpdate = true;
   }
 }
-
-/* ── 새 ── */
 export const wingGeo = (() => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0.6, 0.04, 0.24, 0.6, 0.04, -0.24]), 3)); g.computeVertexNormals(); return g; })();
 export const birdMat = new THREE.MeshBasicMaterial({ color: 0x1c1c22, side: THREE.DoubleSide });
 export function spawnFlock() {

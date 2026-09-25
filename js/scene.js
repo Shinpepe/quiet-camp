@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { ctx, settings } from './state.js';
 import { BG, TIME } from './data.js';
-import { rnd, std, shadowed, softTex, cloudTex } from './util.js';
+import { rnd, std, shadowed, softTex, cloudTex, SRGB_GLSL } from './util.js';
 import { makeGround, makeWater, terrainH } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, contactShadow, Particles, wingGeo, birdMat } from './props.js';
 import { startCrackle } from './audio.js';
+
+/* 하늘 기반 환경광 세기. 0 이면 단일 파일 버전과 조명이 완전히 같아진다. */
+export const IBL_STRENGTH = 0.35;
 
 function disposeScene() {
   const scene = ctx.scene; if (!scene) return;
@@ -22,28 +25,27 @@ export function buildScene(bgKey, timeKey) {
   ctx.renderer.toneMappingExposure = tm.exposure;
   const sunDir = new THREE.Vector3(...tm.sun).normalize();
 
-  /* 하늘 — 최종 패스의 ACES를 미리 역보정해서 단일 파일 버전과 같은 색이 나오게 */
+  /* 하늘 — 단일 파일에서 원본 색 그대로 출력됐으므로, 최종 패스의 sRGB 변환을 상쇄하도록 sRGB→선형만 적용 */
   const skyMat = new THREE.ShaderMaterial({
-    uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow }, uExp: { value: tm.exposure }, uComp: { value: 1 } },
+    uniforms: { top: { value: new THREE.Color(tm.top) }, bottom: { value: new THREE.Color(tm.bottom) }, sunDir: { value: sunDir }, sunColor: { value: new THREE.Color(tm.disc) }, glow: { value: tm.glow }, uLin: { value: 1 } },
     vertexShader: 'varying vec3 vP;void main(){vP=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: `uniform vec3 top,bottom,sunDir,sunColor;uniform float glow,uExp,uComp;varying vec3 vP;
-      vec3 unaces(vec3 y){y=clamp(y,0.0,0.985);vec3 a=2.51-2.43*y;vec3 b=0.03-0.59*y;return (-b+sqrt(b*b+0.56*a*y))/(2.0*a);}
+    fragmentShader: SRGB_GLSL + `uniform vec3 top,bottom,sunDir,sunColor;uniform float glow,uLin;varying vec3 vP;
       void main(){vec3 d=normalize(vP);float h=d.y;float t=pow(max(h,0.0),0.45);vec3 col=mix(bottom,top,t);
       float s=max(dot(d,sunDir),0.0);col+=sunColor*glow*(pow(s,6.0)*0.35+pow(s,40.0)*0.7)*(1.0-t*0.6);
-      col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));vec3 lin=pow(col,vec3(2.2));
-      gl_FragColor=vec4(uComp>0.5?unaces(lin)*0.6/uExp:lin,1.0);}`,
+      col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));col=clamp(col,0.0,1.0);
+      gl_FragColor=vec4(uLin>0.5?srgb2lin(col):col,1.0);}`,
     side: THREE.BackSide, depthWrite: false });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat));
 
-  /* 환경광 (IBL): 역보정 없는 순수 선형 하늘로 굽기 */
-  try {
-    const pm = new THREE.PMREMGenerator(ctx.renderer), envScene = new THREE.Scene();
-    const envMat = skyMat.clone(); envMat.uniforms.uComp.value = 0;
-    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), envMat));
-    scene.environment = pm.fromScene(envScene, 0.04).texture; pm.dispose(); envMat.dispose();
-  } catch (e) { console.warn('IBL skipped', e); }
+  /* 환경광 (IBL) */
+  if (IBL_STRENGTH > 0) {
+    try {
+      const pm = new THREE.PMREMGenerator(ctx.renderer), envScene = new THREE.Scene();
+      envScene.add(new THREE.Mesh(new THREE.SphereGeometry(40, 32, 16), skyMat));
+      scene.environment = pm.fromScene(envScene, 0.04).texture; pm.dispose();
+    } catch (e) { console.warn('IBL skipped', e); }
+  }
 
-  /* 빛 */
   const sun = new THREE.DirectionalLight(tm.sunColor, tm.sunI); sun.position.copy(sunDir).multiplyScalar(90); sun.castShadow = settings.shadow;
   Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 260 }); sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02;
   scene.add(sun, sun.target);
@@ -61,14 +63,12 @@ export function buildScene(bgKey, timeKey) {
   const nC = timeKey === 'night' ? 6 : 14;
   for (let i = 0; i < nC; i++) { const c = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, color: tm.cloud, transparent: true, opacity: tm.cloudOp * rnd(0.6, 1), fog: false, depthWrite: false })); const a = rnd(0, Math.PI * 2), r = rnd(600, 1300); c.position.set(Math.cos(a) * r, rnd(220, 420), Math.sin(a) * r); const s = rnd(260, 520); c.scale.set(s, s * 0.45, 1); scene.add(c); W.clouds.push(c); }
 
-  /* 지형 · 물 · 식생 */
   scene.add(makeGround(cfg));
   if (cfg.water) { W.water = makeWater(cfg.water, tm, W.uTime); scene.add(W.water); }
   makeVegetation(cfg);
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
   if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, terrainH(x, z, cfg) + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
 
-  /* 캠프 */
   const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);
   const chair = makeChair(); chair.position.set(1.5, 0, 0.8); scene.add(chair);
   const table = makeTable(); table.position.set(0.6, 0, 0.5); scene.add(table);
@@ -78,7 +78,6 @@ export function buildScene(bgKey, timeKey) {
   makeProps();
   contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(-3.25, 1.4, 0.7, 0.7, 0.5);
 
-  /* 파티클 */
   W.steam = new Particles(160, { color: 0xffffff, size: 0.05, opacity: 0.32 }); scene.add(W.steam.mesh);
   W.smoke = new Particles(260, { color: 0xc9c9d2, size: 0.09, opacity: 0.22 }); scene.add(W.smoke.mesh);
   W.fire = new Particles(160, { color: 0xff8c2a, size: 0.2, opacity: 0.5, blending: THREE.AdditiveBlending }); scene.add(W.fire.mesh);
@@ -96,6 +95,9 @@ export function buildScene(bgKey, timeKey) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.ff = new THREE.Points(g, new THREE.PointsMaterial({ map: softTex, color: 0xd6ff7a, size: 0.14, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })); W.ff.frustumCulled = false; scene.add(W.ff);
   }
+
+  /* IBL 세기를 모든 표준 재질에 적용 */
+  if (scene.environment) scene.traverse(o => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = IBL_STRENGTH; });
 
   W.interact = [
     { id: 'trunk', pos: [0, 1.0, 10.9], r: 2.6, label: () => '트렁크 열기' },
