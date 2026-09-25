@@ -4,7 +4,7 @@ import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch } from './util.js';
 import { terrainH } from './terrain.js';
 import { makeItem } from './props.js';
-import { buildScene, IBL_STRENGTH } from './scene.js';
+import { buildScene, applyPostMode, IBL_STRENGTH } from './scene.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCrackle, sfx } from './audio.js';
 
 export const player = { x: 2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
@@ -46,7 +46,7 @@ export function bindInput() {
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
   $('#shadow').onclick = () => { settings.shadow = !settings.shadow; $('#shadow').classList.toggle('on', settings.shadow); $('#shadowV').textContent = settings.shadow ? '켜짐' : '꺼짐'; ctx.renderer.shadowMap.enabled = settings.shadow; previewRebuild(); };
-  $('#bloom').onclick = () => { settings.bloom = !settings.bloom; $('#bloom').classList.toggle('on', settings.bloom); $('#bloomV').textContent = settings.bloom ? '켜짐' : '꺼짐'; ctx.post.setBloom(settings.bloom); };
+  $('#post').onclick = () => { settings.post = !settings.post; $('#post').classList.toggle('on', settings.post); $('#postV').textContent = settings.post ? '켜짐 (실험)' : '꺼짐 (실험)'; applyPostMode(); };
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
@@ -80,7 +80,7 @@ function renderTrunk() {
 }
 function pickItem(type) {
   state.item = type; ctx.hand.clear(); const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand();
-  it.traverse(o => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = IBL_STRENGTH; });
+  if (IBL_STRENGTH > 0) it.traverse(o => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.material.envMapIntensity = IBL_STRENGTH; });
   if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다');
 }
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; }
@@ -108,7 +108,8 @@ function showPause() { ctx.paused = true; $('#pause').classList.add('on'); $('#p
 function hidePause() { ctx.paused = false; $('#pause').classList.remove('on'); }
 function takePhoto() {
   if (!ctx.running) return; const hud = $('#hud'); hud.classList.add('photo');
-  ctx.post.render(); const url = canvas().toDataURL('image/png');
+  if (settings.post) ctx.post.render(); else ctx.renderer.render(ctx.scene, ctx.camera);
+  const url = canvas().toDataURL('image/png');
   const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${state.time}.png`; a.click();
   setTimeout(() => { hud.classList.remove('photo'); showToast('사진을 저장했다'); }, 250);
 }
