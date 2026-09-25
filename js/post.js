@@ -30,6 +30,9 @@ export function createPost(renderer, camera) {
   gtao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1, thickness: 1, scale: 1.2, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, radiusExponent: 1, rings: 2, samples: 12 });
   gtao.blendIntensity = 0.75; gtao.enabled = settings.ao;
+  /* AO 용 노멀/깊이 패스는 기본이 앞면만 그려서, 텐트 안에서 보면 벽 안쪽 면이 깊이 버퍼에 없고
+     그 자리에 벽 너머 물체(차·나무)의 깊이가 들어가 벽 위에 그 형태의 음영이 찍혔다. 양면으로 그리면 사라진다. */
+  if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
   if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
   const bokeh = new BokehPass(dummy, camera, { focus: 0.002, aperture: 1.2, maxblur: 0.01 }); bokeh.enabled = false;
   /* 블룸: 문턱을 올려 눈·모래 같은 밝은 지면은 번지지 않고 랜턴·불·해만 번지게 */

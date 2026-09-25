@@ -22,7 +22,7 @@ export function instanced(geo, mat, list, cast) {
 function mergeGeos(list) {
   const pos = [], col = [], uv = [], c = new THREE.Color();
   list.forEach(p => {
-    const g = p.geo.toNonIndexed(); g.applyMatrix4(p.matrix);
+    const g = p.geo.index ? p.geo.toNonIndexed() : p.geo; g.applyMatrix4(p.matrix);
     const pa = g.attributes.position, ua = g.attributes.uv, k = p.uvs || 1; let minY = 1e9, maxY = -1e9;
     if (p.grad) for (let i = 0; i < pa.count; i++) { minY = Math.min(minY, pa.getY(i)); maxY = Math.max(maxY, pa.getY(i)); }
     c.set(p.color);
@@ -66,28 +66,28 @@ function grassGeo() {
 }
 
 /* ── 야자수 ── */
-function frondGeo(L, dead) {
+function frondGeo(L) {
   const pos = [], col = [], uv = [];
   const rib = t => new THREE.Vector3(L * t, L * (0.32 * t - 0.62 * t * t), 0);
   const tri = (a, b, c, ca, cb, cc) => { pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z); col.push(...ca, ...cb, ...cc); uv.push(0, 0, 1, 0, 0.5, 1); };
-  const mul = dead ? [0.62, 0.5, 0.32] : [1, 1, 1], k = (c) => [c[0] * mul[0], c[1] * mul[1], c[2] * mul[2]];
-  const SEG = 10, cr = k([0.6, 0.55, 0.32]);
+  const SEG = 10, cr = [0.6, 0.55, 0.32];
   for (let i = 0; i < SEG; i++) { const t0 = i / SEG, t1 = (i + 1) / SEG, w0 = 0.022 * (1 - t0 * 0.7), w1 = 0.022 * (1 - t1 * 0.7); const a = rib(t0), b = rib(t1); const a1 = a.clone().setZ(-w0), a2 = a.clone().setZ(w0), b1 = b.clone().setZ(-w1), b2 = b.clone().setZ(w1); tri(a1, b1, b2, cr, cr, cr); tri(a1, b2, a2, cr, cr, cr); }
-  const N = 18, cb = k([0.74, 0.8, 0.62]), ct = k([0.98, 1.06, 0.86]);
+  const N = 18, cb = [0.74, 0.8, 0.62], ct = [0.98, 1.06, 0.86];
   for (let i = 0; i < N; i++) for (const s of [-1, 1]) {
     const t = 0.1 + 0.88 * (i + (s > 0 ? 0.5 : 0)) / N, P = rib(t), lf = L * 0.27 * (1 - 0.55 * t) * rnd(0.85, 1.1), w = L * 0.032;
-    const d = new THREE.Vector3(0.45, -(dead ? 0.9 : 0.55) - 0.35 * t, s * 0.85).normalize(), n = new THREE.Vector3(1, 0, 0);
+    const d = new THREE.Vector3(0.45, -0.55 - 0.35 * t, s * 0.85).normalize(), n = new THREE.Vector3(1, 0, 0);
     const tip = P.clone().addScaledVector(d, lf), b1 = P.clone().addScaledVector(n, -w * 0.5), b2 = P.clone().addScaledVector(n, w * 0.5);
     const m1 = P.clone().addScaledVector(d, lf * 0.5).addScaledVector(n, -w * 0.4), m2 = P.clone().addScaledVector(d, lf * 0.5).addScaledVector(n, w * 0.4);
     tri(b1, m1, b2, cb, ct, cb); tri(b2, m1, m2, cb, ct, ct); tri(m1, tip, m2, ct, ct, ct);
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); return g;
 }
+/* 잎 11장을 둘레에 고르게, 전부 위로 뻗은 뒤 끝이 처지는 모양. (아래로 늘어진 마른 잎 2장은 뺐다) */
 function crownGeo(L) {
-  const pos = [], col = [], uv = [], m = new THREE.Matrix4(), rz = new THREE.Matrix4(), n = 10;
-  for (let i = 0; i < n + 2; i++) {
-    const dead = i >= n, g = frondGeo(L * rnd(0.85, 1.15), dead);
-    m.makeRotationY(i / n * Math.PI * 2 + rnd(-0.2, 0.2)).multiply(rz.makeRotationZ(dead ? rnd(-1.1, -0.8) : rnd(0.25, 0.75))); g.applyMatrix4(m);
+  const pos = [], col = [], uv = [], m = new THREE.Matrix4(), rz = new THREE.Matrix4(), n = 11;
+  for (let i = 0; i < n; i++) {
+    const g = frondGeo(L * rnd(0.85, 1.15));
+    m.makeRotationY(i / n * Math.PI * 2 + rnd(-0.2, 0.2)).multiply(rz.makeRotationZ(rnd(0.2, 0.75))); g.applyMatrix4(m);
     pushAll(pos, g.attributes.position.array); pushAll(col, g.attributes.color.array); pushAll(uv, g.attributes.uv.array);
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); return g;
