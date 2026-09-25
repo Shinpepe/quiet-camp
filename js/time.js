@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { TIME, KEYS } from './data.js';
 
-const NUM = ['sunI', 'amb', 'hemi', 'ibl', 'stars', 'sunSize', 'glow', 'lantern', 'tentLamp', 'fireI', 'fogFar', 'exposure', 'waterMul', 'cloudCover', 'mist'];
+const NUM = ['sunI', 'amb', 'hemi', 'ibl', 'stars', 'sunSize', 'glow', 'lantern', 'tentLamp', 'fireI', 'fogFar', 'fogH', 'insc', 'exposure', 'waterMul', 'cloudCover', 'mist'];
 const COL = ['top', 'bottom', 'sunColor', 'disc', 'fog', 'cloudLit', 'cloudShade'];
 const _a = new THREE.Color(), _b = new THREE.Color();
 const ss = x => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
