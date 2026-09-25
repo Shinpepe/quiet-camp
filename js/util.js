@@ -19,6 +19,19 @@ export const NOISE_GLSL = `
 float hashg(vec2 p){vec3 p3=fract(vec3(p.xyx)*0.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float vnoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hashg(i),hashg(i+vec2(1,0)),f.x),mix(hashg(i+vec2(0,1)),hashg(i+vec2(1,1)),f.x),f.y);}`;
 
+/* 하늘 색 함수 — 하늘 돔과 물 반사가 같은 함수를 쓴다. cloudK 로 구름 세기를 조절(물은 흐리게). 별은 여기 없으니 물에 비치지 않는다. */
+export const SKY_GLSL = `
+float cloudD(vec2 p,float cover){float n=vnoise(p)*0.5+vnoise(p*2.1+vec2(3.1,7.3))*0.25+vnoise(p*4.3+vec2(9.7,1.3))*0.125+vnoise(p*8.9+vec2(4.2,5.5))*0.0625;return smoothstep(0.66-cover*0.4,0.74,n);}
+vec3 skyColor(vec3 d,vec3 top,vec3 bottom,vec3 sunDir,vec3 moonDir,vec3 sunCol,vec3 cloudLit,vec3 cloudShade,float glow,float moonK,float cover,float time,float cloudK){
+  float h=d.y;float t=pow(max(h,0.0),0.45);vec3 col=mix(bottom,top,t);
+  float s=max(dot(d,sunDir),0.0);col+=sunCol*glow*(pow(s,6.0)*0.35+pow(s,40.0)*0.9)*(1.0-t*0.6);
+  float ms=max(dot(d,moonDir),0.0);col+=vec3(0.5,0.6,0.85)*moonK*(pow(ms,8.0)*0.12+pow(ms,120.0)*0.4);
+  col=mix(col,bottom*0.9,smoothstep(0.03,-0.2,h));
+  if(h>0.0&&cloudK>0.0){vec2 p=d.xz/(h+0.12)*2.2+vec2(time*0.006,time*0.0025);float dens=cloudD(p,cover);
+    vec3 L=sunDir.y>-0.05?sunDir:moonDir;vec2 ts=(L.xz/(max(L.y,0.05)+0.12))*0.12;float d2=cloudD(p+ts,cover);
+    vec3 cc=mix(cloudShade,cloudLit,1.0-0.75*d2);col=mix(col,cc,dens*smoothstep(0.0,0.2,h)*cloudK);}
+  return col;}`;
+
 export function canvasTex(w, h, draw) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); return new THREE.CanvasTexture(cv); }
 export const softTex = canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
 export const shadowTex = canvasTex(128, 128, (g) => { const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(0.5, 'rgba(0,0,0,.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); });
@@ -38,7 +51,7 @@ export function jitter(geo, amt) { const p = geo.attributes.position; for (let i
 export function mergeParts(parts) {
   const pos = [], col = [], uv = [];
   parts.forEach(p => {
-    const g = p.geo.toNonIndexed(); const m = new THREE.Matrix4().compose(new THREE.Vector3(p.x || 0, p.y || 0, p.z || 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(p.rx || 0, p.ry || 0, p.rz || 0)), new THREE.Vector3(p.s || 1, p.sy || p.s || 1, p.s || 1));
+    const g = p.geo.index ? p.geo.toNonIndexed() : p.geo; const m = new THREE.Matrix4().compose(new THREE.Vector3(p.x || 0, p.y || 0, p.z || 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(p.rx || 0, p.ry || 0, p.rz || 0)), new THREE.Vector3(p.s || 1, p.sy || p.s || 1, p.s || 1));
     const pa = g.attributes.position, ua = g.attributes.uv, k = p.uvs || 1; let minY = 1e9, maxY = -1e9; for (let i = 0; i < pa.count; i++) { minY = Math.min(minY, pa.getY(i)); maxY = Math.max(maxY, pa.getY(i)); }
     const c = new THREE.Color(p.color);
     for (let i = 0; i < pa.count; i++) { const sh = p.grad ? 0.7 + 0.4 * (pa.getY(i) - minY) / (maxY - minY + 1e-6) : 1; col.push(c.r * sh, c.g * sh, c.b * sh); if (ua) uv.push(ua.getX(i) * k, ua.getY(i) * k); else uv.push(0, 0); }
