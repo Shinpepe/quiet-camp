@@ -82,27 +82,39 @@ function loop(now) {
     }
   }
 
+  /* ── 손에 든 것 ── */
   if (W.item && ctx.running) {
     const type = state.item, ud = W.item.userData;
-    if (anim.sipT !== null) {
-      const atMouth = anim.holding && anim.sipT >= 0.5 && ud.amount > 0 && !ctx.paused;
-      if (atMouth) { anim.sipT = 0.5; anim.holdT += dt; } else anim.sipT += dt / 1.7;
-      const k = Math.sin(Math.PI * Math.min(anim.sipT, 1));
-      if (type === 'smoke') { basePos.set(0.2, -0.13, -0.4); sipPos.set(0.04, -0.045, -0.2); hand.rotation.set(0, 0.6 + k * 0.5, 0.15 + k * 0.1); }
-      else { basePos.set(0.22, -0.2, -0.45); sipPos.set(0.06, -0.08, -0.27); hand.rotation.set(k * 0.55, 0, k * -0.1); }
-      hand.position.lerpVectors(basePos, sipPos, k);
-      if (k > 0.85 && ud.amount > 0) {
-        const rate = type === 'smoke' ? 0.07 : type === 'coffee' ? 0.22 : 0.28;
-        ud.amount = Math.max(0, ud.amount - rate * dt); ud.setAmount(ud.amount);
-        if (type !== 'smoke' && T - anim.lastSipSfx > 0.75) { anim.lastSipSfx = T; sfx(type === 'coffee' ? 'sip' : 'gulp'); }
-        if (ud.amount === 0) { if (type === 'smoke') startExhale(anim.holdT); itemEmptied(); }
+    if (type === 'sparkler') {
+      /* 불꽃놀이 스틱: 켜져 있으면 끝에서부터 타 들어가고, 불티가 사방으로 튀며, 손 주변이 밝아진다 (약 40초) */
+      if (ud.lit && !ctx.paused) {
+        ud.amount = Math.max(0, ud.amount - dt / 40); ud.setAmount(ud.amount);
+        ud.emitter.getWorldPosition(tmpV);
+        const n = 2 + (Math.random() < 0.6 ? 1 : 0); for (let i = 0; i < n; i++) W.sparks.spawn(tmpV);
+        ud.light.intensity = 2.0 + Math.random() * 1.3; ud.glow.material.opacity = 0.6 + Math.random() * 0.4; ud.glow.scale.setScalar(0.12 + Math.random() * 0.05);
+        if (ud.amount === 0) { ud.setLit(false); itemEmptied(); }
       }
-      if (W.item && anim.sipT >= 1) { anim.sipT = null; anim.holding = false; if (type === 'smoke') startExhale(anim.holdT); else sfx('gulp'); resetHand(); }
-    }
-    if (W.item) {
-      W.item.userData.emitter.getWorldPosition(tmpV);
-      if (type === 'coffee' && ud.amount > 0.02 && T - anim.lastSteam > 0.07) { anim.lastSteam = T; W.steam.spawn(tmpV, { x: 0, y: 0.22, z: 0 }, 0.02, 2.2); }
-      if (type === 'smoke') { const puff = anim.sipT !== null && anim.sipT > 0.35; ud.tip.material.color.setHex(puff ? 0xffb060 : 0xff5a1a); ud.glow.material.opacity = puff ? 0.95 : 0.5 + 0.1 * Math.sin(T * 6); if (T - anim.lastSteam > (puff ? 0.03 : 0.12)) { anim.lastSteam = T; W.smoke.spawn(tmpV, { x: 0.02, y: 0.16, z: 0 }, 0.01, 3.2, 0.03, 0.02, 0.16, 0.22); } }
+    } else {
+      if (anim.sipT !== null) {
+        const atMouth = anim.holding && anim.sipT >= 0.5 && ud.amount > 0 && !ctx.paused;
+        if (atMouth) { anim.sipT = 0.5; anim.holdT += dt; } else anim.sipT += dt / 1.7;
+        const k = Math.sin(Math.PI * Math.min(anim.sipT, 1));
+        if (type === 'smoke') { basePos.set(0.2, -0.13, -0.4); sipPos.set(0.04, -0.045, -0.2); hand.rotation.set(0, 0.6 + k * 0.5, 0.15 + k * 0.1); }
+        else { basePos.set(0.22, -0.2, -0.45); sipPos.set(0.06, -0.08, -0.27); hand.rotation.set(k * 0.55, 0, k * -0.1); }
+        hand.position.lerpVectors(basePos, sipPos, k);
+        if (k > 0.85 && ud.amount > 0) {
+          const rate = type === 'smoke' ? 0.07 : type === 'coffee' ? 0.22 : 0.28;
+          ud.amount = Math.max(0, ud.amount - rate * dt); ud.setAmount(ud.amount);
+          if (type !== 'smoke' && T - anim.lastSipSfx > 0.75) { anim.lastSipSfx = T; sfx(type === 'coffee' ? 'sip' : 'gulp'); }
+          if (ud.amount === 0) { if (type === 'smoke') startExhale(anim.holdT); itemEmptied(); }
+        }
+        if (W.item && anim.sipT >= 1) { anim.sipT = null; anim.holding = false; if (type === 'smoke') startExhale(anim.holdT); else sfx('gulp'); resetHand(); }
+      }
+      if (W.item) {
+        ud.emitter.getWorldPosition(tmpV);
+        if (type === 'coffee' && ud.amount > 0.02 && T - anim.lastSteam > 0.07) { anim.lastSteam = T; W.steam.spawn(tmpV, { x: 0, y: 0.22, z: 0 }, 0.02, 2.2); }
+        if (type === 'smoke') { const puff = anim.sipT !== null && anim.sipT > 0.35; ud.tip.material.color.setHex(puff ? 0xffb060 : 0xff5a1a); ud.glow.material.opacity = puff ? 0.95 : 0.5 + 0.1 * Math.sin(T * 6); if (T - anim.lastSteam > (puff ? 0.03 : 0.12)) { anim.lastSteam = T; W.smoke.spawn(tmpV, { x: 0.02, y: 0.16, z: 0 }, 0.01, 3.2, 0.03, 0.02, 0.16, 0.22); } }
+      }
     }
   }
   if (anim.exhale > 0 && ctx.running) {
@@ -110,6 +122,7 @@ function loop(now) {
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);
   }
   if (W.prints) W.prints.update(dt);
+  W.sparks.update(dt);
   W.steam.update(dt, 0.03); W.smoke.update(dt, 0.04); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
   ctx.post.render();
 }
