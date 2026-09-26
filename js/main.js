@@ -4,7 +4,7 @@ import { $, rnd, smooth, wrapPI } from './util.js';
 import { buildScene, applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
-import { spawnFlock, updateFlocks } from './props.js';
+import { spawnFlock, updateFlocks, updateLighthouse } from './props.js';
 import { startAmbience, updateAudio, sfx } from './audio.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep } from './game.js';
 
@@ -46,7 +46,7 @@ function loop(now) {
       if (cam.t >= 1) { player.yaw = cam.yawTo; player.pitch = cam.pitchTo; updateHUD(); anim.lastTargetId = undefined; }
     } else if (state.mode === 'walk' && !ctx.paused) walk(dt);
     camera.rotation.y = player.yaw; camera.rotation.x = player.pitch + Math.sin(T * 0.7) * 0.003; camera.rotation.z = Math.sin(T * 0.5) * 0.002;
-    updatePrompt(); if (!ctx.paused) updateSleep(dt);   // 일시정지 중엔 잠자기도 멈춘다
+    updatePrompt(); if (!ctx.paused) updateSleep(dt);
   }
   camera.updateMatrixWorld();
   applyTime();
@@ -61,6 +61,7 @@ function loop(now) {
   if (W.cfg.birds && W.sunUp) { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
   updateFlocks(dt, T);
   updateMeteors(dt);
+  updateLighthouse(T);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
