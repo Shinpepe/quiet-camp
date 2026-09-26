@@ -108,6 +108,7 @@ function loop(now) {
     anim.exhale -= dt; camera.getWorldDirection(fwdV); tmpV.copy(camera.position).addScaledVector(fwdV, 0.22); tmpV.y -= 0.06;
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);
   }
+  if (W.prints) W.prints.update(dt);
   W.steam.update(dt, 0.03); W.smoke.update(dt, 0.04); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
   ctx.post.render();
 }
