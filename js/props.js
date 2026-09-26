@@ -129,7 +129,7 @@ export function makeFire() {
 
 /* ── 자동차 (앞이 -z) ── */
 export function makeCar() {
-  const W = ctx.W, g = new THREE.Group(), body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.38, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.1 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
+  const W = ctx.W, g = new THREE.Group(), body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.46, metalness: 0.2, clearcoat: 0.8, clearcoatRoughness: 0.28 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x7f9fb8, transparent: true, opacity: 0.28, roughness: 0.03, metalness: 0.0, envMapIntensity: 1.6, side: THREE.DoubleSide });
   const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
   add(new THREE.BoxGeometry(1.9, 0.5, 1.4), body, 0, 0.66, -1.7);
@@ -255,19 +255,24 @@ export function makeDock() {
   return shadowed(g);
 }
 
-/* ── 등대: 바위섬 위 흰 탑에 빨간 띠, 난간·등롱·빨간 지붕, 관리사. 밤에만 켜지고 광선 두 줄기가 돌며 카메라를 스칠 때 번쩍 ── */
+/* ── 등대: 바위섬 위 콘크리트 기초, 흰 탑에 빨간 띠, 난간·등롱·빨간 지붕, 관리사. 밤에만 켜지고 광선 두 줄기가 돈다 ── */
 const beamTex = canvasTex(256, 32, (g, w, h) => {
   const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, 'rgba(255,255,255,.6)'); gr.addColorStop(0.25, 'rgba(255,255,255,.25)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
   const v = g.createLinearGradient(0, 0, 0, h); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.5, 'rgba(0,0,0,1)'); v.addColorStop(1, 'rgba(0,0,0,0)'); g.globalCompositeOperation = 'destination-in'; g.fillStyle = v; g.fillRect(0, 0, w, h);
 });
 export function makeLighthouse() {
   const W = ctx.W, g = new THREE.Group();
-  const white = smoothM(0xf2f0ea, { roughness: 0.7 }), red = smoothM(0xb8322a, { roughness: 0.6 }), dark = std(0x2a2c30, { roughness: 0.6 });
-  const rock = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(13, 1), 0.35), std(0x5a5f66, tex('rock', 3, 3, 0.5))); rock.scale.set(1.3, 0.5, 1); rock.position.y = -2.5; g.add(rock);
+  const white = smoothM(0xf2f0ea, { roughness: 0.7 }), red = smoothM(0xb8322a, { roughness: 0.6 }), dark = std(0x2a2c30, { roughness: 0.6 }), concrete = std(0x8d8a82, { roughness: 0.95 });
+  const rock = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(13, 1), 0.25), std(0x5a5f66, tex('rock', 3, 3, 0.5))); rock.scale.set(1.3, 0.5, 1); rock.position.y = -2.5; g.add(rock);
   for (let i = 0; i < 5; i++) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(2, 4), 0), 0.4), std(0x555a60, tex('rock', 2, 2, 0.5))); const a = rnd(0, 6.3), d = rnd(12, 17); r.position.set(Math.cos(a) * d, rnd(-1.5, 0.5), Math.sin(a) * d * 0.8); r.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(r); }
   const top = 4.0;
+  /* 콘크리트 기초: 바위 속으로 3m 박혀 있어 바위 모양과 무관하게 땅에 붙는다 */
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 3.2, 18), concrete); base.position.y = top - 1.4; g.add(base);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(6.2, 3.2, 7.2), concrete); slab.position.set(4.6, top - 1.4, 2.5); g.add(slab);
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 12, 18), white); tower.position.y = top + 6; g.add(tower);
-  [[3, 1.73], [6.6, 1.6]].forEach(([h, r]) => { const b = new THREE.Mesh(new THREE.CylinderGeometry(r - 0.06, r + 0.02, 1.5, 18), red); b.position.y = top + h; g.add(b); });
+  /* 빨간 띠: 탑 표면보다 6cm 바깥에 같은 기울기로 — 면이 겹치면 깜빡인다 */
+  const rAt = y => 1.8 - 0.4 * (y / 12) + 0.06;
+  [3, 6.6].forEach(h => { const b = new THREE.Mesh(new THREE.CylinderGeometry(rAt(h + 0.75), rAt(h - 0.75), 1.5, 18), red); b.position.y = top + h; g.add(b); });
   const gal = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 1.9, 0.35, 18), dark); gal.position.y = top + 12.1; g.add(gal);
   const rail = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.05, 6, 24), dark); rail.rotation.x = Math.PI / 2; rail.position.y = top + 13.1; g.add(rail);
   for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; g.add(bar([Math.cos(a) * 2.05, top + 12.3, Math.sin(a) * 2.05], [Math.cos(a) * 2.05, top + 13.1, Math.sin(a) * 2.05], 0.03, dark, 4)); }
@@ -402,7 +407,7 @@ export class Smoke {
   }
 }
 
-/* ── 발자국: 곱하기 블렌딩 판을 지면에 얹는다. 시간에 따라 흰색으로 돌아가며 사라진다 ── */
+/* ── 발자국 ── */
 const printTex = canvasTex(64, 128, (g, w, h) => {
   g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
   g.fillStyle = '#000'; g.shadowColor = '#000'; g.shadowBlur = 9;
