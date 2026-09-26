@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
-import { rnd, fbm, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex } from './util.js';
+import { rnd, fbm, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 
@@ -106,14 +106,34 @@ export function makeFire() {
   const pole = METAL(), iron = smoothM(0x3b3b3f, { metalness: 0.7, roughness: 0.4 });
   for (let i = 0; i < 3; i++) { const a = i / 3 * Math.PI * 2 + 0.5; g.add(bar([Math.cos(a) * 0.62, 0.02, Math.sin(a) * 0.62], [0, 1.28, 0], 0.012, pole)); }
   g.add(bar([0, 1.28, 0], [0, 1.0, 0], 0.005, pole, 4));
-  /* 주전자: 회전체 — 볼록한 몸통 + 목 + 뚜껑 */
   const kettle = new THREE.Group();
   kettle.add(new THREE.Mesh(lathe([[0, 0], [0.075, 0], [0.105, 0.02], [0.115, 0.07], [0.1, 0.12], [0.06, 0.145], [0.045, 0.15], [0.045, 0.165], [0, 0.165]]), iron));
   kettle.add(at(new THREE.Mesh(lathe([[0, 0], [0.05, 0], [0.055, 0.01], [0.02, 0.03], [0.012, 0.045], [0, 0.045]]), iron), 0, 0.165, 0));
   kettle.add(bar([0.1, 0.04, 0], [0.19, 0.12, 0], 0.014, iron, 8));
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.006, 6, 16, Math.PI), pole); handle.position.y = 0.16; kettle.add(handle);
   kettle.position.y = 0.85; g.add(kettle);
-  return shadowed(g);
+  shadowed(g);
+  /* 불꽃: 노이즈로 일렁이는 판 4장을 45° 간격으로. 아래는 붉고 위로 노랗게, 위로 갈수록 좁아지며 찢어진다 */
+  const flameMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uTime: W.uTime, uK: { value: 0 }, uPh: { value: 0 } },
+    vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: NOISE_GLSL + `uniform float uTime,uK,uPh;varying vec2 vUv;
+      void main(){float x=vUv.x*2.0-1.0;float y=clamp(vUv.y,0.0,1.0);float t=uTime+uPh;
+        float n=vnoise(vec2(vUv.x*3.0+uPh,y*4.0-t*2.4))*0.6+vnoise(vec2(vUv.x*7.0+3.0,y*9.0-t*3.8))*0.4;
+        float w=(1.0-y)*0.85+0.12;
+        float shape=1.0-smoothstep(w*0.4,w*0.95,abs(x)+(n-0.5)*0.55);
+        float body=shape*(1.0-smoothstep(0.45,1.0,y+(n-0.5)*0.4))*smoothstep(0.0,0.1,y);
+        float core=smoothstep(0.45,1.0,body);
+        vec3 col=mix(vec3(1.0,0.22,0.02),vec3(1.0,0.72,0.18),core);col=mix(col,vec3(1.0,0.95,0.62),pow(core,3.0)*0.85);
+        float a=clamp(body*uK,0.0,1.0);gl_FragColor=vec4(col*a*1.5,a);}`,
+  });
+  W.flames = [];
+  for (let i = 0; i < 4; i++) { const m = flameMat.clone(); m.uniforms.uTime = W.uTime; m.uniforms.uPh.value = i * 1.7; const f = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.0), m); f.position.set(0, 0.62, 0); f.rotation.y = i * Math.PI / 4; f.userData.noAO = true; f.frustumCulled = false; f.castShadow = false; g.add(f); W.flames.push(f); }
+  /* 장작 안쪽 끝이 벌겋게 달아오름 */
+  W.logGlow = [];
+  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.3; const s = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4a10, transparent: true, opacity: 0 })); s.position.set(Math.cos(a + 2.4) * 0.08, 0.38, Math.sin(a + 2.4) * 0.08); s.userData.noAO = true; s.castShadow = false; g.add(s); W.logGlow.push(s); }
+  return g;
 }
 export function makeCar() {
   const W = ctx.W, g = new THREE.Group(), body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.38, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.1 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
