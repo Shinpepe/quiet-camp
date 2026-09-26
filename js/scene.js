@@ -4,7 +4,7 @@ import { BG } from './data.js';
 import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
-import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, contactShadow, Particles, Smoke, Footprints, birdMat } from './props.js';
+import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, contactShadow, Particles, Smoke, Footprints, birdMat } from './props.js';
 import { startCrackle } from './audio.js';
 import { paramsAt, sunDirAt } from './time.js';
 
@@ -16,9 +16,6 @@ const streakTex = canvasTex(128, 16, (g, w, h) => {
 });
 const _fc = new THREE.Color(), _ag = new THREE.Color(0x2fae70);
 
-/* 장소를 바꿀 때 이전 씬의 GPU 자원을 모두 놓는다.
-   재질만 dispose 하면 재질에 딸린 텍스처(tex() 가 재질마다 clone 한 것, 물의 ripple)가 남아 장소를 바꿀수록 메모리가 는다.
-   공유 텍스처(softTex 등)도 함께 dispose 되지만 three 가 다음 사용 때 다시 올리므로 문제없다. */
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
   if (W.envRT) { W.envRT.dispose(); W.envRT = null; }
@@ -50,7 +47,6 @@ export function rebakeEnv() {
   } catch (e) { console.warn('IBL skipped', e); }
 }
 
-/* ── 오로라: 씬을 만들 때마다 커튼 2~4장을 무작위로. 한 장은 항상 정면에 ── */
 function makeAurora(W, scene) {
   const base = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
@@ -90,7 +86,6 @@ function makeAurora(W, scene) {
   }
 }
 
-/* 현재 시각 파라미터(W.tm)를 씬의 모든 것에 반영 — 매 프레임 호출 */
 export function applyTime() {
   const W = ctx.W, cur = W.tm; if (!W.sun) return;
   const sd = sunDirAt(state.clock, W.sunDir), md = sunDirAt(state.clock + 0.5, W.moonDir);
@@ -130,7 +125,6 @@ export function applyTime() {
   if (ctx.post) ctx.post.setTime(cur);
 }
 
-/* ── 별똥별 ── */
 const _r = new THREE.Vector3(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4();
 function spawnMeteor(m) {
   const az = rnd(0, Math.PI * 2), el = rnd(0.3, 1.22);
@@ -167,7 +161,7 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
@@ -205,6 +199,7 @@ export function buildScene(bgKey) {
   if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime, W.heightTex, waterEdge(cfg)); scene.add(W.water); }
   makeVegetation(cfg);
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
+  if (cfg.key === 'beach') { const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh); }
   if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const h = terrainH(x, z, cfg); if (h < 0.1) continue; const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
 
   const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);
@@ -222,7 +217,6 @@ export function buildScene(bgKey) {
   W.fire = new Particles(160, { color: 0xff8c2a, size: 0.2, opacity: 0.5, blending: THREE.AdditiveBlending }); scene.add(W.fire.mesh);
   W.fireCore = new Particles(90, { color: 0xfff2b0, size: 0.11, opacity: 0.75, blending: THREE.AdditiveBlending }); scene.add(W.fireCore.mesh);
   W.embers = new Particles(80, { color: 0xffa040, size: 0.035, opacity: 0.95, blending: THREE.AdditiveBlending }); scene.add(W.embers.mesh);
-  /* 발자국: 눈(푸른 회색, 45초) · 모래(어두운 모래색, 90초) */
   W.prints = cfg.snow ? new Footprints(140, [0.66, 0.7, 0.8], 45) : cfg.key === 'beach' ? new Footprints(140, [0.72, 0.65, 0.55], 90) : null;
   if (W.prints) scene.add(W.prints.mesh);
   if (cfg.snow) {
