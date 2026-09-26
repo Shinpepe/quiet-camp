@@ -8,6 +8,7 @@ import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock,
 import { startCrackle } from './audio.js';
 import { paramsAt, sunDirAt } from './time.js';
 
+/* 별똥별 줄무늬: 오른쪽(머리)이 밝고 왼쪽(꼬리)으로 사라지며, 위아래도 부드럽게 */
 const streakTex = canvasTex(128, 16, (g, w, h) => {
   const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.7, 'rgba(255,255,255,.5)'); gr.addColorStop(1, 'rgba(255,255,255,1)');
   g.fillStyle = gr; g.fillRect(0, 0, w, h);
@@ -26,6 +27,7 @@ function disposeScene() {
   scene.environment = null;
 }
 
+/* 하늘을 큐브맵으로 구워 환경광으로. 시간이 흐르면 몇 초마다 다시 굽는다. */
 export function rebakeEnv() {
   const W = ctx.W; if (!W.skyMat) return;
   try {
@@ -38,20 +40,21 @@ export function rebakeEnv() {
   } catch (e) { console.warn('IBL skipped', e); }
 }
 
-/* ── 오로라: 하늘 높이 걸린 곡선 커튼 세 장. 가로 노이즈 주름 + 아래가 밝고 위로 초록→보라 + 세로 광선 ── */
+/* ── 오로라: 하늘 높이 걸린 곡선 커튼 세 장. 가로 노이즈 주름 + 아래가 밝고 위로 초록→보라 + 세로 광선.
+   좌표를 0..1 로 잘라내고 거듭제곱 밑이 음수가 되지 않게 해서 NaN(검은 얼룩)이 생기지 않게 한다 ── */
 function makeAurora(W, scene) {
   const base = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
     uniforms: { uTime: W.uTime, uStr: { value: 0 }, uSeed: { value: 0 }, cA: { value: new THREE.Color(0x36e08a) }, cB: { value: new THREE.Color(0x7a3cff) } },
     vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
     fragmentShader: NOISE_GLSL + `uniform float uTime,uStr,uSeed;uniform vec3 cA,cB;varying vec2 vUv;
-      void main(){float t=uTime*0.05+uSeed;float x=vUv.x,y=vUv.y;
+      void main(){float t=uTime*0.05+uSeed;float x=clamp(vUv.x,0.0,1.0),y=clamp(vUv.y,0.0,1.0);
         float f=vnoise(vec2(x*5.0+t,0.3+uSeed))*0.55+vnoise(vec2(x*13.0-t*1.6,1.7))*0.3+vnoise(vec2(x*29.0+t*2.4,3.1))*0.15;
         float band=smoothstep(0.32,0.72,f);
-        float vert=smoothstep(0.0,0.1,y)*pow(1.0-y,1.5);
+        float vert=smoothstep(0.0,0.1,y)*pow(max(1.0-y,0.0),1.5);
         float rays=0.65+0.35*vnoise(vec2(x*70.0+t*2.0,y*1.5));
         float ends=smoothstep(0.0,0.1,x)*smoothstep(1.0,0.9,x);
-        float a=band*vert*rays*ends*uStr;
+        float a=clamp(band*vert*rays*ends*uStr,0.0,1.0);
         vec3 col=mix(cA,cB,smoothstep(0.1,0.85,y));
         gl_FragColor=vec4(col*a,a);}`,
   });
@@ -62,7 +65,7 @@ function makeAurora(W, scene) {
     for (let k = 0; k < p.count; k++) { const u = p.getX(k) + 0.5, v = p.getY(k) + 0.5, az = az0 + u * span, y = y0 + Math.sin(u * 5.3 + i) * 90 + Math.sin(u * 11.1 + i * 2) * 40 + v * H; p.setXYZ(k, Math.cos(az) * R, y, Math.sin(az) * R); }
     g.computeVertexNormals();
     const m = base.clone(); m.uniforms.uTime = W.uTime; m.uniforms.uSeed.value = i * 3.7;
-    const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; scene.add(mesh); W.aurora.push(mesh);
+    const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.userData.noAO = true; scene.add(mesh); W.aurora.push(mesh);
   });
 }
 
@@ -72,6 +75,7 @@ export function applyTime() {
   const sd = sunDirAt(state.clock, W.sunDir), md = sunDirAt(state.clock + 0.5, W.moonDir);
   const up = sd.y > 0.0; W.sunUp = sd.y > 0.02;
   const L = up ? sd : md, fade = smooth(0.0, 0.08, Math.abs(L.y));
+  /* 그림자 카메라가 플레이어를 따라간다 (2m 격자로 스냅해 떨림 방지) */
   const tgt = W.sun.target.position; tgt.set(Math.round(ctx.camera.position.x / 2) * 2, 0, Math.round(ctx.camera.position.z / 2) * 2);
   W.sun.position.copy(L).multiplyScalar(90).add(tgt); W.sun.color.copy(cur.sunColor); W.sun.intensity = cur.sunI * fade;
   W.hemi.color.copy(cur.top); W.hemi.intensity = cur.hemi; W.amb.intensity = cur.amb;
@@ -90,9 +94,11 @@ export function applyTime() {
   const mk = cur.stars * smooth(-0.05, 0.05, md.y);
   W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.opacity = mk; W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
   ctx.scene.fog.color.copy(cur.fog); ctx.scene.fog.far = cur.fogFar; ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
+  /* 대기 원근 안개 파라미터 (모든 재질이 참조하는 FOG 배열) */
   FOG[0] = L.x; FOG[1] = L.y; FOG[2] = L.z; FOG[3] = cur.insc * fade;
   FOG[4] = 2.3 / cur.fogFar; FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
   _fc.copy(cur.disc).multiplyScalar(up ? 1.0 : 0.45); FOG[8] = _fc.r; FOG[9] = _fc.g; FOG[10] = _fc.b; FOG[11] = 0;
+  /* 잎 재질용: 카메라(뷰) 공간의 광원 방향과 투과 색 */
   ctx.camera.matrixWorldInverse.copy(ctx.camera.matrixWorld).invert();
   W.uSunV.value.copy(L).transformDirection(ctx.camera.matrixWorldInverse);
   W.uLeafCol.value.copy(cur.sunColor).multiplyScalar(cur.sunI * fade * 0.2);
@@ -148,6 +154,7 @@ export function buildScene(bgKey) {
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
+  /* 하늘 + 구름층 — util.js 의 skyColor() (물 반사와 공유) */
   const skyMat = new THREE.ShaderMaterial({
     uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, moonDir: { value: new THREE.Vector3(0, -1, 0) }, sunColor: { value: new THREE.Color() }, glow: { value: 0 }, uTime: W.uTime, uCover: { value: 0.5 }, cloudLit: { value: new THREE.Color() }, cloudShade: { value: new THREE.Color() }, uMoon: { value: 0 } },
     vertexShader: 'varying vec3 vP;void main(){vP=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
@@ -156,6 +163,7 @@ export function buildScene(bgKey) {
     side: THREE.BackSide, depthWrite: false });
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat)); W.skyMat = skyMat;
 
+  /* 빛 */
   W.sun = new THREE.DirectionalLight(0xffffff, 1); W.sun.castShadow = settings.shadow;
   Object.assign(W.sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 260 }); W.sun.shadow.mapSize.set(2048, 2048); W.sun.shadow.bias = -0.0006; W.sun.shadow.normalBias = 0.02;
   scene.add(W.sun, W.sun.target);
@@ -169,9 +177,12 @@ export function buildScene(bgKey) {
     for (let i = 0; i < n; i++) { const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 0.97), r = 1700; sp[i * 3] = r * Math.sin(ph) * Math.cos(th); sp[i * 3 + 1] = r * Math.cos(ph); sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th); }
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0, fog: false })); scene.add(W.stars); }
+  /* 먼 거리의 하늘 물체는 AO 계산에서 뺀다 (반지름 0.5m 가 화면에서 0픽셀이라 자기 자신에 가려진 것으로 계산됨) */
+  W.sunDisc.userData.noAO = W.moon.userData.noAO = W.stars.userData.noAO = true;
+  /* 별똥별 풀 3개 */
   for (let i = 0; i < 3; i++) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: streakTex, color: 0xf4f6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }));
-    m.visible = false; m.frustumCulled = false; scene.add(m);
+    m.visible = false; m.frustumCulled = false; m.userData.noAO = true; scene.add(m);
     W.meteors.push({ mesh: m, t: 0, life: 0, head: new THREE.Vector3(), dir: new THREE.Vector3(), speed: 0, len: 0, width: 0 });
   }
   if (cfg.snow) makeAurora(W, scene);
