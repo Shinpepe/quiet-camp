@@ -10,6 +10,7 @@ import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCr
 
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0 };
+/* sipT: 0→1 한 모금 진행. holding 이면 0.5(입에 닿은 순간)에서 멈춰 계속 마신다. exhale: 남은 내뱉기 시간 */
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, lastSipSfx: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
@@ -35,6 +36,7 @@ export function bindInput() {
   addEventListener('keyup', e => { keys[e.code] = false; });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
   document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (state.mode !== 'trunk') showPause(); });
+  /* 클릭: 포인터 잠금 / 상호작용. 마시기·피우기는 mousedown~mouseup 으로 (길게 누르면 계속) */
   canvas().addEventListener('click', () => {
     if (!ctx.running) return;
     if (!isTouch && !locked()) { canvas().requestPointerLock(); return; }
@@ -86,10 +88,11 @@ export function currentTarget() {
   return best;
 }
 function startMove(to, yawTo) { cam.from.copy(ctx.camera.position); cam.to.copy(to); cam.t = 0; cam.yawFrom = wrapPI(player.yaw); cam.yawTo = yawTo; }
-function sitDown(id) { const st = SEAT[id]; state.mode = 'seated'; state.seat = id; startMove(new THREE.Vector3(...st.pos), wrapPI(player.yaw)); sfx('sit'); setIndoor(id === 'tent' || id === 'car'); }
-function standUp() { const st = SEAT[state.seat]; player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw)); setIndoor(false); }
+function sitDown(id) { const st = SEAT[id]; state.mode = 'seated'; state.seat = id; startMove(new THREE.Vector3(...st.pos), wrapPI(player.yaw)); if (id === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else sfx('sit'); setIndoor(id === 'tent' || id === 'car'); }
+function standUp() { const st = SEAT[state.seat]; if (state.seat === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw)); setIndoor(false); }
 function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx('lighter'); if (W.fireLit) startCrackle(); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); }
 
+/* ── 랜턴: 테이블 랜턴은 걸어가서 E, 의자에 앉아서는 F. 텐트 랜턴은 텐트 안에서 F ── */
 const LAMP = { lantern: { flag: 'lanternLit', name: '랜턴' }, tentLamp: { flag: 'tentLampLit', name: '텐트 랜턴' } };
 export function lampForSeat() { if (state.mode !== 'seated') return null; return state.seat === 'tent' ? 'tentLamp' : state.seat === 'chair' ? 'lantern' : null; }
 function lampLabel(k) { const L = LAMP[k]; return ctx.W[L.flag] ? L.name + ' 끄기' : L.name + ' 켜기'; }
@@ -103,25 +106,28 @@ export function interact() {
   if (t.id === 'trunk') openTrunk(); else if (t.id === 'fire') toggleFire(); else if (t.id === 'lantern') toggleLamp('lantern'); else sitDown(t.id);
   updateHUD(); anim.lastTargetId = undefined;
 }
-function openTrunk() { state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunk'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD(); }
-function closeTrunk() { state.mode = 'walk'; $('#trunk').classList.remove('on'); if (!isTouch) canvas().requestPointerLock(); updateHUD(); }
+function openTrunk() { state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunkOpen'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD(); }
+function closeTrunk() { state.mode = 'walk'; $('#trunk').classList.remove('on'); sfx('trunkClose'); if (!isTouch) canvas().requestPointerLock(); updateHUD(); }
 function trunkKey(n) { const ks = Object.keys(ITEMS); if (n <= 3) { pickItem(ks[n - 1]); closeTrunk(); } else if (state.item) { putBack(); closeTrunk(); } }
 function renderTrunk() {
   const box = $('#trunkItems'); box.innerHTML = '';
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
   if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
+/* 손 없이 아이템만 시야 오른쪽 아래에 든다. 트렁크에서 꺼낼 때마다 새 것(가득) */
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
 export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); } }
 
+/* ── 마시기 / 피우기 ── */
 function startSip() {
   if (!state.item || !ctx.W.item || anim.sipT !== null || state.mode === 'trunk' || ctx.paused || cam.t < 1) return;
   if (ctx.W.item.userData.amount <= 0) { showToast('잔이 비었다'); return; }
   anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.lastSipSfx = -9;
-  if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip');
+  if (state.item === 'whisky') sfx('clink'); else if (state.item === 'coffee') sfx('sip'); else sfx('inhale');
 }
 function endSip() { anim.holding = false; }
+/* 다 마셨거나 다 탔을 때 (main.js 에서 호출) */
 export function itemEmptied() {
   if (state.item === 'smoke') { putBack(); showToast('담배를 다 피웠다'); }
   else showToast(state.item === 'coffee' ? '커피를 다 마셨다' : '위스키를 다 마셨다');
@@ -167,6 +173,7 @@ function renderMenu() {
   const bl = $('#bgList'); bl.innerHTML = '';
   Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div><div class="nm">${b.name}</div><div class="ds">${b.ds}</div></div>`; d.onclick = () => { if (state.bg === b.key) return; state.bg = b.key; renderMenu(); previewRebuild(); }; bl.append(d); });
   const tl = $('#timeList'); tl.innerHTML = '';
+  /* 시각 칩은 씬을 다시 만들지 않고 시계만 옮긴다 — 조명이 바로 따라온다 */
   Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { state.time = t.key; state.clock = t.clock; renderMenu(); }; tl.append(d); });
 }
 let rebuildT = null;
