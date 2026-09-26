@@ -265,7 +265,7 @@ export function walk(dt) {
     if (!blockedAt(player.x + wx, player.z)) player.x += wx;
     if (!blockedAt(player.x, player.z + wz)) player.z += wz;
     player.bob += dt * 9 * Math.min(1, len); player.stepT += dt * Math.min(1, len);
-    if (player.stepT > 0.55) { player.stepT = 0; sfx('step', surfaceAt(player.x, player.z)); }
+    if (player.stepT > 0.55) { player.stepT = 0; const sf = surfaceAt(player.x, player.z); sfx('step', sf); if (ctx.W.prints && (sf === 'snow' || sf === 'sand')) { player.side = !player.side; ctx.W.prints.stamp(player.x, player.z, wx, wz, player.side ? 1 : -1); } }
   } else player.bob += (0 - (player.bob % (Math.PI * 2))) * 0.1;
   const targetY = floorY(player.x, player.z) + EYE + Math.sin(player.bob) * 0.035;
   cam3.position.set(player.x, cam3.position.y + (targetY - cam3.position.y) * Math.min(1, dt * 12), player.z);
