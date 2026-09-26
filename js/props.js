@@ -212,6 +212,7 @@ export function makeProps() {
   [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
   pack.position.set(2.95, 0, 0.3); pack.rotation.set(0, -0.6, 0.12); scene.add(shadowed(pack));
 
+  /* 장작더미 */
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5))), cut = smoothM(0xc9a97c, Object.assign({ roughness: 0.85 }, tex('wood', 1, 1, 0.3)));
   const pile = new THREE.Group();
   [[-0.24, -0.08, 0.08, 0.24], [-0.16, 0, 0.16], [-0.08, 0.08]].forEach((zs, r) => zs.forEach(z => {
@@ -219,11 +220,32 @@ export function makeProps() {
     l.rotation.set(rnd(0, 6.3), rnd(-0.05, 0.05), Math.PI / 2); l.position.set(rnd(-0.03, 0.03), 0.075 + r * 0.139, z); pile.add(l);
   }));
   pile.position.set(1.85, 0, -2.55); pile.rotation.y = -0.35; scene.add(shadowed(pile)); contactShadow(1.85, -2.55, 0.95, 0.8, 0.6);
+
+  /* ── 도끼 박힌 그루터기 ── */
   const stump = new THREE.Group();
   const st = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.32, 12), [bark, cut, cut]); st.position.y = 0.16; stump.add(st);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.075, 0.025), std(0x3a3d42, { metalness: 0.7, roughness: 0.35 })); head.position.set(0.02, 0.35, 0); head.rotation.z = 0.15; stump.add(head);
-  stump.add(bar([0.06, 0.34, 0.01], [0.3, 0.62, 0.05], 0.014, wood(0x9a7a52, 1, 1), 8));
+  {
+    const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.35 }), hickory = wood(0xb08a5a, 1, 1), leather = smoothM(0x4a3324, { roughness: 0.9 });
+    const G = new THREE.Group();
+    /* 도끼머리 윤곽: 뒤쪽 폴(뭉툭) → 위로 벌어지는 날 → 곡선 날끝 → 아래로 벌어지는 날. 날이 +x 방향 */
+    const s = new THREE.Shape();
+    s.moveTo(-0.055, -0.03); s.lineTo(-0.055, 0.03); s.lineTo(0.0, 0.034);
+    s.quadraticCurveTo(0.05, 0.04, 0.085, 0.075); s.quadraticCurveTo(0.108, 0.0, 0.085, -0.075); s.quadraticCurveTo(0.05, -0.04, 0.0, -0.034); s.closePath();
+    const headG = new THREE.ExtrudeGeometry(s, { depth: 0.022, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 2 }); headG.translate(0, 0, -0.011);
+    const head = new THREE.Mesh(headG, steel); head.rotation.z = -Math.PI / 2;   // 날이 아래(-y)를 향하게
+    G.add(head);
+    /* 자루: 눈에서 +x 로 뻗으며 끝이 살짝 아래로 휘는 곡선 */
+    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-0.02, 0, 0), new THREE.Vector3(0.13, 0.006, 0), new THREE.Vector3(0.27, -0.002, 0), new THREE.Vector3(0.4, -0.022, 0)]);
+    const handle = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.015, 10, false), hickory); G.add(handle);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.019, 10, 8), hickory); knob.position.set(0.4, -0.022, 0); knob.scale.set(1.3, 1, 1); G.add(knob);
+    const wrap = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.24, 0.0, 0), new THREE.Vector3(0.33, -0.012, 0)]), 6, 0.017, 10, false), leather); G.add(wrap);
+    G.position.set(-0.03, 0.382, 0.02); G.rotation.set(0, 0.3, 0.6);   // 날끝이 윗면 2.5cm 아래, 자루는 35° 로 올라감
+    stump.add(G);
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.004, 0.02), std(0x1a1410)); slot.position.set(0.03, 0.322, 0.01); slot.rotation.y = 0.3; stump.add(slot);
+  }
   stump.position.set(2.55, 0, -1.95); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(2.55, -1.95, 0.55, 0.55, 0.6);
+
+  /* 잔가지와 껍질 조각 */
   for (let i = 0; i < 6; i++) { const x = rnd(1.5, 2.5), z = rnd(-2.95, -2.15), a = rnd(0, 6.3), L = rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], rnd(0.008, 0.014), bark, 6))); }
   for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(rnd(0.06, 0.12), 0.012, rnd(0.03, 0.06)), bark); c.position.set(rnd(1.6, 2.6), 0.008, rnd(-2.9, -2.1)); c.rotation.set(rnd(-0.2, 0.2), rnd(0, 6.3), 0); scene.add(shadowed(c)); }
 }
