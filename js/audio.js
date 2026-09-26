@@ -50,13 +50,19 @@ function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine',
 
 /* ── 위치 음원 ── */
 function makeFireSrc() {
-  const pan = panner(0.3, 0.6, -1.4, 1.2, 45, 1.3), g = gain(0); g.connect(pan);
-  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.9); chain(rum, rl, rg, g); rum.start(0, off());
-  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.05); chain(hs, hf, hg, g); hs.start(0, off());
-  const [lo, lg] = lfo(0.6, 0.03, hg.gain);
+  const pan = panner(0.3, 0.6, -1.4, 1.6, 45, 1.1), g = gain(0); g.connect(pan);
+  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.55); chain(rum, rl, rg, g); rum.start(0, off());     // 낮은 웅웅거림 (팝을 덮지 않게 낮춤)
+  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.04); chain(hs, hf, hg, g); hs.start(0, off());   // 불이 숨 쉬는 소리
+  const [lo, lg] = lfo(0.6, 0.025, hg.gain);
   const src = { pan, gain: g, nodes: [rum, rl, rg, hs, hf, hg, lo, lg, g, pan], popT: null };
-  const pop = big => { const t = AC.currentTime; if (big) burst(g, false, 'lowpass', rnd(350, 600), 1, 0.004, rnd(0.12, 0.2), 0.12, t); else burst(g, false, 'bandpass', rnd(1200, 3200), 1.5, 0.004, rnd(0.02, 0.06), 0.05, t); };
-  const loop = () => { if (!fire) return; if (ctx.W.fireLit) pop(Math.random() < 0.07); src.popT = setTimeout(loop, rnd(60, 420)); }; loop();
+  const pop = big => {
+    const t = AC.currentTime;
+    if (big) {
+      burst(g, false, 'lowpass', rnd(350, 650), 1, 0.003, rnd(0.22, 0.34), 0.13, t);                                          // 큰 탁!
+      const n = 2 + Math.floor(Math.random() * 2); for (let i = 0; i < n; i++) burst(g, false, 'highpass', rnd(2500, 4500), 1, 0.002, rnd(0.03, 0.06), 0.03, t + 0.03 + Math.random() * 0.12);   // 뒤따르는 불티
+    } else burst(g, false, 'bandpass', rnd(1400, 3600), 1.8, 0.003, rnd(0.06, 0.13), 0.045, t);                             // 잔잔한 탁탁
+  };
+  const loop = () => { if (!fire) return; if (ctx.W.fireLit) pop(Math.random() < 0.09); src.popT = setTimeout(loop, rnd(50, 360)); }; loop();
   fire = src;
 }
 function makeWaterSrc(type, z) {
