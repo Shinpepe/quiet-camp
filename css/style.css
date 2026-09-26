@@ -42,7 +42,7 @@ h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:.12em;
 .go{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:34px;padding:16px 22px;border-radius:14px;border:1px solid var(--accent);background:linear-gradient(135deg,rgba(233,197,138,.18),rgba(233,197,138,.05));color:var(--accent);font-family:var(--serif);font-size:17px;letter-spacing:.2em;cursor:pointer;transition:.25s}
 .go:hover{background:var(--accent);color:#1a1510}
 .go span{font-family:var(--sans);font-size:12px;letter-spacing:.05em;opacity:.7}
-.legend{margin-top:30px;font-size:11px;color:var(--mute);line-height:2.1}
+.legend{margin-top:14px;font-size:11px;color:var(--mute);line-height:2.1}
 .legend b{color:var(--ink);font-weight:500;margin-right:4px}
 .preview-tag{position:absolute;right:26px;bottom:22px;font-size:11px;letter-spacing:.25em;color:var(--mute);text-shadow:0 1px 6px #000}
 .settings{display:grid;grid-template-columns:auto 1fr auto;gap:8px 12px;align-items:center;font-size:12px;color:var(--mute)}
