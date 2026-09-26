@@ -118,6 +118,18 @@ function makePalm() {
   return shadowed(g);
 }
 function makeRock(s, color) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(s, 1), 0.4), std(color, tex('rock', 2, 2, 0.55))); r.rotation.set(rnd(0, 3), rnd(0, 3), rnd(0, 3)); return shadowed(r); }
+/* 조개껍데기: 나선 소라(옆으로 누움) · 이매패(반구를 납작하게, 방사형 홈) — 단위 크기, 배치할 때 3~6cm 로 축소 */
+function conchGeo() {
+  const g = new THREE.LatheGeometry([[0, 0], [0.55, 0.06], [0.8, 0.3], [0.9, 0.62], [0.72, 0.95], [0.45, 1.2], [0.18, 1.38], [0, 1.45]].map(p => new THREE.Vector2(p[0], p[1])), 20);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x), k = 1 + 0.07 * Math.sin(a * 5 + y * 6) + 0.04 * Math.sin(a * 11); p.setX(i, x * k); p.setZ(i, z * k); }
+  g.translate(0, -0.7, 0); g.rotateX(Math.PI / 2); g.computeVertexNormals(); return g;
+}
+function clamGeo() {
+  const g = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x), k = 1 + 0.06 * Math.sin(a * 14); p.setX(i, x * k); p.setY(i, y * 0.32); p.setZ(i, z * k * 0.85); }
+  g.computeVertexNormals(); return g;
+}
 function reserved(x, z) { if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true; if (ctx.W.cfg.dock && x > 3 && x < 9 && z < -6 && z > -22) return true; return false; }
 
 export function makeVegetation(cfg) {
@@ -171,6 +183,20 @@ export function makeVegetation(cfg) {
       const g = rnd(0.55, 0.85); pb.push({ x, y: h + 0.01, z, s: rnd(0.03, 0.08), rot: rnd(0, 6.3), tint: cfg.key === 'beach' ? [g + 0.15, g + 0.08, g - 0.05] : [g, g, g * 0.97] });
     }
     if (pb.length) scene.add(instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false));
+      /* 조개껍데기: 모래사장 해안선 육지 쪽 띠에 드문드문, 절반쯤 모래에 묻혀서 */
+    if (cfg.key === 'beach') {
+      const tints = [[0.96, 0.92, 0.82], [0.95, 0.84, 0.8], [0.97, 0.97, 0.94], [0.86, 0.76, 0.62], [0.9, 0.86, 0.9]], conch = [], clam = [];
+      for (let t = 0; t < 400 && conch.length + clam.length < 60; t++) {
+        const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
+        const z = cfg.water.z + shoreOff(x, cfg) + rnd(-1.6, 4.2), h = terrainH(x, z, cfg); if (h < WATER_Y + 0.02) continue;
+        const tint = tints[Math.floor(Math.random() * tints.length)];
+        if (Math.random() < 0.55) { const s = rnd(0.03, 0.055); clam.push({ x, y: h + s * 0.02, z, s, rot: rnd(0, 6.3), rx: rnd(-0.25, 0.25), tint }); }
+        else { const s = rnd(0.035, 0.06); conch.push({ x, y: h + s * rnd(0.25, 0.6), z, s, rot: rnd(0, 6.3), rz: rnd(-0.2, 0.2), tint }); }
+      }
+      const shellM = smoothM(0xffffff, { roughness: 0.55 });
+      if (conch.length) scene.add(instanced(conchGeo(), shellM, conch, false));
+      if (clam.length) scene.add(instanced(clamGeo(), shellM, clam, false));
+    }
   }
 
   const gr = cfg.grass; if (!gr) return;
