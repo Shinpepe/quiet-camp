@@ -44,9 +44,13 @@ export function terrainH(x, z, cfg) {
   let h = localBase(x, z, cfg) + localNoise(x, z, cfg) * (1 - smooth(150, 230, d)) + mountainH(x, z, cfg);
   if (cfg.water) {
     const e = waterEdge(cfg), s = z - cfg.water.z - shoreOff(x, cfg);
-    /* 물가 안쪽(땅 쪽, s>0)은 어디서든 수면+30cm 아래로 꺼지지 않게 받친다 — 풀밭 웅덩이 방지.
-       물 평면 가장자리 바깥(z>e)은 조금 더 높게 받쳐 가장자리 옆에 마른 웅덩이가 생기지 않게 */
-    if (s > 0) { const fl = z > e ? 0.05 + 0.13 * smooth(e, e + 3, z) : 0.05; if (h < fl) h += (fl - h) * 0.95; }
+    /* 물가 안쪽(땅 쪽) 지형이 수면 아래로 꺼지지 않게 받친다 — 단, 캠프(반지름 12m)는 소품이 y=0 기준이라 받치지 않고,
+       12~30m 에서 서서히 올린다. 웅덩이를 만드는 노이즈는 12m 밖에서만 생기므로 이걸로 충분하다 */
+    if (s > 0) {
+      const kc = smooth(12, 30, Math.hypot(x, z - 3));
+      const fl = (z > e ? 0.05 + 0.13 * smooth(e, e + 3, z) : 0.05) * kc;
+      if (h < fl) h += (fl - h) * 0.95;
+    }
   }
   return h;
 }
