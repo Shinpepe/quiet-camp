@@ -6,7 +6,7 @@ import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks } from './props.js';
 import { startAmbience, updateAudio, sfx } from './audio.js';
-import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied } from './game.js';
+import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep } from './game.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -14,7 +14,7 @@ const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: fal
 renderer.setPixelRatio(Math.min(devicePixelRatio, FINE ? 2 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.autoUpdate = false;   // 그림자는 10Hz 로만 갱신 (루프에서 needsUpdate)
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
@@ -24,7 +24,9 @@ addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; cam
 
 let last = performance.now(), T = 0, lastSec = -1;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
+/* 랜턴 밝기: 켜졌으면 시간대 값(최소치 보장)으로, 꺼졌으면 0 으로 부드럽게 */
 const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
+/* 담배: 빨아들인 시간(h)에 비례해 길고 진하게 내뱉는다 */
 function startExhale(h) { const k = Math.min(h, 3) / 3; anim.exhale = 0.35 + k * 0.75; anim.exhaleStr = 0.6 + k * 0.8; sfx('exhale'); }
 
 function loop(now) {
@@ -32,9 +34,11 @@ function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene; if (!scene) return; T += dt; W.uTime.value = T; ctx.post.update(T);
   const hand = ctx.hand;
 
-  if (settings.flow && !ctx.paused) state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
+  /* 시간 흐름: 하루 = settings.dayMin 분 (잠자는 동안은 잠자기 쪽이 시계를 움직인다) */
+  if (settings.flow && !ctx.paused && state.mode !== 'sleep') state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
   paramsAt(state.clock, W.tm);
   if (Math.floor(T) !== lastSec) { lastSec = Math.floor(T); if (ctx.running) updateCaption(); }
+  /* 낮/밤이 바뀌면 앰비언스도 따라 바꾼다 */
   { const night = isNightClock(state.clock); if (ctx.running && night !== W.wasNight) { W.wasNight = night; startAmbience(W.cfg.ambience, night ? 'night' : 'day'); } }
 
   if (!ctx.running) { const a = T * 0.06; camera.position.set(Math.sin(a) * 9.5, 2.3 + Math.sin(T * 0.13) * 0.3, 2 + Math.cos(a) * 9.5); camera.lookAt(0, 0.9, 0.3); }
@@ -42,16 +46,18 @@ function loop(now) {
     if (cam.t < 1) {
       cam.t = Math.min(1, cam.t + dt / 1.3); const k = smooth(0, 1, cam.t);
       camera.position.lerpVectors(cam.from, cam.to, k); camera.position.y += Math.sin(k * Math.PI) * 0.18;
-      player.yaw = cam.yawFrom + wrapPI(cam.yawTo - cam.yawFrom) * k;
-      if (cam.t >= 1) { player.yaw = cam.yawTo; updateHUD(); anim.lastTargetId = undefined; }
+      player.yaw = cam.yawFrom + wrapPI(cam.yawTo - cam.yawFrom) * k; player.pitch = cam.pitchFrom + (cam.pitchTo - cam.pitchFrom) * k;
+      if (cam.t >= 1) { player.yaw = cam.yawTo; player.pitch = cam.pitchTo; updateHUD(); anim.lastTargetId = undefined; }
     } else if (state.mode === 'walk' && !ctx.paused) walk(dt);
     camera.rotation.y = player.yaw; camera.rotation.x = player.pitch + Math.sin(T * 0.7) * 0.003; camera.rotation.z = Math.sin(T * 0.5) * 0.002;
-    updatePrompt();
+    updatePrompt(); updateSleep(dt);
   }
   camera.updateMatrixWorld();
+  /* 카메라 위치가 정해진 뒤 시각 반영 (그림자 카메라·오디오 리스너가 카메라를 따라가므로) */
   applyTime();
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
+  /* 그림자 갱신 10Hz. 모닥불 그림자는 밤에 불이 켜져 있을 때만 (데스크톱) */
   W.shT += dt; if (W.shT >= 0.1) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
   if (W.fireLight) W.fireLight.castShadow = settings.shadow && FINE && W.fireLit && !W.sunUp;
 
@@ -67,7 +73,7 @@ function loop(now) {
   if (W.dockLight) { W.dockLight.intensity = W.tm.lantern * 0.8 * (0.96 + 0.04 * Math.sin(T * 3.1)); if (W.dockLampObj) W.dockLampObj.userData.setLit(W.tm.lantern > 0.5); }
   if (W.stars) W.stars.material.opacity = W.tm.stars * (0.85 + 0.15 * Math.sin(T * 2.3));
 
-  /* 모닥불 */
+  /* 모닥불: 불꽃 판 세기(fireK) 는 켜고 끌 때 부드럽게, 판은 각각 다른 박자로 흔들림 */
   W.fireK = (W.fireK || 0) + ((W.fireLit ? 1 : 0) - (W.fireK || 0)) * Math.min(1, dt * 2.5);
   if (W.flames) W.flames.forEach((f, i) => { f.material.uniforms.uK.value = W.fireK; f.visible = W.fireK > 0.02; f.scale.y = W.fireK * (0.85 + 0.2 * Math.sin(T * 8.5 + i * 1.3) + 0.1 * Math.sin(T * 21 + i)); f.scale.x = 0.9 + 0.1 * Math.sin(T * 6.7 + i * 2); });
   if (W.logGlow) W.logGlow.forEach((s, i) => { s.material.opacity = W.fireK * (0.55 + 0.45 * Math.sin(T * 13 + i * 1.9)); });
@@ -75,13 +81,14 @@ function loop(now) {
     const tgt = W.fireLit ? W.tm.fireI : 0; W.fireLight.intensity += (tgt * (0.85 + 0.12 * Math.sin(T * 17) + 0.08 * Math.sin(T * 41)) - W.fireLight.intensity) * Math.min(1, dt * 4);
     W.emberCore.material.color.lerp(_c.setHex(W.fireLit ? 0xff6a1a : 0x2a1c14), Math.min(1, dt * 3));
     if (W.fireLit) {
-      if (Math.random() < 0.45) W.fire.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.3, 0.4, 0.3);
+      if (Math.random() < 0.45) W.fire.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.3, 0.45, 0.3);
       if (Math.random() < 0.3) W.fireCore.spawn(firePos, { x: 0, y: 1.4, z: 0 }, 0.12, 0.35, 0.2);
       if (Math.random() < 0.14) W.embers.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.3, 1.6, 0.6);
       if (Math.random() < 0.09) W.smoke.spawn(tmpV.copy(firePos).setY(1.2), { x: 0.04, y: 0.5, z: 0 }, 0.2, 5.0, 0.1, 0.2, 1.0, 0.16);
     }
   }
 
+  /* ── 손에 든 것: 한 모금 / 길게 마시기 / 양 감소 ── */
   if (W.item && ctx.running) {
     const type = state.item, ud = W.item.userData;
     if (anim.sipT !== null) {
@@ -105,6 +112,7 @@ function loop(now) {
       if (type === 'smoke') { const puff = anim.sipT !== null && anim.sipT > 0.35; ud.tip.material.color.setHex(puff ? 0xffb060 : 0xff5a1a); ud.glow.material.opacity = puff ? 0.95 : 0.5 + 0.1 * Math.sin(T * 6); if (T - anim.lastSteam > (puff ? 0.03 : 0.12)) { anim.lastSteam = T; W.smoke.spawn(tmpV, { x: 0.02, y: 0.16, z: 0 }, 0.01, 3.2, 0.03, 0.02, 0.16, 0.22); } }
     }
   }
+  /* 내뱉는 연기: 시야 앞 22cm 아래쪽에서 앞으로 퍼진다 */
   if (anim.exhale > 0 && ctx.running) {
     anim.exhale -= dt; camera.getWorldDirection(fwdV); tmpV.copy(camera.position).addScaledVector(fwdV, 0.22); tmpV.y -= 0.06;
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);
