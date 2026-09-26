@@ -42,7 +42,7 @@ export const ITEMS = {
 };
 export const SEAT = {
   car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },
-  chair: { pos: [1.5, 1.05, 0.95], stand: [1.5, 2.4], name: '의자', up: '일어나기' },
+  chair: { pos: [1.5, 1.05, 0.95], stand: [1.5, -0.1], name: '의자', up: '일어나기' },
   tent:  { pos: [-1.6, 0.72, 1.85], stand: [-1.6, -1.3], name: '텐트 안', up: '텐트에서 나가기' },
   bed:   { pos: [-1.1, 0.45, 1.95], yaw: Math.PI, pitch: 1.15, stand: [-1.6, -1.3], name: '침낭', up: '일어나기' },
   dock:  { pos: [5.7, 1.05, -19.4], stand: [5.7, -18.0], name: '부두 끝', up: '일어나기' },
