@@ -5,7 +5,7 @@ import { rnd } from './util.js';
 let AC = null, master, comp, worldLP, worldGain, sfxBus;
 let whiteBuf = null, brownBuf = null;
 let bed = null, evTimer = null, sceneKey = null;
-let fire = null, water = null, lamps = null;
+let fire = null, water = null, lamps = null, spark = null;
 const _f = new THREE.Vector3(), _u = new THREE.Vector3();
 
 export function initAudio() {
@@ -21,7 +21,6 @@ export function initAudio() {
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.value = v; }
 export function setIndoor(on) { if (!AC) return; const t = AC.currentTime; worldLP.frequency.setTargetAtTime(on ? 1100 : 20000, t, 0.15); worldGain.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.15); }
-export function startCrackle() {}
 
 /* ── 재료 ── */
 function noiseBuf(brown) {
@@ -92,6 +91,21 @@ function killSpatial() {
   fire = water = lamps = null; sceneKey = null;
 }
 
+/* ── 불꽃놀이 스틱: 치익거리는 고음 노이즈 + 잦은 미세 탁탁. 손에 든 것이라 효과음 버스로 ── */
+export function setSparkler(on) {
+  if (!AC) return;
+  if (on && !spark) {
+    const g = gain(0), s = noise(false, true), f = filt('highpass', 4200), ig = gain(0.055); chain(s, f, ig, g, sfxBus); s.start(0, off());
+    g.gain.setTargetAtTime(1, AC.currentTime, 0.1);
+    const st = { gain: g, nodes: [s, f, ig, g], t: null };
+    const crack = () => { if (!spark) return; burst(g, false, 'bandpass', rnd(5000, 9000), 2, 0.002, rnd(0.03, 0.08), 0.02, AC.currentTime); st.t = setTimeout(crack, rnd(15, 70)); }; crack();
+    spark = st;
+  } else if (!on && spark) {
+    const st = spark; spark = null; clearTimeout(st.t);
+    st.gain.gain.setTargetAtTime(0, AC.currentTime, 0.25); setTimeout(() => kill(st.nodes), 900);
+  }
+}
+
 /* ── 배경 베드 ── */
 function makeBed(type, timeKey) {
   const out = gain(0.0001), nodes = [out], timers = []; out.connect(worldLP);
@@ -113,7 +127,7 @@ function makeBed(type, timeKey) {
   return { out, nodes, timers };
 }
 const killBed = b => { if (!b) return; b.timers.forEach(clearTimeout); kill(b.nodes); };
-export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); }
+export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); }
 export function startAmbience(type, timeKey) {
   if (!AC) return;
   if (sceneKey !== ctx.W.cfg.key) buildSpatial();
@@ -174,7 +188,7 @@ export function updateAudio(dt) {
   if (lamps) { lamps.lantern.gain.gain.value += ((W.lanternLit ? 1 : 0) - lamps.lantern.gain.gain.value) * k; lamps.tentLamp.gain.gain.value += ((W.tentLampLit ? 1 : 0) - lamps.tentLamp.gain.gain.value) * k; }
 }
 
-/* ── 발소리: 뒤꿈치 충격(저음) + 재질 질감(미세 알갱이 여러 개) + 앞꿈치, 좌우 번갈아 ── */
+/* ── 발소리 ── */
 let stepIdx = 0;
 function footstep(surface) {
   const t0 = AC.currentTime, side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.85, 1.15);
@@ -199,16 +213,16 @@ function footstep(surface) {
     grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05);
     burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
   } else if (surface === 'sand') {
-    tone(pan, 60, 42, 0.008, 0.06 * v, 0.1, t0);                                  // 낮고 짧은 쿵 (모래가 흡수)
-    burst(pan, true, 'lowpass', 420, 1, 0.012, 0.09 * v, 0.24, t0, 220, 0.24);     // 발이 파고들며 미끄러지는 소리 (주파수 내려감)
-    grains(16, 0.2, false, 'bandpass', 2600, 1.2, 0.028, 0.035, t0);               // 모래알 서걱임
-    grains(6, 0.1, false, 'bandpass', 3400, 1.5, 0.018, 0.03, t0 + 0.14);          // 앞꿈치 뗄 때 흩어지는 알갱이
+    tone(pan, 60, 42, 0.008, 0.06 * v, 0.1, t0);
+    burst(pan, true, 'lowpass', 420, 1, 0.012, 0.09 * v, 0.24, t0, 220, 0.24);
+    grains(16, 0.2, false, 'bandpass', 2600, 1.2, 0.028, 0.035, t0);
+    grains(6, 0.1, false, 'bandpass', 3400, 1.5, 0.018, 0.03, t0 + 0.14);
   } else {
-    tone(pan, 75, 50, 0.004, 0.08 * v, 0.07, t0);                                  // 흙의 둔탁함 (약하게)
+    tone(pan, 75, 50, 0.004, 0.08 * v, 0.07, t0);
     burst(pan, true, 'lowpass', 600, 1, 0.005, 0.06 * v, 0.09, t0);
-    burst(pan, false, 'bandpass', 900, 1.0, 0.006, 0.05 * v, 0.07, t0);            // 풀이 눌리는 부드러운 소리
-    grains(10, 0.14, false, 'bandpass', 3600, 1.2, 0.03, 0.03, t0);                // 잎 바스락
-    burst(pan, true, 'lowpass', 700, 1, 0.005, 0.04 * v, 0.07, t0 + 0.1);          // 앞꿈치
+    burst(pan, false, 'bandpass', 900, 1.0, 0.006, 0.05 * v, 0.07, t0);
+    grains(10, 0.14, false, 'bandpass', 3600, 1.2, 0.03, 0.03, t0);
+    burst(pan, true, 'lowpass', 700, 1, 0.005, 0.04 * v, 0.07, t0 + 0.1);
     grains(4, 0.06, false, 'bandpass', 3000, 1.2, 0.02, 0.025, t0 + 0.11);
   }
 }
@@ -229,5 +243,7 @@ export function sfx(type, surface) {
     case 'exhale': burst(B, false, 'bandpass', 900, 0.6, 0.05, 0.04, 0.7, t, 450, 0.7); return;
     case 'lighter': burst(B, false, 'highpass', 3000, 1, 0.003, 0.12, 0.14, t); return;
     case 'sit': burst(B, false, 'highpass', 1500, 1, 0.03, 0.035, 0.18, t); return;
+    case 'sparkOn': burst(B, false, 'highpass', 5000, 1, 0.01, 0.22, 0.45, t); for (let i = 0; i < 8; i++) burst(B, false, 'bandpass', rnd(5000, 9000), 2, 0.002, rnd(0.06, 0.12), 0.02, t + Math.random() * 0.3); return;   // 점화: 치직!
+    case 'sparkOff': burst(B, false, 'highpass', 4500, 1, 0.02, 0.05, 0.5, t, 2500, 0.5); return;   // 꺼짐: 잦아드는 치익
   }
 }
