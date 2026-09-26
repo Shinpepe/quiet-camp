@@ -14,7 +14,7 @@ const streakTex = canvasTex(128, 16, (g, w, h) => {
   const v = g.createLinearGradient(0, 0, 0, h); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.5, 'rgba(0,0,0,1)'); v.addColorStop(1, 'rgba(0,0,0,0)');
   g.globalCompositeOperation = 'destination-in'; g.fillStyle = v; g.fillRect(0, 0, w, h);
 });
-const _fc = new THREE.Color();
+const _fc = new THREE.Color(), _ag = new THREE.Color(0x2fae70);
 
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
@@ -38,6 +38,34 @@ export function rebakeEnv() {
   } catch (e) { console.warn('IBL skipped', e); }
 }
 
+/* ── 오로라: 하늘 높이 걸린 곡선 커튼 세 장. 가로 노이즈 주름 + 아래가 밝고 위로 초록→보라 + 세로 광선 ── */
+function makeAurora(W, scene) {
+  const base = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uTime: W.uTime, uStr: { value: 0 }, uSeed: { value: 0 }, cA: { value: new THREE.Color(0x36e08a) }, cB: { value: new THREE.Color(0x7a3cff) } },
+    vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: NOISE_GLSL + `uniform float uTime,uStr,uSeed;uniform vec3 cA,cB;varying vec2 vUv;
+      void main(){float t=uTime*0.05+uSeed;float x=vUv.x,y=vUv.y;
+        float f=vnoise(vec2(x*5.0+t,0.3+uSeed))*0.55+vnoise(vec2(x*13.0-t*1.6,1.7))*0.3+vnoise(vec2(x*29.0+t*2.4,3.1))*0.15;
+        float band=smoothstep(0.32,0.72,f);
+        float vert=smoothstep(0.0,0.1,y)*pow(1.0-y,1.5);
+        float rays=0.65+0.35*vnoise(vec2(x*70.0+t*2.0,y*1.5));
+        float ends=smoothstep(0.0,0.1,x)*smoothstep(1.0,0.9,x);
+        float a=band*vert*rays*ends*uStr;
+        vec3 col=mix(cA,cB,smoothstep(0.1,0.85,y));
+        gl_FragColor=vec4(col*a,a);}`,
+  });
+  W.aurora = [];
+  /* [시작 방위각, 폭(rad), 거리, 아래 높이, 세로 높이] — 카메라 정면(-z)이 방위각 -π/2 */
+  [[-2.3, 1.35, 1500, 780, 420], [-1.25, 1.0, 1650, 980, 520], [0.35, 1.5, 1450, 700, 360]].forEach(([az0, span, R, y0, H], i) => {
+    const g = new THREE.PlaneGeometry(1, 1, 96, 10), p = g.attributes.position;
+    for (let k = 0; k < p.count; k++) { const u = p.getX(k) + 0.5, v = p.getY(k) + 0.5, az = az0 + u * span, y = y0 + Math.sin(u * 5.3 + i) * 90 + Math.sin(u * 11.1 + i * 2) * 40 + v * H; p.setXYZ(k, Math.cos(az) * R, y, Math.sin(az) * R); }
+    g.computeVertexNormals();
+    const m = base.clone(); m.uniforms.uTime = W.uTime; m.uniforms.uSeed.value = i * 3.7;
+    const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; scene.add(mesh); W.aurora.push(mesh);
+  });
+}
+
 /* 현재 시각 파라미터(W.tm)를 씬의 모든 것에 반영 — 매 프레임 호출 */
 export function applyTime() {
   const W = ctx.W, cur = W.tm; if (!W.sun) return;
@@ -47,6 +75,12 @@ export function applyTime() {
   const tgt = W.sun.target.position; tgt.set(Math.round(ctx.camera.position.x / 2) * 2, 0, Math.round(ctx.camera.position.z / 2) * 2);
   W.sun.position.copy(L).multiplyScalar(90).add(tgt); W.sun.color.copy(cur.sunColor); W.sun.intensity = cur.sunI * fade;
   W.hemi.color.copy(cur.top); W.hemi.intensity = cur.hemi; W.amb.intensity = cur.amb;
+  /* 오로라: 설산 + 별이 뜬 밤. 20초 주기로 강약. 설면에 초록 기운 */
+  if (W.aurora) {
+    const ak = cur.stars * smooth(0.5, 0.9, cur.stars) * (0.55 + 0.45 * Math.sin(W.uTime.value * 0.31));
+    W.aurora.forEach(m => { m.material.uniforms.uStr.value = ak * 1.1; m.visible = ak > 0.01; });
+    if (ak > 0) W.hemi.color.lerp(_ag, 0.3 * ak);
+  }
   const glow = cur.glow * smooth(-0.15, 0.02, sd.y);
   const u = W.skyMat.uniforms;
   u.top.value.copy(cur.top); u.bottom.value.copy(cur.bottom); u.sunDir.value.copy(sd); u.moonDir.value.copy(md); u.sunColor.value.copy(cur.disc);
@@ -59,7 +93,6 @@ export function applyTime() {
   FOG[0] = L.x; FOG[1] = L.y; FOG[2] = L.z; FOG[3] = cur.insc * fade;
   FOG[4] = 2.3 / cur.fogFar; FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
   _fc.copy(cur.disc).multiplyScalar(up ? 1.0 : 0.45); FOG[8] = _fc.r; FOG[9] = _fc.g; FOG[10] = _fc.b; FOG[11] = 0;
-  /* 잎 재질용: 카메라(뷰) 공간의 광원 방향과 투과 색 */
   ctx.camera.matrixWorldInverse.copy(ctx.camera.matrixWorld).invert();
   W.uSunV.value.copy(L).transformDirection(ctx.camera.matrixWorldInverse);
   W.uLeafCol.value.copy(cur.sunColor).multiplyScalar(cur.sunI * fade * 0.2);
@@ -111,7 +144,7 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0 };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
@@ -141,6 +174,7 @@ export function buildScene(bgKey) {
     m.visible = false; m.frustumCulled = false; scene.add(m);
     W.meteors.push({ mesh: m, t: 0, life: 0, head: new THREE.Vector3(), dir: new THREE.Vector3(), speed: 0, len: 0, width: 0 });
   }
+  if (cfg.snow) makeAurora(W, scene);
 
   if (cfg.water) { W.shoreTex = bakeShoreTex(cfg); W.heightTex = bakeHeightMap(cfg); }
   const ground = makeGround(cfg, W.uTime, W.shoreTex); scene.add(ground); W.groundMat = ground.material;
