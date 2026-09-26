@@ -51,16 +51,16 @@ function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine',
 /* ── 위치 음원 ── */
 function makeFireSrc() {
   const pan = panner(0.3, 0.6, -1.4, 1.6, 45, 1.1), g = gain(0); g.connect(pan);
-  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.55); chain(rum, rl, rg, g); rum.start(0, off());     // 낮은 웅웅거림 (팝을 덮지 않게 낮춤)
-  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.04); chain(hs, hf, hg, g); hs.start(0, off());   // 불이 숨 쉬는 소리
+  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.55); chain(rum, rl, rg, g); rum.start(0, off());
+  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.04); chain(hs, hf, hg, g); hs.start(0, off());
   const [lo, lg] = lfo(0.6, 0.025, hg.gain);
   const src = { pan, gain: g, nodes: [rum, rl, rg, hs, hf, hg, lo, lg, g, pan], popT: null };
   const pop = big => {
     const t = AC.currentTime;
     if (big) {
-      burst(g, false, 'lowpass', rnd(350, 650), 1, 0.003, rnd(0.22, 0.34), 0.13, t);                                          // 큰 탁!
-      const n = 2 + Math.floor(Math.random() * 2); for (let i = 0; i < n; i++) burst(g, false, 'highpass', rnd(2500, 4500), 1, 0.002, rnd(0.03, 0.06), 0.03, t + 0.03 + Math.random() * 0.12);   // 뒤따르는 불티
-    } else burst(g, false, 'bandpass', rnd(1400, 3600), 1.8, 0.003, rnd(0.06, 0.13), 0.045, t);                             // 잔잔한 탁탁
+      burst(g, false, 'lowpass', rnd(350, 650), 1, 0.003, rnd(0.22, 0.34), 0.13, t);
+      const n = 2 + Math.floor(Math.random() * 2); for (let i = 0; i < n; i++) burst(g, false, 'highpass', rnd(2500, 4500), 1, 0.002, rnd(0.03, 0.06), 0.03, t + 0.03 + Math.random() * 0.12);
+    } else burst(g, false, 'bandpass', rnd(1400, 3600), 1.8, 0.003, rnd(0.06, 0.13), 0.045, t);
   };
   const loop = () => { if (!fire) return; if (ctx.W.fireLit) pop(Math.random() < 0.09); src.popT = setTimeout(loop, rnd(50, 360)); }; loop();
   fire = src;
@@ -199,15 +199,17 @@ function footstep(surface) {
     grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05);
     burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
   } else if (surface === 'sand') {
-    tone(pan, 60, 40, 0.006, 0.1 * v, 0.1, t0);
-    burst(pan, true, 'lowpass', 260, 1, 0.01, 0.09 * v, 0.22, t0);
-    grains(10, 0.16, false, 'bandpass', 1500, 1, 0.012, 0.04, t0 + 0.01);
-    burst(pan, true, 'lowpass', 220, 1, 0.01, 0.04 * v, 0.14, t0 + 0.1);
+    tone(pan, 60, 42, 0.008, 0.06 * v, 0.1, t0);                                  // 낮고 짧은 쿵 (모래가 흡수)
+    burst(pan, true, 'lowpass', 420, 1, 0.012, 0.09 * v, 0.24, t0, 220, 0.24);     // 발이 파고들며 미끄러지는 소리 (주파수 내려감)
+    grains(16, 0.2, false, 'bandpass', 2600, 1.2, 0.028, 0.035, t0);               // 모래알 서걱임
+    grains(6, 0.1, false, 'bandpass', 3400, 1.5, 0.018, 0.03, t0 + 0.14);          // 앞꿈치 뗄 때 흩어지는 알갱이
   } else {
-    tone(pan, 70, 45, 0.004, 0.16 * v, 0.08, t0);
-    burst(pan, true, 'lowpass', 500, 1, 0.004, 0.08 * v, 0.1, t0);
-    grains(6, 0.09, false, 'bandpass', 3200, 1.5, 0.02, 0.03, t0);
-    burst(pan, true, 'lowpass', 700, 1, 0.004, 0.05 * v, 0.08, t0 + 0.09);
+    tone(pan, 75, 50, 0.004, 0.08 * v, 0.07, t0);                                  // 흙의 둔탁함 (약하게)
+    burst(pan, true, 'lowpass', 600, 1, 0.005, 0.06 * v, 0.09, t0);
+    burst(pan, false, 'bandpass', 900, 1.0, 0.006, 0.05 * v, 0.07, t0);            // 풀이 눌리는 부드러운 소리
+    grains(10, 0.14, false, 'bandpass', 3600, 1.2, 0.03, 0.03, t0);                // 잎 바스락
+    burst(pan, true, 'lowpass', 700, 1, 0.005, 0.04 * v, 0.07, t0 + 0.1);          // 앞꿈치
+    grains(4, 0.06, false, 'bandpass', 3000, 1.2, 0.02, 0.025, t0 + 0.11);
   }
 }
 
@@ -227,6 +229,5 @@ export function sfx(type, surface) {
     case 'exhale': burst(B, false, 'bandpass', 900, 0.6, 0.05, 0.04, 0.7, t, 450, 0.7); return;
     case 'lighter': burst(B, false, 'highpass', 3000, 1, 0.003, 0.12, 0.14, t); return;
     case 'sit': burst(B, false, 'highpass', 1500, 1, 0.03, 0.035, 0.18, t); return;
-    case 'trunk': sfx('trunkOpen'); return;
   }
 }
