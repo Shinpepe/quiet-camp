@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
-import { rnd, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex } from './util.js';
+import { rnd, fbm, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 
