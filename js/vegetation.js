@@ -124,22 +124,29 @@ function gridGeo(nu, nv, fn) {
   for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = i * (nv + 1) + j, b = a + nv + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
   const g = new THREE.BufferGeometry(); g.setIndex(idx); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g;
 }
-/* 소라: 로그 나선으로 감기는 관. 한 바퀴마다 2.2배 굵어지며 아래로 내려간다. 표면 이랑 + 나선 방향 골. 옆으로 눕힘 */
+/* 소라: 원뿔에 나선 이랑이 5바퀴 감기고, 아래 몸통이 볼록했다가 오므라든다. 옆으로 눕힘(축이 x) */
 function conchGeo() {
-  const g = gridGeo(140, 14, (u, v) => {
-    const t = u * 3.5 * Math.PI * 2, r = 0.08 * Math.exp(0.1255 * t), R = 0.62 * r * (1 + 0.05 * Math.sin(v * Math.PI * 2 * 7) + 0.04 * Math.sin(t * 12)), ph = v * Math.PI * 2;
-    const cx = r * Math.cos(t), cz = r * Math.sin(t), cy = -0.55 * r, rx = Math.cos(t), rz = Math.sin(t);
-    return [cx + R * Math.cos(ph) * rx, cy + R * Math.sin(ph), cz + R * Math.cos(ph) * rz];
+  const g = gridGeo(90, 36, (u, v) => {
+    const th = v * Math.PI * 2;
+    let r = u < 0.82 ? Math.pow(u / 0.82, 1.15) : 1 - 0.5 * Math.pow((u - 0.82) / 0.18, 1.6);
+    const sp = ((u * 5 - v) % 1 + 1) % 1, whorl = Math.exp(-Math.pow(sp - 0.5, 2) * 45);
+    r *= 1 + 0.13 * whorl * Math.min(1, u * 4) + 0.02 * Math.sin(th * 18);
+    return [r * Math.cos(th), 1.7 * (1 - u), r * Math.sin(th)];
   });
-  g.translate(0, 0.7, 0); g.rotateZ(Math.PI / 2); return g;
+  g.rotateZ(Math.PI / 2); return g;
 }
-/* 가리비: 경첩에서 220° 부채꼴로 퍼지고 가운데가 볼록, 방사형 골 16개 */
+/* 가리비: 물결치는 가장자리, 방사형 골 16개, 가운데가 볼록, 경첩에 귀 두 개. 위·아래 면이 있어 두께가 보인다 */
 function clamGeo() {
-  return gridGeo(12, 40, (u, v) => {
-    const a = (v - 0.5) * Math.PI * 1.22, r = u, rib = 0.5 + 0.5 * Math.cos(a * 16);
-    const y = 0.26 * Math.sin(Math.PI * Math.min(1, r * 1.05)) + 0.045 * rib * r;
+  const shell = (top) => gridGeo(14, 48, (u, v) => {
+    const a = (v - 0.5) * Math.PI * 1.25, rib = 0.5 + 0.5 * Math.cos(a * 16), r = u * (1 + 0.05 * (rib - 0.5) * u * u);
+    const dome = 0.32 * Math.sin(Math.PI * Math.min(1, r * 1.05)) * (1 - 0.25 * r);
+    const y = top ? dome + 0.05 * rib * r : -0.03 * (1 - r * r);
     return [r * Math.sin(a), y, r * Math.cos(a)];
   });
+  return mergeParts([
+    { geo: shell(true), color: 0xffffff }, { geo: shell(false), color: 0xffffff },
+    { geo: new THREE.BoxGeometry(0.24, 0.06, 0.18), color: 0xffffff, x: -0.3, y: 0.03, z: -0.06 }, { geo: new THREE.BoxGeometry(0.24, 0.06, 0.18), color: 0xffffff, x: 0.3, y: 0.03, z: -0.06 },
+  ]);
 }
 function reserved(x, z) { if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true; if (ctx.W.cfg.dock && x > 3 && x < 9 && z < -6 && z > -22) return true; return false; }
 
@@ -187,7 +194,7 @@ export function makeVegetation(cfg) {
       }
       if (reeds.length) scene.add(instanced(reedGeo(), swayMat(fol(), 0.05, 0.2), reeds, false));
     }
-    if (cfg.key !== 'beach') {   // 자갈은 호수에만 — 모래사장에 자갈이 많으면 어색하다
+    if (cfg.key !== 'beach') {
       const pb = [];
       for (let t = 0; t < 1400 && pb.length < 450; t++) {
         const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
@@ -196,14 +203,14 @@ export function makeVegetation(cfg) {
       }
       if (pb.length) scene.add(instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false));
     }
-    if (cfg.key === 'beach') {   // 조개껍데기: 해안선 육지 쪽 띠에 드문드문, 반쯤 모래에 묻혀서
+    if (cfg.key === 'beach') {
       const tints = [[0.96, 0.92, 0.82], [0.95, 0.84, 0.8], [0.97, 0.97, 0.94], [0.86, 0.76, 0.62], [0.92, 0.88, 0.9]], conch = [], clam = [];
       for (let t = 0; t < 400 && conch.length + clam.length < 60; t++) {
         const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
         const z = cfg.water.z + shoreOff(x, cfg) + rnd(-1.6, 4.2), h = terrainH(x, z, cfg); if (h < WATER_Y + 0.02) continue;
         const tint = tints[Math.floor(Math.random() * tints.length)];
-        if (Math.random() < 0.55) { const s = rnd(0.035, 0.06); clam.push({ x, y: h - s * 0.05, z, s, rot: rnd(0, 6.3), rx: rnd(-0.2, 0.2), tint }); }
-        else { const s = rnd(0.04, 0.06); conch.push({ x, y: h + s * rnd(0.35, 0.6), z, s, rot: rnd(0, 6.3), rx: rnd(-0.3, 0.3), tint }); }
+        if (Math.random() < 0.55) { const s = rnd(0.04, 0.065); clam.push({ x, y: h + s * 0.03, z, s, rot: rnd(0, 6.3), rx: rnd(-0.2, 0.2), tint }); }
+        else { const s = rnd(0.045, 0.07); conch.push({ x, y: h + s * rnd(0.55, 0.85), z, s, rot: rnd(0, 6.3), rx: rnd(-0.25, 0.25), tint }); }
       }
       const shellM = smoothM(0xffffff, { roughness: 0.5, side: THREE.DoubleSide });
       if (conch.length) scene.add(instanced(conchGeo(), shellM, conch, false));
