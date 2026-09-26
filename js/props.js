@@ -266,11 +266,9 @@ export function makeLighthouse() {
   const rock = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(13, 1), 0.25), std(0x5a5f66, tex('rock', 3, 3, 0.5))); rock.scale.set(1.3, 0.5, 1); rock.position.y = -2.5; g.add(rock);
   for (let i = 0; i < 5; i++) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(2, 4), 0), 0.4), std(0x555a60, tex('rock', 2, 2, 0.5))); const a = rnd(0, 6.3), d = rnd(12, 17); r.position.set(Math.cos(a) * d, rnd(-1.5, 0.5), Math.sin(a) * d * 0.8); r.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(r); }
   const top = 4.0;
-  /* 콘크리트 기초: 바위 속으로 3m 박혀 있어 바위 모양과 무관하게 땅에 붙는다 */
   const base = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 3.2, 18), concrete); base.position.y = top - 1.4; g.add(base);
   const slab = new THREE.Mesh(new THREE.BoxGeometry(6.2, 3.2, 7.2), concrete); slab.position.set(4.6, top - 1.4, 2.5); g.add(slab);
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 12, 18), white); tower.position.y = top + 6; g.add(tower);
-  /* 빨간 띠: 탑 표면보다 6cm 바깥에 같은 기울기로 — 면이 겹치면 깜빡인다 */
   const rAt = y => 1.8 - 0.4 * (y / 12) + 0.06;
   [3, 6.6].forEach(h => { const b = new THREE.Mesh(new THREE.CylinderGeometry(rAt(h + 0.75), rAt(h - 0.75), 1.5, 18), red); b.position.y = top + h; g.add(b); });
   const gal = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 1.9, 0.35, 18), dark); gal.position.y = top + 12.1; g.add(gal);
@@ -287,7 +285,7 @@ export function makeLighthouse() {
   const house = new THREE.Mesh(new THREE.BoxGeometry(4.2, 3, 5), white); house.position.set(4.6, top + 1.5, 2.5); g.add(house);
   const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, 3.2, 1.8, 4), red); roof.scale.set(1, 1, 1.3); roof.rotation.y = Math.PI / 4; roof.position.set(4.6, top + 3.9, 2.5); g.add(roof);
   const win = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.0), new THREE.MeshBasicMaterial({ color: 0x4a5560 })); win.position.set(6.71, top + 1.8, 2.0); win.rotation.y = Math.PI / 2; g.add(win);
-  shadowed(g); [glass, glow, lamp, ...beams].forEach(o => { o.castShadow = false; o.userData.noAO = true; });
+  shadowed(g); [glass, glow, lamp, rock, ...beams].forEach(o => { o.castShadow = false; }); [glass, glow, lamp, ...beams].forEach(o => { o.userData.noAO = true; });
   W.lighthouse = { group: g, pivot, glow, beamMat, lamp, win };
   return g;
 }
@@ -320,6 +318,22 @@ export function makeItem(type) {
     [[0.008, 0.012, 0.005, 0.4, 0.5], [-0.012, 0.018, -0.006, 0.9, 1.6]].forEach(([x, y, z, rx, ry]) => { const c = new THREE.Mesh(jitter(new THREE.BoxGeometry(0.026, 0.026, 0.026, 2, 2, 2), 0.15), ice); c.position.set(x, y, z); c.rotation.set(rx, ry, 0.2); c.renderOrder = 2; c.userData.y0 = y; ices.push(c); g.add(c); });
     emitter.position.y = 0.04;
     g.userData.setAmount = a => { liq.scale.y = Math.max(0.03, a); liq.position.y = -0.023 + 0.019 * a; liq.visible = a > 0.02; ices.forEach(c => { c.position.y = Math.max(-0.014, c.userData.y0 - (1 - a) * 0.034); }); };
+  } else if (type === 'sparkler') {
+    /* 철사 스틱. 위쪽 회색 코팅이 끝에서부터 타 들어가 검게 남고, 발광점이 아래로 내려온다 */
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.0015, 0.0015, 0.3, 6), smoothM(0x5c5a55, { metalness: 0.6, roughness: 0.5 })); wire.position.y = 0.15; g.add(wire);
+    const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.0038, 1, 8), smoothM(0x8d8880, { roughness: 1 })); g.add(coat);
+    const burnt = new THREE.Mesh(new THREE.CylinderGeometry(0.0034, 0.0034, 1, 8), smoothM(0x2b2622, { roughness: 1 })); g.add(burnt);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 8), new THREE.MeshBasicMaterial({ color: 0xfff6d8 })); tip.visible = false; g.add(tip); g.userData.tip = tip;
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xffd08a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); glow.scale.setScalar(0.14); g.add(glow); g.userData.glow = glow;
+    const light = new THREE.PointLight(0xffd8a0, 0, 3.5, 2); g.add(light); g.userData.light = light;
+    g.userData.lit = false; g.userData.igniting = false;
+    g.userData.setAmount = a => {
+      const y0 = 0.08, L = 0.22, end = y0 + L * a;
+      coat.scale.y = Math.max(0.001, L * a); coat.position.y = y0 + L * a * 0.5; coat.visible = a > 0.005;
+      burnt.scale.y = Math.max(0.001, L * (1 - a)); burnt.position.y = end + L * (1 - a) * 0.5; burnt.visible = a < 0.995;
+      tip.position.y = end; glow.position.y = end; light.position.y = end; emitter.position.y = end;
+    };
+    g.userData.setLit = on => { g.userData.lit = on; tip.visible = on; if (!on) { glow.material.opacity = 0; light.intensity = 0; } };
   } else {
     const paper = smoothM(0xf4f1ea, { roughness: 0.9 });
     const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 12), paper); cig.rotation.z = Math.PI / 2; g.add(cig);
@@ -444,6 +458,41 @@ export class Footprints {
     let any = false;
     for (let i = 0; i < this.n; i++) { if (this.age[i] >= this.life) continue; this.age[i] += dt; const t = this.age[i] / this.life; this.k[i] = t < 0.25 ? 1 : Math.max(0, 1 - (t - 0.25) / 0.75); any = true; }
     if (any) this.mesh.geometry.attributes.aK.needsUpdate = true;
+  }
+}
+
+/* ── 불티: 짧은 선분. 빠르게 튀어나가 공기 저항과 중력으로 휘며 꺼지고, 일부는 끝에서 두 갈래로 갈라진다 ── */
+export class Sparks {
+  constructor(n) {
+    this.n = n; this.i = 0; this.pos = new Float32Array(n * 3); this.vel = new Float32Array(n * 3); this.life = new Float32Array(n); this.max = new Float32Array(n);
+    this.pts = new Float32Array(n * 6); this.col = new Float32Array(n * 6);
+    for (let i = 0; i < n * 6; i += 3) { this.pts[i + 1] = -999; }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.pts, 3)); g.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
+    this.mesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    this.mesh.frustumCulled = false; this.mesh.userData.noAO = true;
+  }
+  spawn(p, speed, life) {
+    const i = this.i; this.i = (i + 1) % this.n;
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(rnd(-1, 1)), s = speed || rnd(1.6, 4.2);
+    this.pos[i * 3] = p.x; this.pos[i * 3 + 1] = p.y; this.pos[i * 3 + 2] = p.z;
+    this.vel[i * 3] = Math.sin(ph) * Math.cos(th) * s; this.vel[i * 3 + 1] = Math.cos(ph) * s + 0.6; this.vel[i * 3 + 2] = Math.sin(ph) * Math.sin(th) * s;
+    this.life[i] = 0; this.max[i] = life || (Math.random() < 0.3 ? rnd(0.35, 0.6) : rnd(0.1, 0.28));
+  }
+  update(dt) {
+    const P = this.pos, V = this.vel, Q = this.pts, C = this.col;
+    for (let i = 0; i < this.n; i++) {
+      if (this.life[i] >= this.max[i]) { if (Q[i * 6 + 1] > -900) { Q[i * 6 + 1] = Q[i * 6 + 4] = -999; } continue; }
+      this.life[i] += dt; const k = this.life[i] / this.max[i];
+      V[i * 3] *= 1 - 2.2 * dt; V[i * 3 + 1] = (V[i * 3 + 1] - 6 * dt) * (1 - 2.2 * dt); V[i * 3 + 2] *= 1 - 2.2 * dt;
+      P[i * 3] += V[i * 3] * dt; P[i * 3 + 1] += V[i * 3 + 1] * dt; P[i * 3 + 2] += V[i * 3 + 2] * dt;
+      const tail = 0.022;
+      Q[i * 6] = P[i * 3]; Q[i * 6 + 1] = P[i * 3 + 1]; Q[i * 6 + 2] = P[i * 3 + 2];
+      Q[i * 6 + 3] = P[i * 3] - V[i * 3] * tail; Q[i * 6 + 4] = P[i * 3 + 1] - V[i * 3 + 1] * tail; Q[i * 6 + 5] = P[i * 3 + 2] - V[i * 3 + 2] * tail;
+      const a = 1 - k * k, r = 1.0 * a, gg = (0.85 - 0.25 * k) * a, b = (0.55 - 0.4 * k) * a;
+      C[i * 6] = r; C[i * 6 + 1] = gg; C[i * 6 + 2] = b; C[i * 6 + 3] = r * 0.3; C[i * 6 + 4] = gg * 0.3; C[i * 6 + 5] = b * 0.3;
+      if (this.life[i] >= this.max[i] && Math.random() < 0.35 && this.max[i] > 0.3) { const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2]; for (let j = 0; j < 2; j++) this.spawn({ x: px, y: py, z: pz }, rnd(0.6, 1.4), rnd(0.06, 0.12)); }
+    }
+    this.mesh.geometry.attributes.position.needsUpdate = true; this.mesh.geometry.attributes.color.needsUpdate = true;
   }
 }
 
