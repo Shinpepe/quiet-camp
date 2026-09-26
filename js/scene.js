@@ -4,8 +4,7 @@ import { BG } from './data.js';
 import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
-import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, contactShadow, Particles, Smoke, Footprints, birdMat } from './props.js';
-import { startCrackle } from './audio.js';
+import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, contactShadow, Particles, Smoke, Sparks, Footprints, birdMat } from './props.js';
 import { paramsAt, sunDirAt } from './time.js';
 
 const streakTex = canvasTex(128, 16, (g, w, h) => {
@@ -199,8 +198,10 @@ export function buildScene(bgKey) {
   if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime, W.heightTex, waterEdge(cfg)); scene.add(W.water); }
   makeVegetation(cfg);
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
-  if (cfg.key === 'beach') { const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh); }
-  if (cfg.key === 'beach') for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const h = terrainH(x, z, cfg); if (h < 0.1) continue; const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
+  if (cfg.key === 'beach') {
+    const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
+    for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const h = terrainH(x, z, cfg); if (h < 0.1) continue; const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
+  }
 
   const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);
   const chair = makeChair(); chair.position.set(1.5, 0, 0.8); scene.add(chair);
@@ -217,6 +218,7 @@ export function buildScene(bgKey) {
   W.fire = new Particles(160, { color: 0xff8c2a, size: 0.2, opacity: 0.5, blending: THREE.AdditiveBlending }); scene.add(W.fire.mesh);
   W.fireCore = new Particles(90, { color: 0xfff2b0, size: 0.11, opacity: 0.75, blending: THREE.AdditiveBlending }); scene.add(W.fireCore.mesh);
   W.embers = new Particles(80, { color: 0xffa040, size: 0.035, opacity: 0.95, blending: THREE.AdditiveBlending }); scene.add(W.embers.mesh);
+  W.sparks = new Sparks(260); scene.add(W.sparks.mesh);
   W.prints = cfg.snow ? new Footprints(140, [0.66, 0.7, 0.8], 45) : cfg.key === 'beach' ? new Footprints(140, [0.72, 0.65, 0.55], 90) : null;
   if (W.prints) scene.add(W.prints.mesh);
   if (cfg.snow) {
@@ -245,5 +247,4 @@ export function buildScene(bgKey) {
   if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.6], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉기' });
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();
-  if (W.fireLit) startCrackle();
 }
