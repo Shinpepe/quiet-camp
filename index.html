@@ -15,12 +15,12 @@
 <body>
 <canvas id="c"></canvas>
 <div id="fade"></div>
-<div id="loading" class="on"><div class="ring"></div><div>장소를 준비하는 중</div></div>
+<div id="loading" class="on"><div class="ring"></div><div>캠핑을 준비하는 중</div></div>
 <div id="menu">
   <div class="side">
     <div class="eyebrow">QUIET CAMP</div>
     <h1>고요 속의 캠핑</h1>
-    <div class="tag">원하는 곳에서 원하는 시간에.<br>차에서 내려, 짐을 꺼내고, 잠시 쉬다가세요.</div>
+    <div class="tag">원하는 곳에서 원하는 시간에.<br>차에서 내려, 짐을 꺼내고, 잠시 쉬었다 가세요.</div>
     <div class="sec">장소</div>
     <div id="bgList"></div>
     <div class="sec">시작 시각</div>
@@ -31,11 +31,11 @@
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>걷기</span></div>
       <div><kbd>마우스</kbd><span>둘러보기</span></div>
       <div><kbd class="a">E</kbd><span>상호작용</span></div>
-      <div><kbd>클릭</kbd><span>손에 든 것 한 모금. 길게 누르면 계속</span></div>
+      <div><kbd>클릭</kbd><span>손에 든 것 사용</span></div>
       <div><kbd>P</kbd><span>사진</span></div>
       <div><kbd>ESC</kbd><span>잠시 멈춤</span></div>
     </div>
-    <div class="legend">모바일 — 왼쪽 드래그 이동/오른쪽 드래그 시선/화면 버튼으로 행동</div>
+    <div class="legend">모바일 — 왼쪽 드래그 이동 / 오른쪽 드래그 시선 / 화면 버튼으로 행동</div>
     <div class="sec">설정</div>
     <div class="settings">
       <span>소리</span><input type="range" id="vol" min="0" max="1" step="0.05" value="0.5"><span id="volV">50%</span>
@@ -54,14 +54,14 @@
   <button id="pausebtn" title="잠시 멈춤" aria-label="잠시 멈춤"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg></button>
   <div id="cross"></div>
   <div id="prompt"></div>
-  <div id="legend"><kbd>E</kbd> 상호작용 &nbsp; <kbd>클릭</kbd> 한 모금 &nbsp; <kbd>P</kbd> 사진 &nbsp; <kbd>ESC</kbd> 멈춤</div>
+  <div id="legend"><kbd>E</kbd> 상호작용 &nbsp; <kbd>클릭</kbd> 손에 든 것 &nbsp; <kbd>P</kbd> 사진 &nbsp; <kbd>ESC</kbd> 멈춤</div>
   <div id="itembox"><span class="ic"></span><div><div class="nm"></div><div class="hn"></div></div></div>
   <div id="toast"></div>
   <div id="sleep"><small>QUIET CAMP</small><span id="sleepText"></span><em>밤이 깊어간다</em></div>
   <div id="lockmsg">화면을 클릭하면 시작합니다<small>ESC : 잠시 멈춤</small></div>
   <div id="mobile"><button class="b" id="mAct">행동</button><button class="b" id="mSip">한 모금</button></div>
   <div class="modal" id="trunk"><div class="box">
-    <h2>트렁크</h2><div class="sub">뭘 가져갈까. 서두를 필요는 없다.</div>
+    <h2>트렁크</h2><div class="sub">뭘 가져갈까. 천천히 골라보자.</div>
     <div class="cards" id="trunkItems"></div>
     <div class="row"><button class="b" id="trunkClose">닫기 <kbd>E</kbd></button></div>
   </div></div>
@@ -72,7 +72,7 @@
       <span>시선 감도</span><input type="range" id="sens2" min="0.3" max="2" step="0.1" value="1"><span id="sensV2">1.0</span>
     </div>
     <div class="row"><button class="b p" id="resume">계속하기</button><button class="b" id="photoBtn">사진 찍기 <kbd>P</kbd></button><button class="b" id="toMenu">장소 바꾸기</button></div>
-    <div class="hint"><kbd>ESC</kbd> 또는 <kbd>Enter</kbd> 바탕을 눌러도 계속됩니다</div>
+    <div class="hint"><kbd>ESC</kbd> 또는 <kbd>Enter</kbd> 화면을 클릭하면 계속됩니다</div>
   </div></div>
 </div>
 <script type="module" src="js/main.js"></script>
