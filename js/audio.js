@@ -1,54 +1,185 @@
+import * as THREE from 'three';
 import { ctx, settings } from './state.js';
 import { rnd } from './util.js';
 
-let AC = null, master, ambNodes = [], chirpTimer = null, crackleTimer = null;
+/* 구조: [월드 소리들] → worldLP(실내 필터) → worldGain → comp → master → 출력
+         [효과음]      → sfxBus ──────────────────────────→ comp
+   월드 소리 = 배경 베드(무위치) + 위치 음원(모닥불·물가·랜턴) + 간헐 이벤트 */
+let AC = null, master, comp, worldLP, worldGain, sfxBus;
 let whiteBuf = null, brownBuf = null;
+let bed = null, evTimer = null, sceneKey = null;
+let fire = null, water = null, lamps = null;
+const _f = new THREE.Vector3(), _u = new THREE.Vector3();
 
 export function initAudio() {
   if (AC) return;
   AC = new (window.AudioContext || window.webkitAudioContext)();
   whiteBuf = brownBuf = null;
   master = AC.createGain(); master.gain.value = settings.vol; master.connect(AC.destination);
+  comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 3; comp.attack.value = 0.01; comp.release.value = 0.25; comp.connect(master);
+  worldLP = AC.createBiquadFilter(); worldLP.type = 'lowpass'; worldLP.frequency.value = 20000;
+  worldGain = AC.createGain(); worldGain.gain.value = 1; worldLP.connect(worldGain); worldGain.connect(comp);
+  sfxBus = AC.createGain(); sfxBus.gain.value = 1; sfxBus.connect(comp);
 }
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.value = v; }
+/* 텐트·차 안: 고음이 먹먹해지고 조금 작아진다 */
+export function setIndoor(on) { if (!AC) return; const t = AC.currentTime; worldLP.frequency.setTargetAtTime(on ? 1100 : 20000, t, 0.15); worldGain.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.15); }
+export function startCrackle() {}   // 호환용 — 장작 소리는 이제 위치 음원이 W.fireLit 을 보고 스스로 켜고 끈다
 
-/* 노이즈 버퍼는 종류별로 한 번만 만들고 재사용한다. 재생 시작 오프셋을 랜덤으로 줘서 매번 다른 구간이 들린다. */
+/* ── 재료 ── */
 function noiseBuf(brown) {
-  if (brown && brownBuf) return brownBuf;
-  if (!brown && whiteBuf) return whiteBuf;
+  if (brown && brownBuf) return brownBuf; if (!brown && whiteBuf) return whiteBuf;
   const len = AC.sampleRate * 3, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0); let last = 0;
   for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; if (brown) { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } else d[i] = w; }
-  if (brown) brownBuf = b; else whiteBuf = b;
-  return b;
+  if (brown) brownBuf = b; else whiteBuf = b; return b;
 }
 const off = () => Math.random() * 2.4;
+const noise = (brown, loop) => { const s = AC.createBufferSource(); s.buffer = noiseBuf(brown); s.loop = !!loop; return s; };
+const filt = (type, f, q) => { const n = AC.createBiquadFilter(); n.type = type; n.frequency.value = f; if (q !== undefined) n.Q.value = q; return n; };
+const gain = v => { const g = AC.createGain(); g.gain.value = v; return g; };
+const osc = (type, f) => { const o = AC.createOscillator(); o.type = type || 'sine'; o.frequency.value = f; return o; };
+const chain = (...n) => { for (let i = 0; i < n.length - 1; i++) n[i].connect(n[i + 1]); return n[0]; };
+const env = (g, t, a, peak, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+const lfo = (hz, depth, target) => { const o = osc('sine', hz), g = gain(depth); o.connect(g); g.connect(target); o.start(); return [o, g]; };
+const spanner = () => { const p = AC.createStereoPanner(); p.pan.value = rnd(-0.8, 0.8); p.connect(worldLP); return p; };
+function setPos(n, x, y, z) { if (n.positionX) { n.positionX.value = x; n.positionY.value = y; n.positionZ.value = z; } else n.setPosition(x, y, z); }
+function panner(x, y, z, ref, max, roll) { const p = AC.createPanner(); p.panningModel = 'equalpower'; p.distanceModel = 'inverse'; p.refDistance = ref; p.maxDistance = max; p.rolloffFactor = roll; setPos(p, x, y, z); p.connect(worldLP); return p; }
+function kill(nodes) { nodes.forEach(n => { try { n.stop && n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} }); }
 
-export function stopAmbience() { ambNodes.forEach(n => { try { n.stop && n.stop(); n.disconnect(); } catch (e) {} }); ambNodes = []; clearTimeout(chirpTimer); clearTimeout(crackleTimer); }
-export function startAmbience(type, timeKey) {
-  if (!AC) return; stopAmbience();
-  const src = AC.createBufferSource(); src.buffer = noiseBuf(true); src.loop = true;
-  const f = AC.createBiquadFilter(); f.type = 'lowpass'; const g = AC.createGain(); src.connect(f); f.connect(g); g.connect(master);
-  const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.connect(lg);
-  if (type === 'waves') { f.frequency.value = 700; g.gain.value = 0.32; lfo.frequency.value = 0.085; lg.gain.value = 0.2; lg.connect(g.gain); }
-  else if (type === 'wind') { f.frequency.value = 420; g.gain.value = 0.28; lfo.frequency.value = 0.045; lg.gain.value = 260; lg.connect(f.frequency); const l2 = AC.createOscillator(), g2 = AC.createGain(); l2.frequency.value = 0.11; g2.gain.value = 0.12; l2.connect(g2); g2.connect(g.gain); l2.start(); ambNodes.push(l2); }
-  else { f.frequency.value = 900; g.gain.value = 0.07; lfo.frequency.value = 0.07; lg.gain.value = 0.03; lg.connect(g.gain); }
-  src.start(0, off()); lfo.start(); ambNodes.push(src, lfo, f, g, lg);
-  if (type === 'forest') {
-    if (timeKey === 'night') { const o = AC.createOscillator(), og = AC.createGain(), pl = AC.createOscillator(), pg = AC.createGain(); o.frequency.value = 4300; og.gain.value = 0.012; pl.frequency.value = 18; pg.gain.value = 0.012; pl.connect(pg); pg.connect(og.gain); o.connect(og); og.connect(master); o.start(); pl.start(); ambNodes.push(o, pl, og, pg); }
-    else { const loop = () => { chirp(); chirpTimer = setTimeout(loop, rnd(1800, 6000)); }; chirpTimer = setTimeout(loop, 1500); }
-  }
-  if (ctx.W.fireLit) startCrackle();
+/* ── 위치 음원 ── */
+function makeFireSrc() {
+  const pan = panner(0.3, 0.6, -1.4, 1.2, 45, 1.3), g = gain(0); g.connect(pan);
+  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.9); chain(rum, rl, rg, g); rum.start(0, off());     // 낮은 웅웅거림
+  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.05); chain(hs, hf, hg, g); hs.start(0, off());   // 불이 숨 쉬는 소리
+  const [lo, lg] = lfo(0.6, 0.03, hg.gain);
+  const src = { pan, gain: g, nodes: [rum, rl, rg, hs, hf, hg, lo, lg, g, pan], popT: null };
+  const pop = big => {
+    const t = AC.currentTime, s = noise(false), f = big ? filt('lowpass', rnd(350, 600)) : filt('bandpass', rnd(1200, 3200), 1.5), pg = gain(0);
+    env(pg, t, 0.004, big ? rnd(0.12, 0.2) : rnd(0.02, 0.06), big ? 0.12 : 0.05); chain(s, f, pg, g); s.start(t, off()); s.stop(t + 0.2);
+  };
+  const loop = () => { if (!fire) return; if (ctx.W.fireLit) pop(Math.random() < 0.07); src.popT = setTimeout(loop, rnd(60, 420)); }; loop();
+  fire = src;
 }
-export function startCrackle() { if (!AC) return; clearTimeout(crackleTimer); const loop = () => { if (!ctx.W.fireLit) return; pop(); crackleTimer = setTimeout(loop, rnd(60, 420)); }; loop(); }
-function pop() { const t = AC.currentTime, s = AC.createBufferSource(); s.buffer = noiseBuf(false); const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = rnd(1200, 3200); f.Q.value = 1.5; const g = AC.createGain(); g.gain.setValueAtTime(rnd(0.015, 0.05), t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05); s.connect(f); f.connect(g); g.connect(master); s.start(t, off()); s.stop(t + 0.08); }
-function chirp() { if (!AC) return; const n = 2 + Math.floor(Math.random() * 3), t0 = AC.currentTime, base = rnd(2200, 3400); for (let i = 0; i < n; i++) { const o = AC.createOscillator(), g = AC.createGain(), t = t0 + i * 0.16; o.frequency.setValueAtTime(base, t); o.frequency.exponentialRampToValueAtTime(base * 1.4, t + 0.08); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.035, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.15); } }
-export function sfx(type) {
+function makeWaterSrc(type, z) {
+  const pan = panner(0, 0, z, 5, 160, 0.9), nodes = [pan];
+  if (type === 'waves') {
+    const s = noise(true, true), f = filt('lowpass', 700), g = gain(0.5); chain(s, f, g, pan); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.085, 0.3, g.gain));
+    const w = noise(false, true), wf = filt('bandpass', 1800, 0.5), wg = gain(0.05); chain(w, wf, wg, pan); w.start(0, off()); nodes.push(w, wf, wg, ...lfo(0.07, 0.04, wg.gain));   // 거품 쉬익
+  } else {
+    const s = noise(true, true), f = filt('lowpass', 450), g = gain(0.13); chain(s, f, g, pan); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.2, 0.06, g.gain));            // 찰랑임
+    const w = noise(false, true), wf = filt('bandpass', 2500, 0.6), wg = gain(0.012); chain(w, wf, wg, pan); w.start(0, off()); nodes.push(w, wf, wg, ...lfo(0.3, 0.01, wg.gain));
+  }
+  water = { pan, z, nodes };
+}
+function makeHiss(x, y, z) {
+  const pan = panner(x, y, z, 0.5, 8, 2.2), g = gain(0), s = noise(false, true), f = filt('highpass', 5000), ig = gain(0.012);
+  chain(s, f, ig, g, pan); s.start(0, off()); return { gain: g, nodes: [s, f, ig, g, pan] };
+}
+function buildSpatial() {
+  const cfg = ctx.W.cfg; killSpatial();
+  makeFireSrc();
+  if (cfg.water) makeWaterSrc(cfg.key === 'beach' ? 'waves' : 'lake', cfg.water.z - 3);
+  lamps = { lantern: makeHiss(0.65, 0.75, 0.5), tentLamp: makeHiss(-2.35, 0.4, 2.1) };
+  sceneKey = cfg.key;
+}
+function killSpatial() {
+  if (fire) { clearTimeout(fire.popT); kill(fire.nodes); } if (water) kill(water.nodes); if (lamps) { kill(lamps.lantern.nodes); kill(lamps.tentLamp.nodes); }
+  fire = water = lamps = null; sceneKey = null;
+}
+
+/* ── 배경 베드 (무위치) ── */
+function makeBed(type, timeKey) {
+  const out = gain(0.0001), nodes = [out]; out.connect(worldLP);
+  const wind = (f, g0, l1, l2) => { const s = noise(true, true), f1 = filt('lowpass', f), g = gain(g0); chain(s, f1, g, out); s.start(0, off()); nodes.push(s, f1, g, ...lfo(0.045, l1, f1.frequency), ...lfo(0.11, l2, g.gain)); };
+  if (type === 'wind') wind(420, 0.28, 260, 0.12);
+  else if (type === 'waves') wind(300, 0.06, 80, 0.02);
+  else {
+    wind(360, 0.05, 100, 0.02);
+    if (timeKey === 'night') [[4300, 18, 0.011], [3900, 23, 0.008]].forEach(([f, am, g0]) => { const o = osc('sine', f), og = gain(g0); const [a, ag] = lfo(am, g0, og.gain); o.connect(og); og.connect(out); o.start(); nodes.push(o, og, a, ag); });   // 풀벌레
+    else { const s = noise(true, true), f = filt('lowpass', 900), g = gain(0.03); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.015, g.gain)); }   // 잎 스치는 소리
+  }
+  return { out, nodes };
+}
+export function stopAmbience() {
+  clearTimeout(evTimer); if (bed) { kill(bed.nodes); bed = null; } killSpatial();
+}
+export function startAmbience(type, timeKey) {
+  if (!AC) return;
+  if (sceneKey !== ctx.W.cfg.key) buildSpatial();
+  const old = bed, t = AC.currentTime;
+  bed = makeBed(type, timeKey); bed.out.gain.setValueAtTime(0.0001, t); bed.out.gain.exponentialRampToValueAtTime(1, t + 4);
+  if (old) { old.out.gain.cancelScheduledValues(t); old.out.gain.setValueAtTime(Math.max(0.0001, old.out.gain.value), t); old.out.gain.exponentialRampToValueAtTime(0.0001, t + 4); setTimeout(() => kill(old.nodes), 4600); }
+  startEvents(type, timeKey);
+}
+
+/* ── 간헐 이벤트: 7~24초 간격, 장소·시간에 따라 다른 것, 좌우 랜덤 ── */
+function startEvents(type, timeKey) {
+  clearTimeout(evTimer);
+  const loop = () => { playEvent(type, timeKey); evTimer = setTimeout(loop, rnd(7000, 24000)); };
+  evTimer = setTimeout(loop, rnd(3000, 9000));
+}
+function playEvent(type, timeKey) {
+  if (!AC || ctx.paused) return; const r = Math.random(), night = timeKey === 'night';
+  if (type === 'waves') { if (!night && r < 0.55) gull(); else if (r < 0.8) gust(0.5); else swell(); }
+  else if (type === 'forest') {
+    if (!night) { if (r < 0.6) chirp(); else if (r < 0.75) woodpecker(); else gust(0.35); }
+    else { if (r < 0.45) owl(); else if (r < 0.6) loon(); else if (r < 0.85) gust(0.3); else creak(); }
+  } else { if (r < 0.6) gust(1.0); else if (r < 0.85) snowSlide(); else creak(); }
+}
+function gull() {
+  const n = 2 + Math.floor(Math.random() * 3), t0 = AC.currentTime, pan = spanner(), base = rnd(1100, 1500);
+  for (let i = 0; i < n; i++) {
+    const t = t0 + i * rnd(0.35, 0.55), o = osc('sawtooth', base), f = filt('bandpass', base, 6), g = gain(0);
+    o.frequency.setValueAtTime(base * 1.15, t); o.frequency.exponentialRampToValueAtTime(base * 0.8, t + 0.32);
+    const v = osc('sine', 28), vg = gain(40); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 0.4);
+    env(g, t, 0.04, 0.035, 0.3); chain(o, f, g, pan); o.start(t); o.stop(t + 0.4);
+  }
+}
+function chirp() {
+  const n = 3 + Math.floor(Math.random() * 3), t0 = AC.currentTime, pan = spanner(), base = rnd(2200, 3600);
+  for (let i = 0; i < n; i++) {
+    const t = t0 + i * rnd(0.12, 0.2), f0 = base * rnd(0.9, 1.4), o = osc('sine', f0), g = gain(0);
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 1.35, t + 0.05); o.frequency.exponentialRampToValueAtTime(f0 * 0.95, t + 0.1);
+    env(g, t, 0.015, 0.03, 0.1); o.connect(g); g.connect(pan); o.start(t); o.stop(t + 0.14);
+  }
+}
+function woodpecker() { const n = 7 + Math.floor(Math.random() * 4), t0 = AC.currentTime, pan = spanner(); for (let i = 0; i < n; i++) { const t = t0 + i * 0.07, s = noise(false), f = filt('lowpass', 1200), g = gain(0); env(g, t, 0.003, 0.05, 0.02); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 0.04); } }
+function owl() { const t0 = AC.currentTime, pan = spanner(); [0, 0.55].forEach((d, i) => { const t = t0 + d, o = osc('sine', 390), f = filt('lowpass', 800), g = gain(0); o.frequency.setValueAtTime(400, t); o.frequency.exponentialRampToValueAtTime(340, t + 0.4); env(g, t, 0.08, i ? 0.05 : 0.06, 0.4); chain(o, f, g, pan); o.start(t); o.stop(t + 0.55); }); }
+function loon() { const t = AC.currentTime, pan = spanner(), o = osc('sine', 620), g = gain(0); o.frequency.setValueAtTime(620, t); o.frequency.exponentialRampToValueAtTime(980, t + 0.6); o.frequency.exponentialRampToValueAtTime(600, t + 1.5); const v = osc('sine', 5), vg = gain(15); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 1.7); env(g, t, 0.3, 0.028, 1.2); o.connect(g); g.connect(pan); o.start(t); o.stop(t + 1.7); }
+function gust(k) { const t = AC.currentTime, pan = spanner(), s = noise(true), f = filt('bandpass', 250, 0.8), g = gain(0); f.frequency.setValueAtTime(250, t); f.frequency.linearRampToValueAtTime(900, t + 1.6); f.frequency.linearRampToValueAtTime(300, t + 3.6); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.22 * k, t + 1.5); g.gain.linearRampToValueAtTime(0, t + 3.8); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 4); }
+function swell() { const t = AC.currentTime, pan = spanner(), s = noise(true), f = filt('lowpass', 500), g = gain(0); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.25, t + 2); g.gain.linearRampToValueAtTime(0, t + 5); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 5.2); }
+function snowSlide() { const t = AC.currentTime, pan = spanner(), s = noise(false), f = filt('lowpass', 900), g = gain(0); f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(300, t + 0.7); env(g, t, 0.15, 0.12, 0.6); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 0.9); }
+function creak() { const t = AC.currentTime, pan = spanner(), s = noise(false), f = filt('lowpass', 350), g = gain(0); env(g, t, 0.05, 0.05, 0.25); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 0.4); const o = osc('sine', 95), og = gain(0); o.frequency.exponentialRampToValueAtTime(70, t + 0.3); env(og, t, 0.05, 0.03, 0.25); o.connect(og); og.connect(pan); o.start(t); o.stop(t + 0.4); }
+
+/* ── 매 프레임: 리스너 위치·방향, 모닥불·랜턴 세기, 물가 위치 ── */
+export function updateAudio(dt) {
+  if (!AC || !ctx.camera) return; const cam = ctx.camera, L = AC.listener, W = ctx.W;
+  cam.getWorldDirection(_f); _u.set(0, 1, 0).applyQuaternion(cam.quaternion);
+  if (L.positionX) { L.positionX.value = cam.position.x; L.positionY.value = cam.position.y; L.positionZ.value = cam.position.z; L.forwardX.value = _f.x; L.forwardY.value = _f.y; L.forwardZ.value = _f.z; L.upX.value = _u.x; L.upY.value = _u.y; L.upZ.value = _u.z; }
+  else { L.setPosition(cam.position.x, cam.position.y, cam.position.z); L.setOrientation(_f.x, _f.y, _f.z, _u.x, _u.y, _u.z); }
+  const k = Math.min(1, dt * 2.5);
+  if (fire) fire.gain.gain.value += ((W.fireLit ? 1 : 0) - fire.gain.gain.value) * k;
+  if (water) setPos(water.pan, cam.position.x, 0, water.z);
+  if (lamps) { lamps.lantern.gain.gain.value += ((W.lanternLit ? 1 : 0) - lamps.lantern.gain.gain.value) * k; lamps.tentLamp.gain.gain.value += ((W.tentLampLit ? 1 : 0) - lamps.tentLamp.gain.gain.value) * k; }
+}
+
+/* ── 효과음 (실내 필터를 거치지 않는다) ── */
+export function sfx(type, surface) {
   if (!AC) return; const t = AC.currentTime;
-  if (type === 'clink') { [2400, 3150].forEach((fq, i) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = fq; g.gain.setValueAtTime(0.08 - i * 0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.4); }); return; }
-  const s = AC.createBufferSource(); s.buffer = noiseBuf(false); const f = AC.createBiquadFilter(), g = AC.createGain();
-  const cfgs = { step: ['lowpass', ctx.W.cfg.snow ? 900 : 500, 0.05, 0.12], sip: ['bandpass', 1100, 0.06, 0.32], lighter: ['highpass', 3000, 0.12, 0.14], trunk: ['lowpass', 300, 0.15, 0.3], sit: ['lowpass', 400, 0.06, 0.25], exhale: ['bandpass', 520, 0.035, 0.7] }[type];
+  if (type === 'clink') { [2400, 3150].forEach((fq, i) => { const o = osc('sine', fq), g = gain(0); g.gain.setValueAtTime(0.08 - i * 0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); o.connect(g); g.connect(sfxBus); o.start(t); o.stop(t + 0.4); }); return; }
+  if (type === 'step') {
+    const rate = rnd(0.88, 1.12), s = noise(false); s.playbackRate.value = rate;
+    if (surface === 'snow') { const f = filt('highpass', 1200), g = gain(0); env(g, t, 0.01, 0.045, 0.09); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.2); const s2 = noise(true), f2 = filt('lowpass', 300), g2 = gain(0); env(g2, t, 0.01, 0.05, 0.1); chain(s2, f2, g2, sfxBus); s2.start(t, off()); s2.stop(t + 0.2); }
+    else if (surface === 'wood') { const o = osc('sine', 140 * rate), og = gain(0); env(og, t, 0.005, 0.07, 0.14); o.connect(og); og.connect(sfxBus); o.start(t); o.stop(t + 0.2); const f = filt('lowpass', 900), g = gain(0); env(g, t, 0.005, 0.03, 0.06); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.1); }
+    else if (surface === 'wet') { const f = filt('bandpass', 2500, 0.8), g = gain(0); env(g, t, 0.02, 0.045, 0.16); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.25); const s2 = noise(true), f2 = filt('lowpass', 400), g2 = gain(0); env(g2, t, 0.01, 0.04, 0.1); chain(s2, f2, g2, sfxBus); s2.start(t, off()); s2.stop(t + 0.2); }
+    else if (surface === 'sand') { const f = filt('lowpass', 350), g = gain(0); env(g, t, 0.03, 0.05, 0.2); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.3); }
+    else { const f = filt('lowpass', 500), g = gain(0); env(g, t, 0.02, 0.05, 0.12); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.2); }
+    return;
+  }
+  const s = noise(false), f = AC.createBiquadFilter(), g = gain(0);
+  const cfgs = { sip: ['bandpass', 1100, 0.06, 0.32], lighter: ['highpass', 3000, 0.12, 0.14], trunk: ['lowpass', 300, 0.15, 0.3], sit: ['highpass', 1500, 0.035, 0.18], exhale: ['bandpass', 520, 0.035, 0.7] }[type];
   if (!cfgs) return;
-  f.type = cfgs[0]; f.frequency.value = cfgs[1]; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(cfgs[2], t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + cfgs[3]);
-  s.connect(f); f.connect(g); g.connect(master); s.start(t, off()); s.stop(t + 0.8);
+  f.type = cfgs[0]; f.frequency.value = cfgs[1]; env(g, t, 0.03, cfgs[2], cfgs[3]);
+  chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.9);
 }
