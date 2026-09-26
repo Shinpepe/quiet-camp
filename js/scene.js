@@ -40,16 +40,15 @@ export function rebakeEnv() {
   } catch (e) { console.warn('IBL skipped', e); }
 }
 
-/* ── 오로라: 하늘 높이 걸린 곡선 커튼 세 장. 가로 노이즈 주름 + 아래가 밝고 위로 초록→보라 + 세로 광선.
-   좌표를 0..1 로 잘라내고 거듭제곱 밑이 음수가 되지 않게 해서 NaN(검은 얼룩)이 생기지 않게 한다 ── */
+/* ── 오로라: 씬을 만들 때마다 커튼 2~4장을 무작위로. 방향·폭·높이·거리·물결·색·속도가 매번 다르고, 한 장은 항상 정면에 ── */
 function makeAurora(W, scene) {
   const base = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
-    uniforms: { uTime: W.uTime, uStr: { value: 0 }, uSeed: { value: 0 }, cA: { value: new THREE.Color(0x36e08a) }, cB: { value: new THREE.Color(0x7a3cff) } },
+    uniforms: { uTime: W.uTime, uStr: { value: 0 }, uSeed: { value: 0 }, uSpd: { value: 1 }, uFold: { value: 5 }, cA: { value: new THREE.Color() }, cB: { value: new THREE.Color() } },
     vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
-    fragmentShader: NOISE_GLSL + `uniform float uTime,uStr,uSeed;uniform vec3 cA,cB;varying vec2 vUv;
-      void main(){float t=uTime*0.05+uSeed;float x=clamp(vUv.x,0.0,1.0),y=clamp(vUv.y,0.0,1.0);
-        float f=vnoise(vec2(x*5.0+t,0.3+uSeed))*0.55+vnoise(vec2(x*13.0-t*1.6,1.7))*0.3+vnoise(vec2(x*29.0+t*2.4,3.1))*0.15;
+    fragmentShader: NOISE_GLSL + `uniform float uTime,uStr,uSeed,uSpd,uFold;uniform vec3 cA,cB;varying vec2 vUv;
+      void main(){float t=uTime*0.05*uSpd+uSeed;float x=clamp(vUv.x,0.0,1.0),y=clamp(vUv.y,0.0,1.0);
+        float f=vnoise(vec2(x*uFold+t,0.3+uSeed))*0.55+vnoise(vec2(x*uFold*2.6-t*1.6,1.7))*0.3+vnoise(vec2(x*uFold*5.8+t*2.4,3.1))*0.15;
         float band=smoothstep(0.32,0.72,f);
         float vert=smoothstep(0.0,0.1,y)*pow(max(1.0-y,0.0),1.5);
         float rays=0.65+0.35*vnoise(vec2(x*70.0+t*2.0,y*1.5));
@@ -59,14 +58,26 @@ function makeAurora(W, scene) {
         gl_FragColor=vec4(col*a,a);}`,
   });
   W.aurora = [];
-  /* [시작 방위각, 폭(rad), 거리, 아래 높이, 세로 높이] — 카메라 정면(-z)이 방위각 -π/2 */
-  [[-2.3, 1.35, 1500, 780, 420], [-1.25, 1.0, 1650, 980, 520], [0.35, 1.5, 1450, 700, 360]].forEach(([az0, span, R, y0, H], i) => {
-    const g = new THREE.PlaneGeometry(1, 1, 96, 10), p = g.attributes.position;
-    for (let k = 0; k < p.count; k++) { const u = p.getX(k) + 0.5, v = p.getY(k) + 0.5, az = az0 + u * span, y = y0 + Math.sin(u * 5.3 + i) * 90 + Math.sin(u * 11.1 + i * 2) * 40 + v * H; p.setXYZ(k, Math.cos(az) * R, y, Math.sin(az) * R); }
+  const palettes = [[0x36e08a, 0x7a3cff], [0x2fd67c, 0xd04cff], [0x4af0a0, 0x3c7cff], [0x6ee89a, 0xff4c8a]];
+  const n = 2 + Math.floor(Math.random() * 3);   // 2~4장
+  for (let i = 0; i < n; i++) {
+    const span = rnd(1.6, 2.6);
+    const az0 = i === 0 ? -Math.PI / 2 - span * rnd(0.35, 0.65) : rnd(-Math.PI, Math.PI);   // 첫 장은 정면(-π/2)을 가로지르게
+    const R = rnd(1400, 1700), y0 = rnd(600, 1000), H = rnd(500, 850), w1 = rnd(60, 160), w2 = rnd(20, 70), f1 = rnd(3, 8), f2 = rnd(8, 16), ph = rnd(0, 6.3);
+    const g = new THREE.PlaneGeometry(1, 1, 128, 12), p = g.attributes.position;
+    for (let k = 0; k < p.count; k++) {
+      const u = p.getX(k) + 0.5, v = p.getY(k) + 0.5, az = az0 + u * span;
+      const y = y0 + Math.sin(u * f1 + ph) * w1 + Math.sin(u * f2 + ph * 2) * w2 + v * H;
+      const r = R + Math.sin(u * f2 * 0.7 + ph) * 40;   // 거리도 살짝 굽이쳐 입체감
+      p.setXYZ(k, Math.cos(az) * r, y, Math.sin(az) * r);
+    }
     g.computeVertexNormals();
-    const m = base.clone(); m.uniforms.uTime = W.uTime; m.uniforms.uSeed.value = i * 3.7;
+    const m = base.clone(); m.uniforms.uTime = W.uTime;
+    const pal = palettes[Math.floor(Math.random() * palettes.length)];
+    m.uniforms.cA.value.setHex(pal[0]); m.uniforms.cB.value.setHex(pal[1]);
+    m.uniforms.uSeed.value = rnd(0, 50); m.uniforms.uSpd.value = rnd(0.6, 1.5); m.uniforms.uFold.value = rnd(3.5, 7);
     const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.userData.noAO = true; scene.add(mesh); W.aurora.push(mesh);
-  });
+  }
 }
 
 /* 현재 시각 파라미터(W.tm)를 씬의 모든 것에 반영 — 매 프레임 호출 */
