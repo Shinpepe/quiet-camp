@@ -4,7 +4,7 @@ import { BG } from './data.js';
 import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
-import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, contactShadow, Particles, Smoke, birdMat } from './props.js';
+import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, contactShadow, Particles, Smoke, Footprints, birdMat } from './props.js';
 import { startCrackle } from './audio.js';
 import { paramsAt, sunDirAt } from './time.js';
 
@@ -222,6 +222,9 @@ export function buildScene(bgKey) {
   W.fire = new Particles(160, { color: 0xff8c2a, size: 0.2, opacity: 0.5, blending: THREE.AdditiveBlending }); scene.add(W.fire.mesh);
   W.fireCore = new Particles(90, { color: 0xfff2b0, size: 0.11, opacity: 0.75, blending: THREE.AdditiveBlending }); scene.add(W.fireCore.mesh);
   W.embers = new Particles(80, { color: 0xffa040, size: 0.035, opacity: 0.95, blending: THREE.AdditiveBlending }); scene.add(W.embers.mesh);
+  /* 발자국: 눈(푸른 회색, 45초) · 모래(어두운 모래색, 90초) */
+  W.prints = cfg.snow ? new Footprints(140, [0.66, 0.7, 0.8], 45) : cfg.key === 'beach' ? new Footprints(140, [0.72, 0.65, 0.55], 90) : null;
+  if (W.prints) scene.add(W.prints.mesh);
   if (cfg.snow) {
     const n = 2800, sp = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { sp[i * 3] = rnd(-35, 35); sp[i * 3 + 1] = rnd(0, 30); sp[i * 3 + 2] = rnd(-40, 20); }
