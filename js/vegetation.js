@@ -5,7 +5,7 @@ import { rnd, fbm, std, smoothM, shadowed, bar, jitter, mergeParts, tintOf, push
 import { terrainH, slopeUp, shoreOff, campDirt, WATER_Y } from './terrain.js';
 import { tex } from './textures.js';
 
-/* 잎 재질: 바람 흔들림 + 역광 투과(해를 등지고 보면 잎이 빛남) + 림 라이트 + 아랫면 어두움 */
+/* 잎 재질: 바람 흔들림 + 역광 투과 + 림 라이트 + 아랫면 어두움 */
 export function swayMat(extra, strength, from) {
   const W = ctx.W, mat = new THREE.MeshStandardMaterial(Object.assign({ vertexColors: true, roughness: 0.95 }, extra || {}));
   mat.onBeforeCompile = sh => {
@@ -69,10 +69,8 @@ function treeGeo(color) {
   return mergeGeos(list);
 }
 function bushGeo(color) { return mergeParts([{ geo: jitter(new THREE.IcosahedronGeometry(1, 1), 0.35), color, y: 0.6, sy: 0.7, grad: true, uvs: 2 }, { geo: jitter(new THREE.IcosahedronGeometry(0.7, 1), 0.35), color, y: 0.7, x: 0.7, z: 0.3, sy: 0.7, grad: true, uvs: 2 }]); }
-/* 풀잎: 폭 w, 높이 h, 위로 갈수록 좁아지고 끝이 살짝 휘는 판 (y 0..h) */
 function bladeGeo(w, h, curl) { const g = new THREE.PlaneGeometry(w, h, 1, 4); g.translate(0, h / 2, 0); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const t = p.getY(i) / h; p.setX(i, p.getX(i) * (1 - t * 0.85)); p.setZ(i, t * t * curl); } return g; }
 function grassGeo() { return mergeParts([{ geo: bladeGeo(0.09, 0.5, 0.16), color: 0xffffff, grad: true }, { geo: bladeGeo(0.09, 0.5, 0.16), color: 0xffffff, ry: Math.PI / 2, grad: true }]); }
-/* 갈대: 긴 잎 두 장 교차 + 갈색 이삭 */
 function reedGeo() {
   return mergeParts([
     { geo: bladeGeo(0.05, 1.4, 0.12), color: 0x7f9a48, grad: true }, { geo: bladeGeo(0.05, 1.4, 0.12), color: 0x74903f, ry: Math.PI / 2, grad: true },
@@ -118,17 +116,30 @@ function makePalm() {
   return shadowed(g);
 }
 function makeRock(s, color) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(s, 1), 0.4), std(color, tex('rock', 2, 2, 0.55))); r.rotation.set(rnd(0, 3), rnd(0, 3), rnd(0, 3)); return shadowed(r); }
-/* 조개껍데기: 나선 소라(옆으로 누움) · 이매패(반구를 납작하게, 방사형 홈) — 단위 크기, 배치할 때 3~6cm 로 축소 */
-function conchGeo() {
-  const g = new THREE.LatheGeometry([[0, 0], [0.55, 0.06], [0.8, 0.3], [0.9, 0.62], [0.72, 0.95], [0.45, 1.2], [0.18, 1.38], [0, 1.45]].map(p => new THREE.Vector2(p[0], p[1])), 20);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x), k = 1 + 0.07 * Math.sin(a * 5 + y * 6) + 0.04 * Math.sin(a * 11); p.setX(i, x * k); p.setZ(i, z * k); }
-  g.translate(0, -0.7, 0); g.rotateX(Math.PI / 2); g.computeVertexNormals(); return g;
+
+/* ── 조개껍데기 ── */
+function gridGeo(nu, nv, fn) {
+  const pos = [], idx = [];
+  for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) { const p = fn(i / nu, j / nv); pos.push(p[0], p[1], p[2]); }
+  for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = i * (nv + 1) + j, b = a + nv + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const g = new THREE.BufferGeometry(); g.setIndex(idx); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g;
 }
+/* 소라: 로그 나선으로 감기는 관. 한 바퀴마다 2.2배 굵어지며 아래로 내려간다. 표면 이랑 + 나선 방향 골. 옆으로 눕힘 */
+function conchGeo() {
+  const g = gridGeo(140, 14, (u, v) => {
+    const t = u * 3.5 * Math.PI * 2, r = 0.08 * Math.exp(0.1255 * t), R = 0.62 * r * (1 + 0.05 * Math.sin(v * Math.PI * 2 * 7) + 0.04 * Math.sin(t * 12)), ph = v * Math.PI * 2;
+    const cx = r * Math.cos(t), cz = r * Math.sin(t), cy = -0.55 * r, rx = Math.cos(t), rz = Math.sin(t);
+    return [cx + R * Math.cos(ph) * rx, cy + R * Math.sin(ph), cz + R * Math.cos(ph) * rz];
+  });
+  g.translate(0, 0.7, 0); g.rotateZ(Math.PI / 2); return g;
+}
+/* 가리비: 경첩에서 220° 부채꼴로 퍼지고 가운데가 볼록, 방사형 골 16개 */
 function clamGeo() {
-  const g = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x), k = 1 + 0.06 * Math.sin(a * 14); p.setX(i, x * k); p.setY(i, y * 0.32); p.setZ(i, z * k * 0.85); }
-  g.computeVertexNormals(); return g;
+  return gridGeo(12, 40, (u, v) => {
+    const a = (v - 0.5) * Math.PI * 1.22, r = u, rib = 0.5 + 0.5 * Math.cos(a * 16);
+    const y = 0.26 * Math.sin(Math.PI * Math.min(1, r * 1.05)) + 0.045 * rib * r;
+    return [r * Math.sin(a), y, r * Math.cos(a)];
+  });
 }
 function reserved(x, z) { if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true; if (ctx.W.cfg.dock && x > 3 && x < 9 && z < -6 && z > -22) return true; return false; }
 
@@ -163,7 +174,7 @@ export function makeVegetation(cfg) {
     const lg = new THREE.PlaneGeometry(0.14, 0.09); lg.rotateX(-Math.PI / 2);
     if (lv.length) scene.add(instanced(lg, new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide }), lv, false));
   }
-  /* 물가: 갈대(호수) + 자갈 */
+  /* 물가: 갈대(호수) + 자갈(호수) + 조개껍데기(모래사장) */
   if (cfg.water) {
     if (cfg.key === 'lake') {
       const reeds = [];
@@ -176,24 +187,25 @@ export function makeVegetation(cfg) {
       }
       if (reeds.length) scene.add(instanced(reedGeo(), swayMat(fol(), 0.05, 0.2), reeds, false));
     }
-    const pb = [];
-    for (let t = 0; t < 1400 && pb.length < 450; t++) {
-      const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
-      const z = cfg.water.z + shoreOff(x, cfg) - 2.3 + rnd(-1.8, 1.8), h = terrainH(x, z, cfg); if (h < WATER_Y - 0.25) continue;
-      const g = rnd(0.55, 0.85); pb.push({ x, y: h + 0.01, z, s: rnd(0.03, 0.08), rot: rnd(0, 6.3), tint: cfg.key === 'beach' ? [g + 0.15, g + 0.08, g - 0.05] : [g, g, g * 0.97] });
+    if (cfg.key !== 'beach') {   // 자갈은 호수에만 — 모래사장에 자갈이 많으면 어색하다
+      const pb = [];
+      for (let t = 0; t < 1400 && pb.length < 450; t++) {
+        const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
+        const z = cfg.water.z + shoreOff(x, cfg) - 2.3 + rnd(-1.8, 1.8), h = terrainH(x, z, cfg); if (h < WATER_Y - 0.25) continue;
+        const g = rnd(0.55, 0.85); pb.push({ x, y: h + 0.01, z, s: rnd(0.03, 0.08), rot: rnd(0, 6.3), tint: [g, g, g * 0.97] });
+      }
+      if (pb.length) scene.add(instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false));
     }
-    if (pb.length) scene.add(instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false));
-      /* 조개껍데기: 모래사장 해안선 육지 쪽 띠에 드문드문, 절반쯤 모래에 묻혀서 */
-    if (cfg.key === 'beach') {
-      const tints = [[0.96, 0.92, 0.82], [0.95, 0.84, 0.8], [0.97, 0.97, 0.94], [0.86, 0.76, 0.62], [0.9, 0.86, 0.9]], conch = [], clam = [];
+    if (cfg.key === 'beach') {   // 조개껍데기: 해안선 육지 쪽 띠에 드문드문, 반쯤 모래에 묻혀서
+      const tints = [[0.96, 0.92, 0.82], [0.95, 0.84, 0.8], [0.97, 0.97, 0.94], [0.86, 0.76, 0.62], [0.92, 0.88, 0.9]], conch = [], clam = [];
       for (let t = 0; t < 400 && conch.length + clam.length < 60; t++) {
         const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
         const z = cfg.water.z + shoreOff(x, cfg) + rnd(-1.6, 4.2), h = terrainH(x, z, cfg); if (h < WATER_Y + 0.02) continue;
         const tint = tints[Math.floor(Math.random() * tints.length)];
-        if (Math.random() < 0.55) { const s = rnd(0.03, 0.055); clam.push({ x, y: h + s * 0.02, z, s, rot: rnd(0, 6.3), rx: rnd(-0.25, 0.25), tint }); }
-        else { const s = rnd(0.035, 0.06); conch.push({ x, y: h + s * rnd(0.25, 0.6), z, s, rot: rnd(0, 6.3), rz: rnd(-0.2, 0.2), tint }); }
+        if (Math.random() < 0.55) { const s = rnd(0.035, 0.06); clam.push({ x, y: h - s * 0.05, z, s, rot: rnd(0, 6.3), rx: rnd(-0.2, 0.2), tint }); }
+        else { const s = rnd(0.04, 0.06); conch.push({ x, y: h + s * rnd(0.35, 0.6), z, s, rot: rnd(0, 6.3), rx: rnd(-0.3, 0.3), tint }); }
       }
-      const shellM = smoothM(0xffffff, { roughness: 0.55 });
+      const shellM = smoothM(0xffffff, { roughness: 0.5, side: THREE.DoubleSide });
       if (conch.length) scene.add(instanced(conchGeo(), shellM, conch, false));
       if (clam.length) scene.add(instanced(clamGeo(), shellM, clam, false));
     }
@@ -204,14 +216,13 @@ export function makeVegetation(cfg) {
   for (let tries = 0; tries < gr.n * 4 && list.length < gr.n; tries++) {
     const a = rnd(0, Math.PI * 2), r = 3.5 + 44 * Math.pow(Math.random(), 0.7), x = Math.cos(a) * r, z = 3 + Math.sin(a) * r;
     if (z < gr.zmin || Math.hypot(x, z) > 48) continue;
-    if (campDirt(x, z) > 0.35) continue;                                                  // 캠프 흙 원 안에는 풀 없음
+    if (campDirt(x, z) > 0.35) continue;
     if (BLOCKS.some(b => x > b.x[0] - 0.2 && x < b.x[1] + 0.2 && z > b.z[0] - 0.2 && z < b.z[1] + 0.2)) continue;
     if (cfg.dock && x > 4.6 && x < 6.8 && z < -7.5) continue;
     const cl = fbm(x * 0.11 + 3, z * 0.11 + 8, 3); if (cl < 0.42 && Math.random() > (cl - 0.25) * 2) continue;
     const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.3 && cfg.water) continue;
     c.copy(base).multiplyScalar(rnd(0.7, 1.25)); list.push({ x, y: h - 0.02, z, s: rnd(0.6, 1.4), sy: rnd(0.8, 1.3), rot: rnd(0, 6.3), tint: [c.r, c.g, c.b] });
   }
-  /* 풀 재질: 뿌리는 지면 색으로 녹아들고, 끝은 역광에 빛난다 */
   const gm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide });
   gm.onBeforeCompile = sh => {
     sh.uniforms.uTime = W.uTime; sh.uniforms.uSunV = W.uSunV; sh.uniforms.uLeafCol = W.uLeafCol; sh.uniforms.uGroundCol = { value: new THREE.Color(cfg.ground).multiplyScalar(0.85) };
