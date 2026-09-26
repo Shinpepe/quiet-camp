@@ -106,6 +106,9 @@ export function setSparkler(on) {
   }
 }
 
+/* 치익 소리 크기 (손에 들면 1, 땅에 꽂고 멀어질수록 작게) */
+export function sparklerLevel(v) { if (spark) spark.gain.gain.setTargetAtTime(v, AC.currentTime, 0.1); }
+
 /* ── 배경 베드 ── */
 function makeBed(type, timeKey) {
   const out = gain(0.0001), nodes = [out], timers = []; out.connect(worldLP);
