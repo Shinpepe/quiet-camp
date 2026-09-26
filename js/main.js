@@ -5,7 +5,7 @@ import { buildScene, applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks } from './props.js';
-import { startAmbience, sfx } from './audio.js';
+import { startAmbience, updateAudio, sfx } from './audio.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied } from './game.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
@@ -14,7 +14,7 @@ const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: fal
 renderer.setPixelRatio(Math.min(devicePixelRatio, FINE ? 2 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.shadowMap.autoUpdate = false;   // 그림자는 10Hz 로만 갱신 (루프에서 needsUpdate)
+renderer.shadowMap.autoUpdate = false;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
@@ -49,10 +49,9 @@ function loop(now) {
     updatePrompt();
   }
   camera.updateMatrixWorld();
-  /* 카메라 위치가 정해진 뒤 시각 반영 (그림자 카메라가 카메라를 따라가므로) */
   applyTime();
+  updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
-  /* 그림자 갱신 10Hz. 모닥불 그림자는 밤에 불이 켜져 있을 때만 (데스크톱) */
   W.shT += dt; if (W.shT >= 0.1) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
   if (W.fireLight) W.fireLight.castShadow = settings.shadow && FINE && W.fireLit && !W.sunUp;
 
@@ -67,14 +66,19 @@ function loop(now) {
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
   if (W.dockLight) { W.dockLight.intensity = W.tm.lantern * 0.8 * (0.96 + 0.04 * Math.sin(T * 3.1)); if (W.dockLampObj) W.dockLampObj.userData.setLit(W.tm.lantern > 0.5); }
   if (W.stars) W.stars.material.opacity = W.tm.stars * (0.85 + 0.15 * Math.sin(T * 2.3));
+
+  /* 모닥불: 불꽃 판 세기(fireK) 는 켜고 끌 때 부드럽게, 판은 각각 다른 박자로 흔들림 */
+  W.fireK = (W.fireK || 0) + ((W.fireLit ? 1 : 0) - (W.fireK || 0)) * Math.min(1, dt * 2.5);
+  if (W.flames) W.flames.forEach((f, i) => { f.material.uniforms.uK.value = W.fireK; f.visible = W.fireK > 0.02; f.scale.y = W.fireK * (0.85 + 0.2 * Math.sin(T * 8.5 + i * 1.3) + 0.1 * Math.sin(T * 21 + i)); f.scale.x = 0.9 + 0.1 * Math.sin(T * 6.7 + i * 2); });
+  if (W.logGlow) W.logGlow.forEach((s, i) => { s.material.opacity = W.fireK * (0.55 + 0.45 * Math.sin(T * 13 + i * 1.9)); });
   if (W.fireLight) {
     const tgt = W.fireLit ? W.tm.fireI : 0; W.fireLight.intensity += (tgt * (0.85 + 0.12 * Math.sin(T * 17) + 0.08 * Math.sin(T * 41)) - W.fireLight.intensity) * Math.min(1, dt * 4);
     W.emberCore.material.color.lerp(_c.setHex(W.fireLit ? 0xff6a1a : 0x2a1c14), Math.min(1, dt * 3));
     if (W.fireLit) {
-      for (let i = 0; i < 5; i++) W.fire.spawn(firePos, { x: 0, y: 1.1, z: 0 }, 0.34, 0.55, 0.25);
-      for (let i = 0; i < 3; i++) W.fireCore.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.16, 0.45, 0.2);
-      if (Math.random() < 0.35) W.embers.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.3, 1.6, 0.6);
-      if (Math.random() < 0.22) W.smoke.spawn(tmpV.copy(firePos).setY(1.0), { x: 0.05, y: 0.5, z: 0 }, 0.3, 4.5, 0.2);
+      for (let i = 0; i < 2; i++) W.fire.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.3, 0.5, 0.3);
+      if (Math.random() < 0.5) W.fireCore.spawn(firePos, { x: 0, y: 1.4, z: 0 }, 0.12, 0.4, 0.2);
+      if (Math.random() < 0.4) W.embers.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.3, 1.6, 0.6);
+      if (Math.random() < 0.22) W.smoke.spawn(tmpV.copy(firePos).setY(1.1), { x: 0.05, y: 0.5, z: 0 }, 0.3, 4.5, 0.2);
     }
   }
 
