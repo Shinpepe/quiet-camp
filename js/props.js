@@ -326,12 +326,6 @@ export function makeSnowCaps() {
   const scene = ctx.scene, snow = smoothM(0xf5f8fc, Object.assign({ roughness: 0.95 }, tex('snow', 2, 2, 0.35)));
   let seed = 1;
   const cap = (w, d, h, x, y, z, ry, slope) => { const m = new THREE.Mesh(snowCapGeo(w, d, h, slope, seed += 2.3), snow); m.position.set(x, y, z); m.rotation.y = ry || 0; m.castShadow = false; m.receiveShadow = true; scene.add(m); };
-  cap(0.62, 3.4, 0.11, -1.6, 1.76, 1.2, 0, 1.4);      // 텐트 용마루 — 지붕 경사(약 55°) 따라 양옆으로 흘러내림
-  cap(1.8, 2.4, 0.09, 0, 1.895, 8.35);                 // 차 지붕
-  cap(1.75, 1.35, 0.07, 0, 1.14, 6.45);                // 보닛
-  cap(0.68, 0.22, 0.045, 0.6, 0.515, 0.3); cap(0.68, 0.22, 0.045, 0.6, 0.515, 0.7);   // 테이블 (가운데 랜턴 자리는 비움)
-  cap(0.62, 0.46, 0.06, 2.4, 0.45, 0.6, 0.2);          // 쿨러 뚜껑
-  cap(0.78, 0.46, 0.06, 1.65, 0.245, -2.45);           // 장작더미
-  cap(0.62, 0.12, 0.04, 1.5, 1.07, 1.18);              // 의자 등받이 윗단
-  cap(0.34, 0.24, 0.06, 2.95, 0.64, 0.3, -0.6);        // 배낭 위
+  cap(1.8, 2.4, 0.1, 0, 1.895, 8.35);     // 차 지붕
+  cap(1.75, 1.35, 0.07, 0, 1.14, 6.45);   // 보닛
 }
