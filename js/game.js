@@ -112,8 +112,10 @@ function trunkKey(n) { const ks = Object.keys(ITEMS); if (n <= 3) { pickItem(ks[
 function renderTrunk() {
   const box = $('#trunkItems'); box.innerHTML = '';
   Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
-  if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">↩</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
+  if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${ICON_BACK}</div><div class="nm">내려놓기</div><div class="ds">${ITEMS[state.item].name}를 다시 넣는다</div><kbd>4</kbd>`; d.onclick = () => trunkKey(4); box.append(d); }
 }
+/* 내려놓기 카드용 아이콘 (되돌리는 화살표) */
+const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/></svg>';
 /* 손 없이 아이템만 시야 오른쪽 아래에 든다. 트렁크에서 꺼낼 때마다 새 것(가득) */
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
@@ -141,7 +143,7 @@ export function updateHUD() {
   const ib = $('#itembox'); ib.classList.toggle('on', !!state.item && state.mode !== 'trunk');
   if (state.item) {
     const empty = ctx.W.item && ctx.W.item.userData.amount <= 0;
-    ib.querySelector('.ic').textContent = ITEMS[state.item].ic; ib.querySelector('.nm').textContent = ITEMS[state.item].name;
+    ib.querySelector('.ic').innerHTML = ITEMS[state.item].ic; ib.querySelector('.nm').textContent = ITEMS[state.item].name;
     ib.querySelector('.hn').textContent = empty ? '비었다 · 트렁크에서 새로 꺼내기' : (isTouch ? '버튼' : '클릭') + ' · ' + ITEMS[state.item].act + ' · 길게 누르면 계속';
   }
   $('#mSip').style.display = state.item && state.mode !== 'trunk' ? '' : 'none';
@@ -169,11 +171,11 @@ function takePhoto() {
   const a = document.createElement('a'); a.href = url; a.download = `quiet-camp-${state.bg}-${clockLabel(state.clock).replace(':', '')}.png`; a.click();
   setTimeout(() => { hud.classList.remove('photo'); showToast('사진을 저장했다'); }, 250);
 }
+/* 메뉴: 장소는 아이콘 + 이름만 (설명 없음), 시각 칩은 아이콘 위·이름 아래 */
 function renderMenu() {
   const bl = $('#bgList'); bl.innerHTML = '';
-  Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div><div class="nm">${b.name}</div><div class="ds">${b.ds}</div></div>`; d.onclick = () => { if (state.bg === b.key) return; state.bg = b.key; renderMenu(); previewRebuild(); }; bl.append(d); });
+  Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div class="nm">${b.name}</div>`; d.onclick = () => { if (state.bg === b.key) return; state.bg = b.key; renderMenu(); previewRebuild(); }; bl.append(d); });
   const tl = $('#timeList'); tl.innerHTML = '';
-  /* 시각 칩은 씬을 다시 만들지 않고 시계만 옮긴다 — 조명이 바로 따라온다 */
   Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { state.time = t.key; state.clock = t.clock; renderMenu(); }; tl.append(d); });
 }
 let rebuildT = null;
