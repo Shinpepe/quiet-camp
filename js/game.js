@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
-import { $, clamp, wrapPI, isTouch } from './util.js';
+import { $, clamp, wrapPI, isTouch, rnd } from './util.js';
 import { terrainH, shoreOff, WATER_Y } from './terrain.js';
 import { makeItem } from './props.js';
 import { buildScene } from './scene.js';
 import { clockLabel } from './time.js';
-import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, setSparkler } from './audio.js';
+import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor } from './audio.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기 ── */
 
@@ -130,7 +130,7 @@ function renderTrunk() {
 }
 const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/></svg>';
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); if (type === 'smoke') sfx('lighter'); showToast(ITEMS[type].name + '를 챙겼다'); }
-export function putBack() { if (ctx.W.item && ctx.W.item.userData.lit) setSparkler(false); state.item = null; ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
+export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
 export function resetHand() {
   const h = ctx.hand;
   if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); }
@@ -138,10 +138,10 @@ export function resetHand() {
   else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); }
 }
 
-/* ── 손에 든 것 사용: 마실 것·담배는 길게, 스틱은 클릭 한 번으로 점화 ── */
+/* ── 손에 든 것 사용: 마실 것·담배는 길게, 스틱은 클릭으로 점화 → 다시 클릭으로 땅에 꽂기 ── */
 function useItem() {
   if (!state.item || !ctx.W.item || state.mode === 'trunk' || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
-  if (state.item === 'sparkler') { igniteSparkler(); return; }
+  if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
   if (anim.sipT !== null) return;
   if (ctx.W.item.userData.amount <= 0) { showToast('잔이 비었다'); return; }
   anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.lastSipSfx = -9;
@@ -151,11 +151,23 @@ function endSip() { anim.holding = false; }
 function igniteSparkler() {
   const it = ctx.W.item, ud = it.userData; if (ud.lit || ud.igniting || ud.amount <= 0) return;
   ud.igniting = true; sfx('lighter');
-  setTimeout(() => { if (ctx.W.item !== it || !ctx.running) return; ud.igniting = false; ud.setLit(true); sfx('sparkOn'); setSparkler(true); updateHUD(); }, 450);
+  setTimeout(() => { if (ctx.W.item !== it || !ctx.running) return; ud.igniting = false; ud.setLit(true); sfx('sparkOn'); updateHUD(); }, 450);
+}
+/* 타는 스틱을 앞쪽 땅에 꽂는다 — 서 있을 때만. 남은 양을 그대로 이어받아 계속 탄다 */
+function plantSparkler() {
+  const it = ctx.W.item, ud = it.userData; if (!ud.lit) return;
+  if (state.mode !== 'walk') { showToast('서 있을 때 꽂을 수 있다'); return; }
+  const s = Math.sin(player.yaw), c = Math.cos(player.yaw);
+  let px = player.x - s * 0.75, pz = player.z - c * 0.75;
+  if (blockedAt(px, pz)) { px = player.x + c * 0.4; pz = player.z - s * 0.4; }
+  const g = makeItem('sparkler'), nu = g.userData; nu.amount = ud.amount; nu.setAmount(nu.amount); nu.setLit(true);
+  g.position.set(px, floorY(px, pz) - 0.03, pz); g.rotation.set(rnd(-0.15, 0.15), rnd(0, 6.3), rnd(-0.15, 0.15));
+  ctx.scene.add(g); ctx.W.planted.push({ g, ud: nu, doneT: -1 });
+  ud.setLit(false); putBack(); sfx('sit'); showToast('스틱을 땅에 꽂았다'); updateHUD();
 }
 export function itemEmptied() {
   if (state.item === 'smoke') { putBack(); showToast('담배를 다 피웠다'); }
-  else if (state.item === 'sparkler') { setSparkler(false); sfx('sparkOff'); putBack(); showToast('불꽃이 다 탔다'); }
+  else if (state.item === 'sparkler') { sfx('sparkOff'); putBack(); showToast('불꽃이 다 탔다'); }
   else showToast(state.item === 'coffee' ? '커피를 다 마셨다' : '위스키를 다 마셨다');
   updateHUD();
 }
@@ -197,8 +209,8 @@ export function updateHUD() {
   if (state.item) {
     const def = ITEMS[state.item], ud = ctx.W.item && ctx.W.item.userData, empty = ud && ud.amount <= 0, btn = isTouch ? '버튼' : '클릭';
     ib.querySelector('.ic').innerHTML = def.ic; ib.querySelector('.nm').textContent = def.name;
-    ib.querySelector('.hn').textContent = empty ? '비었다 · 트렁크에서 새로 꺼내기' : ud && ud.lit ? '타는 중 · 불티가 튄다' : btn + ' · ' + def.act + (def.hold ? ' · 길게 누르면 계속' : '');
-    $('#mSip').textContent = def.act;
+    ib.querySelector('.hn').textContent = empty ? '비었다 · 트렁크에서 새로 꺼내기' : ud && ud.lit ? btn + ' · 땅에 꽂기 · 타는 중' : btn + ' · ' + def.act + (def.hold ? ' · 길게 누르면 계속' : '');
+    $('#mSip').textContent = ud && ud.lit ? '땅에 꽂기' : def.act;
   }
   $('#mSip').style.display = state.item && state.mode !== 'trunk' && state.mode !== 'sleep' ? '' : 'none';
   anim.lastTargetId = undefined; updatePrompt();
