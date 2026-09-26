@@ -75,10 +75,10 @@ function loop(now) {
     const tgt = W.fireLit ? W.tm.fireI : 0; W.fireLight.intensity += (tgt * (0.85 + 0.12 * Math.sin(T * 17) + 0.08 * Math.sin(T * 41)) - W.fireLight.intensity) * Math.min(1, dt * 4);
     W.emberCore.material.color.lerp(_c.setHex(W.fireLit ? 0xff6a1a : 0x2a1c14), Math.min(1, dt * 3));
     if (W.fireLit) {
-      if (Math.random() < 0.6) W.fire.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.3, 0.45, 0.3);
+      if (Math.random() < 0.45) W.fire.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.3, 0.4, 0.3);
       if (Math.random() < 0.3) W.fireCore.spawn(firePos, { x: 0, y: 1.4, z: 0 }, 0.12, 0.35, 0.2);
-      if (Math.random() < 0.25) W.embers.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.3, 1.6, 0.6);
-      if (Math.random() < 0.13) W.smoke.spawn(tmpV.copy(firePos).setY(1.2), { x: 0.04, y: 0.5, z: 0 }, 0.2, 5.0, 0.1, 0.2, 1.0, 0.2);
+      if (Math.random() < 0.14) W.embers.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.3, 1.6, 0.6);
+      if (Math.random() < 0.09) W.smoke.spawn(tmpV.copy(firePos).setY(1.2), { x: 0.04, y: 0.5, z: 0 }, 0.2, 5.0, 0.1, 0.2, 1.0, 0.16);
     }
   }
 
