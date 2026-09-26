@@ -32,11 +32,8 @@ vec3 skyColor(vec3 d,vec3 top,vec3 bottom,vec3 sunDir,vec3 moonDir,vec3 sunCol,v
     vec3 cc=mix(cloudShade,cloudLit,1.0-0.75*d2);col=mix(col,cc,dens*smoothstep(0.0,0.2,h)*cloudK);}
   return col;}`;
 
-/* ── 대기 원근 안개 ──
-   three 의 fog 셰이더 조각을 통째로 바꿔 모든 재질(표준·포인트·스프라이트)에 적용한다.
-   값은 FOG 배열 하나를 모든 재질이 참조로 공유하므로 scene.js 의 applyTime() 이 이 배열만 갱신하면 된다.
-   uFog[0]=(광원 방향 xyz, 산란 세기)  uFog[1]=(밀도, 1/높이스케일, 기준 높이, 0)  uFog[2]=(산란 색 rgb, 0)
-   - 낮은 곳일수록 짙고(높이 감쇠), 산 정상은 맑고, 해/달 쪽을 볼 때 안개가 밝게 빛난다(산란). */
+/* ── 대기 원근 안개: three 의 fog 셰이더 조각을 통째로 바꿔 모든 재질에 적용.
+   uFog[0]=(광원 방향 xyz, 산란 세기)  uFog[1]=(밀도, 1/높이스케일, 기준 높이, 0)  uFog[2]=(산란 색 rgb, 0) ── */
 export const FOG = new Float32Array(12);
 export const FOG_GLSL = `
 float fogAmount(vec3 wpos,vec4 f1){vec3 d=wpos-cameraPosition;float dist=length(d);float y0=clamp(cameraPosition.y-f1.z,-20.0,600.0),y1=clamp(wpos.y-f1.z,-20.0,600.0);float dy=y1-y0;float hi=abs(dy)>0.05?(exp(-f1.y*y0)-exp(-f1.y*y1))/(f1.y*dy):exp(-f1.y*y0);return clamp(1.0-exp(-f1.x*dist*hi),0.0,1.0);}
@@ -50,7 +47,6 @@ THREE.ShaderChunk.fog_fragment = '#ifdef USE_FOG\ngl_FragColor.rgb=mix(gl_FragCo
 export function canvasTex(w, h, draw) { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; draw(cv.getContext('2d'), w, h); return new THREE.CanvasTexture(cv); }
 export const softTex = canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
 export const shadowTex = canvasTex(128, 128, (g) => { const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(0.5, 'rgba(0,0,0,.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); });
-export const cloudTex = canvasTex(256, 128, (g) => { for (let i = 0; i < 14; i++) { const x = 40 + Math.random() * 176, y = 50 + Math.random() * 40, r = 22 + Math.random() * 30; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 128); } });
 
 export const std = (color, extra) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.9, flatShading: true }, extra || {}));
 export const smoothM = (color, extra) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.6 }, extra || {}));
