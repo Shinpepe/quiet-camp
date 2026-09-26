@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch } from './util.js';
-import { terrainH, WATER_Y } from './terrain.js';
+import { terrainH, shoreOff, WATER_Y } from './terrain.js';
 import { makeItem } from './props.js';
 import { buildScene } from './scene.js';
 import { clockLabel } from './time.js';
@@ -10,7 +10,7 @@ import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, startCr
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기 ── */
 
-export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0 };
+export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, stepT: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, lastSipSfx: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
@@ -35,11 +35,9 @@ export function bindInput() {
     if (state.mode === 'trunk' && /^Digit[1-4]$/.test(e.code)) trunkKey(+e.code[5]);
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
-  /* 창 포커스를 잃으면(Alt-Tab 등) 눌린 키와 터치를 모두 해제 — 안 그러면 계속 걷는다 */
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
   document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (state.mode !== 'trunk') showPause(); });
-  /* 클릭: 포인터 잠금만. 상호작용은 E, 손에 든 것은 mousedown~mouseup */
   canvas().addEventListener('click', () => { if (ctx.running && !isTouch && !locked()) canvas().requestPointerLock(); });
   addEventListener('mousedown', e => { if (e.button !== 0 || !ctx.running || isTouch || !locked()) return; startSip(); });
   addEventListener('mouseup', e => { if (e.button === 0) endSip(); });
@@ -72,7 +70,6 @@ export function bindInput() {
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
-/* 계속하기: ESC 직후엔 브라우저가 잠금 재요청을 거부할 수 있어, 실패하면 "클릭하면 시작" 안내를 띄운다 */
 function resume() {
   hidePause(); if (isTouch) return;
   const p = canvas().requestPointerLock(); if (p && p.catch) p.catch(() => { $('#lockmsg').style.opacity = 0.85; });
@@ -104,7 +101,6 @@ function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx('lighter');
 const LAMP = { lantern: { flag: 'lanternLit', name: '랜턴' }, tentLamp: { flag: 'tentLampLit', name: '텐트 랜턴' } };
 function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx('lighter'); showToast(ctx.W[L.flag] ? L.name + '을 켰다' : L.name + '을 껐다'); }
 
-/* E: 바라보는 것이 있으면 그것, 없으면 (앉아 있을 때) 일어나기 */
 export function interact() {
   if (cam.t < 1 || ctx.paused || state.mode === 'sleep') return;
   if (state.mode === 'trunk') { closeTrunk(); return; }
@@ -136,7 +132,6 @@ function pickItem(type) { putBack(); state.item = type; const it = makeItem(type
 export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
 export function resetHand() { const h = ctx.hand; if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); } else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); } }
 
-/* ── 마시기 / 피우기 (좌클릭·한 모금 버튼) ── */
 function startSip() {
   if (!state.item || !ctx.W.item || anim.sipT !== null || state.mode === 'trunk' || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
   if (ctx.W.item.userData.amount <= 0) { showToast('잔이 비었다'); return; }
@@ -150,15 +145,13 @@ export function itemEmptied() {
   updateHUD();
 }
 
-/* ── 잠자기: 어두워짐(1.7s) → 시계가 다음 새벽까지 빠르게(4.5s) → 침낭에 누운 채 밝아짐(1.7s)
-   자는 동안은 조준점과 하단 안내를 숨겨 검은 화면 위에 시계만 남긴다 ── */
+/* ── 잠자기 ── */
 const sleep = { on: false, phase: '', t: 0, from: 0, to: 0 };
 function startSleep() {
   sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
   $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('sit');
 }
-/* 잠자기 UI 원상복구 (깨어날 때와 메뉴로 나갈 때) */
 function endSleepUI() { sleep.on = false; $('#sleep').classList.remove('on'); $('#fade').style.transition = ''; $('#cross').style.display = ''; $('#legend').style.display = ''; }
 export function updateSleep(dt) {
   if (!sleep.on) return; sleep.t += dt;
@@ -168,7 +161,7 @@ export function updateSleep(dt) {
     if (sleep.t >= 1.7) {
       const b = SEAT.bed; state.seat = 'bed'; ctx.camera.position.set(...b.pos); player.yaw = b.yaw; player.pitch = b.pitch; cam.t = 1; putBack();
       sleep.from = state.clock; sleep.to = state.clock < 0.27 ? 0.27 : 1.27; sleep.phase = 'night'; sleep.t = 0;
-      st.classList.add('on'); ctx.W.fireLit = false;   // 밤새 불이 사그라든다
+      st.classList.add('on'); ctx.W.fireLit = false;
     }
   } else if (sleep.phase === 'night') {
     const k = Math.min(1, sleep.t / 4.5), e = k * k * (3 - 2 * k);
@@ -243,7 +236,8 @@ export function startGame() {
 
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }
-function surfaceAt(x, z) { const cfg = ctx.W.cfg; if (onPlatform(x, z)) return 'wood'; if (cfg.water && terrainH(x, z, cfg) < WATER_Y + 0.3) return 'wet'; return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass'; }
+/* 발밑 재질: 부두 나무 / 물가(해안선에서 바다 쪽으로 1.2m 이상) / 눈 / 모래 / 풀 */
+function surfaceAt(x, z) { const cfg = ctx.W.cfg; if (onPlatform(x, z)) return 'wood'; if (cfg.water && z - cfg.water.z - shoreOff(x, cfg) < -1.2) return 'wet'; return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass'; }
 function blockedAt(x, z) {
   for (const b of BLOCKS) if (x > b.x[0] - PR && x < b.x[1] + PR && z > b.z[0] - PR && z < b.z[1] + PR) return true;
   for (const t of ctx.W.trees) if (Math.hypot(x - t[0], z - t[1]) < t[2] + PR) return true;
@@ -265,7 +259,10 @@ export function walk(dt) {
     if (!blockedAt(player.x + wx, player.z)) player.x += wx;
     if (!blockedAt(player.x, player.z + wz)) player.z += wz;
     player.bob += dt * 9 * Math.min(1, len); player.stepT += dt * Math.min(1, len);
-    if (player.stepT > 0.55) { player.stepT = 0; const sf = surfaceAt(player.x, player.z); sfx('step', sf); if (ctx.W.prints && (sf === 'snow' || sf === 'sand')) { player.side = !player.side; ctx.W.prints.stamp(player.x, player.z, wx, wz, player.side ? 1 : -1); } }
+    if (player.stepT > 0.55) {
+      player.stepT = 0; const sf = surfaceAt(player.x, player.z); sfx('step', sf);
+      if (ctx.W.prints && (sf === 'snow' || sf === 'sand')) { player.side = !player.side; ctx.W.prints.stamp(player.x, player.z, wx, wz, player.side ? 1 : -1); }
+    }
   } else player.bob += (0 - (player.bob % (Math.PI * 2))) * 0.1;
   const targetY = floorY(player.x, player.z) + EYE + Math.sin(player.bob) * 0.035;
   cam3.position.set(player.x, cam3.position.y + (targetY - cam3.position.y) * Math.min(1, dt * 12), player.z);
