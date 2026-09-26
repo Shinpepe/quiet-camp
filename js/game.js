@@ -35,6 +35,8 @@ export function bindInput() {
     if (state.mode === 'trunk' && /^Digit[1-4]$/.test(e.code)) trunkKey(+e.code[5]);
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
+  /* 창 포커스를 잃으면(Alt-Tab 등) 눌린 키와 터치를 모두 해제 — 안 그러면 계속 걷는다 */
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
   document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (state.mode !== 'trunk') showPause(); });
   /* 클릭: 포인터 잠금만. 상호작용은 E, 손에 든 것은 mousedown~mouseup */
@@ -47,10 +49,10 @@ export function bindInput() {
 
   $('#trunkClose').onclick = closeTrunk;
   $('#resume').onclick = resume;
-  $('#pause').addEventListener('click', e => { if (e.target === $('#pause')) resume(); });   // 바탕을 눌러도 계속
-  $('#pausebtn').style.display = isTouch ? '' : 'none';                                     // 데스크톱은 포인터 잠금 중 누를 수 없으니 숨김 (ESC)
+  $('#pause').addEventListener('click', e => { if (e.target === $('#pause')) resume(); });
+  $('#pausebtn').style.display = isTouch ? '' : 'none';
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; sleep.on = false; $('#sleep').classList.remove('on'); $('#fade').style.transition = ''; $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); setIndoor(false); setVolume(settings.vol); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; };
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); setIndoor(false); setVolume(settings.vol); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); if (!isTouch) canvas().requestPointerLock(); };
   $('#mAct').onclick = interact;
   const ms = $('#mSip'); ms.onpointerdown = e => { e.preventDefault(); startSip(); }; ms.onpointerup = ms.onpointercancel = ms.onpointerleave = endSip; ms.oncontextmenu = e => e.preventDefault();
@@ -70,7 +72,11 @@ export function bindInput() {
   renderMenu();
 }
 function look(dx, dy, s) { player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3); }
-function resume() { hidePause(); if (!isTouch) canvas().requestPointerLock(); }
+/* 계속하기: ESC 직후엔 브라우저가 잠금 재요청을 거부할 수 있어, 실패하면 "클릭하면 시작" 안내를 띄운다 */
+function resume() {
+  hidePause(); if (isTouch) return;
+  const p = canvas().requestPointerLock(); if (p && p.catch) p.catch(() => { $('#lockmsg').style.opacity = 0.85; });
+}
 
 /* ── 조준: 조준점이 물체의 실루엣 안에 있는 것. 걷는 중이면 'walk', 앉아 있으면 자리 이름으로 대상이 걸러진다 ── */
 const fwd = new THREE.Vector3(), toT = new THREE.Vector3();
@@ -144,13 +150,16 @@ export function itemEmptied() {
   updateHUD();
 }
 
-/* ── 잠자기: 어두워짐(1.7s) → 시계가 다음 새벽까지 빠르게(4.5s) → 침낭에 누운 채 밝아짐(1.7s) ── */
+/* ── 잠자기: 어두워짐(1.7s) → 시계가 다음 새벽까지 빠르게(4.5s) → 침낭에 누운 채 밝아짐(1.7s)
+   자는 동안은 조준점과 하단 안내를 숨겨 검은 화면 위에 시계만 남긴다 ── */
 const sleep = { on: false, phase: '', t: 0, from: 0, to: 0 };
 function startSleep() {
   sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
-  $('#prompt').classList.remove('on'); $('#cross').classList.remove('hot'); sfx('sit');
+  $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('sit');
 }
+/* 잠자기 UI 원상복구 (깨어날 때와 메뉴로 나갈 때) */
+function endSleepUI() { sleep.on = false; $('#sleep').classList.remove('on'); $('#fade').style.transition = ''; $('#cross').style.display = ''; $('#legend').style.display = ''; }
 export function updateSleep(dt) {
   if (!sleep.on) return; sleep.t += dt;
   const f = $('#fade'), st = $('#sleep');
@@ -168,7 +177,7 @@ export function updateSleep(dt) {
     if (k >= 1) { sleep.phase = 'out'; sleep.t = 0; st.classList.remove('on'); f.style.opacity = 0; }
   } else if (sleep.phase === 'out') {
     setVolume(settings.vol * Math.min(1, 0.12 + sleep.t / 1.6));
-    if (sleep.t >= 1.7) { sleep.on = false; f.style.transition = ''; setVolume(settings.vol); state.mode = 'seated'; updateHUD(); anim.lastTargetId = undefined; showToast('아침이 왔다'); }
+    if (sleep.t >= 1.7) { endSleepUI(); setVolume(settings.vol); state.mode = 'seated'; updateHUD(); anim.lastTargetId = undefined; showToast('아침이 왔다'); }
   }
 }
 
@@ -185,7 +194,6 @@ export function updateHUD() {
   $('#mSip').style.display = state.item && state.mode !== 'trunk' && state.mode !== 'sleep' ? '' : 'none';
   anim.lastTargetId = undefined; updatePrompt();
 }
-/* 안내: 바라보는 것이 있으면 그 행동, 앉아 있으면 일어나기, 걷는 중 아무것도 없으면 숨김 */
 export function updatePrompt() {
   const p = $('#prompt');
   if (state.mode === 'trunk' || state.mode === 'sleep') { p.classList.remove('on'); $('#cross').classList.remove('hot'); anim.lastTargetId = null; return; }
