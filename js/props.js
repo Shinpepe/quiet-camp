@@ -139,64 +139,69 @@ export function makeCar() {
   const W = ctx.W, g = new THREE.Group(), body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.38, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.1 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x7f9fb8, transparent: true, opacity: 0.28, roughness: 0.03, metalness: 0.0, envMapIntensity: 1.6, side: THREE.DoubleSide });
   const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
-  /* 차체 — 앞·뒤로 나누고 실내는 낮은 바닥만 둔다 */
+  /* ── 차체 (앞이 -z). 실내는 z -1.0 ~ 1.5, 트렁크는 z 1.5 ~ 2.4 ── */
   add(new THREE.BoxGeometry(1.9, 0.5, 1.4), body, 0, 0.66, -1.7);    // 앞 차체  z -2.4 ~ -1.0
   add(new THREE.BoxGeometry(1.9, 0.5, 0.9), body, 0, 0.66, 1.95);    // 뒤 차체  z  1.5 ~  2.4
-  add(new THREE.BoxGeometry(1.9, 0.08, 2.5), dark, 0, 0.47, 0.25);   // 실내 바닥 z -1.0 ~  1.5 (윗면 0.51)
+  add(new THREE.BoxGeometry(1.9, 0.08, 2.5), dark, 0, 0.47, 0.25);   // 실내 바닥 (윗면 0.51)
   add(new THREE.BoxGeometry(1.94, 0.12, 4.75), dark, 0, 0.44, 0.05); // 하부
-  add(new THREE.BoxGeometry(1.85, 0.28, 1.5), body, 0, 1.0, -1.55);  // 보닛
-  add(new THREE.BoxGeometry(1.8, 0.07, 2.35), body, 0, 1.86, 0.35); add(new THREE.BoxGeometry(1.7, 0.02, 2.25), dark, 0, 1.815, 0.35);  // 지붕 + 헤드라이너
+  add(new THREE.BoxGeometry(1.85, 0.28, 1.5), body, 0, 1.0, -1.55);  // 보닛  z -2.3 ~ -0.8
+  add(new THREE.BoxGeometry(1.8, 0.07, 2.2), body, 0, 1.86, 0.4); add(new THREE.BoxGeometry(1.7, 0.02, 2.1), dark, 0, 1.815, 0.4);  // 지붕 z -0.7 ~ 1.5 (앞유리 상단에 맞춤) + 헤드라이너
   add(new THREE.BoxGeometry(1.75, 0.05, 1.15), dark, 0, 0.9, 1.95); add(new THREE.BoxGeometry(1.75, 0.35, 0.08), body, 0, 1.06, 2.49);  // 트렁크 바닥·뒷판
-  [-0.84, 0.84].forEach(x => add(new THREE.BoxGeometry(0.08, 0.35, 1.15), body, x, 1.06, 1.95));
+  [-0.84, 0.84].forEach(x => add(new THREE.BoxGeometry(0.08, 0.35, 1.15), body, x, 1.06, 1.95));                                   // 트렁크 옆벽
   [-0.88, 0.88].forEach(x => {
-    add(new THREE.BoxGeometry(0.09, 0.95, 0.09), dark, x, 1.45, -0.9, 0.55); add(new THREE.BoxGeometry(0.09, 0.75, 0.09), dark, x, 1.5, 0.55); add(new THREE.BoxGeometry(0.09, 0.85, 0.09), dark, x, 1.48, 1.45, -0.35);
-    add(new THREE.BoxGeometry(0.1, 0.9, 2.8), body, x, 0.7, 0.35); add(new THREE.BoxGeometry(0.05, 0.85, 2.7), dark, x * 0.93, 0.7, 0.35);
-    add(new THREE.PlaneGeometry(1.25, 0.65), glass, x, 1.48, 0.35, 0, Math.PI / 2);
-    add(new THREE.BoxGeometry(0.03, 0.03, 0.18), chrome, x * 1.06, 1.0, 0.1); add(new THREE.BoxGeometry(0.03, 0.03, 0.18), chrome, x * 1.06, 1.0, 1.15);
-    add(new THREE.BoxGeometry(0.22, 0.12, 0.08), dark, x * 1.1, 1.22, -0.65);
-    add(new THREE.BoxGeometry(0.28, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), x * 0.65, 0.85, -2.31);
-    add(new THREE.BoxGeometry(0.34, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: 0xff2a2a }), x * 0.62, 0.9, 2.55);
+    add(new THREE.BoxGeometry(0.09, 0.95, 0.09), dark, x, 1.45, -0.9, 0.55);   // A필러
+    add(new THREE.BoxGeometry(0.09, 0.75, 0.09), dark, x, 1.5, 0.55);          // B필러
+    add(new THREE.BoxGeometry(0.09, 0.85, 0.09), dark, x, 1.48, 1.45, -0.25);  // C필러 (뒷유리 각도와 같게)
+    add(new THREE.BoxGeometry(0.1, 0.9, 2.8), body, x, 0.7, 0.35); add(new THREE.BoxGeometry(0.05, 0.85, 2.7), dark, x * 0.93, 0.7, 0.35);  // 문 + 안쪽 패널
+    add(new THREE.PlaneGeometry(1.5, 0.65), glass, x, 1.48, 0.15, 0, Math.PI / 2);    // 앞문 창 z -0.6 ~ 0.9 (A필러까지)
+    add(new THREE.PlaneGeometry(0.6, 0.62), glass, x, 1.47, 1.25, 0, Math.PI / 2);    // 뒷문 창 z 0.95 ~ 1.55
+    add(new THREE.BoxGeometry(0.03, 0.03, 0.18), chrome, x * 1.06, 1.0, 0.1); add(new THREE.BoxGeometry(0.03, 0.03, 0.18), chrome, x * 1.06, 1.0, 1.15);  // 바깥 손잡이
+    add(new THREE.BoxGeometry(0.22, 0.12, 0.08), dark, x * 1.1, 1.22, -0.65);  // 사이드미러
+    add(new THREE.BoxGeometry(0.28, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), x * 0.65, 0.85, -2.31);   // 헤드라이트
+    add(new THREE.BoxGeometry(0.34, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: 0xff2a2a }), x * 0.62, 0.9, 2.55);     // 테일라이트
   });
-  add(new THREE.PlaneGeometry(1.7, 0.95), glass, 0, 1.48, -0.95, 0.6); add(new THREE.PlaneGeometry(1.6, 0.8), glass, 0, 1.5, 1.5, -0.35);
-  add(new THREE.BoxGeometry(0.5, 0.12, 0.02), smoothM(0xe8e8e8), 0, 0.7, 2.56);
-  add(new THREE.BoxGeometry(1.9, 0.12, 0.1), chrome, 0, 0.5, -2.33); add(new THREE.BoxGeometry(1.9, 0.12, 0.1), chrome, 0, 0.5, 2.55); add(new THREE.BoxGeometry(0.9, 0.22, 0.04), dark, 0, 0.82, -2.33);
+  add(new THREE.PlaneGeometry(1.7, 0.95), glass, 0, 1.48, -0.95, 0.6);     // 앞유리: 아래 (z -1.22, y 1.09) → 위 (z -0.68, y 1.87)
+  add(new THREE.PlaneGeometry(1.6, 0.8), glass, 0, 1.5, 1.55, -0.25);      // 뒷유리: 위 (z 1.45, y 1.89) → 아래 (z 1.65, y 1.11) — 좌석 뒤를 지난다
+  add(new THREE.BoxGeometry(0.5, 0.12, 0.02), smoothM(0xe8e8e8), 0, 0.7, 2.56);   // 번호판
+  add(new THREE.BoxGeometry(1.9, 0.12, 0.1), chrome, 0, 0.5, -2.33); add(new THREE.BoxGeometry(1.9, 0.12, 0.1), chrome, 0, 0.5, 2.55); add(new THREE.BoxGeometry(0.9, 0.22, 0.04), dark, 0, 0.82, -2.33);  // 범퍼·그릴
   [[-1.02, -1.55], [1.02, -1.55], [-1.02, 1.55], [1.02, 1.55]].forEach(([x, z]) => { add(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 18), std(0x141414, { roughness: 0.95 }), x, 0.36, z, 0, 0, Math.PI / 2); add(new THREE.CylinderGeometry(0.2, 0.2, 0.28, 10), chrome, x, 0.36, z, 0, 0, Math.PI / 2); });
 
-  /* 실내 — 왼쪽 운전석(D), 오른쪽 조수석(P). 눈높이 1.28. 대시보드 앞면 z -0.7, 그 앞에 붙는 것들은 최소 5mm 띄운다(z-fighting 방지) */
+  /* ── 실내 — 왼쪽 운전석(D), 오른쪽 조수석(P). 눈높이 1.28 ── */
   const D = -0.45, P = 0.45;
   const trim = std(0x2e3036, { roughness: 0.85 }), seatM = cloth(0x3a3f47, 2), carpet = cloth(0x1e2024, 4), ivory = std(0xd8dfe8, { roughness: 0.6 }), black = std(0x141416, { roughness: 0.5 });
   [D, P].forEach(x => {
     add(new THREE.BoxGeometry(0.45, 0.01, 0.5), carpet, x, 0.515, -0.25);                                                     // 발매트
     add(new THREE.BoxGeometry(0.5, 0.35, 0.5), seatM, x, 0.68, 0.45); add(new THREE.BoxGeometry(0.5, 0.75, 0.15), seatM, x, 1.2, 0.75);  // 앞좌석 방석·등받이
     add(new THREE.BoxGeometry(0.26, 0.15, 0.1), seatM, x, 1.7, 0.76);                                                           // 머리받침
-    [-0.1, 0.1].forEach(dx => g.add(bar([x + dx, 1.57, 0.76], [x + dx, 1.63, 0.76], 0.008, chrome, 6)));                       // 머리받침 봉
+    [-0.1, 0.1].forEach(dx => g.add(bar([x + dx, 1.57, 0.76], [x + dx, 1.63, 0.76], 0.008, chrome, 6)));
     add(new THREE.BoxGeometry(0.4, 0.02, 0.18), trim, x, 1.78, -0.55);                                                          // 선바이저
   });
-  add(new THREE.BoxGeometry(1.4, 0.35, 0.5), seatM, 0, 0.68, 1.3); add(new THREE.BoxGeometry(1.4, 0.7, 0.15), seatM, 0, 1.15, 1.55);  // 뒷좌석
-  [-0.4, 0.4].forEach(x => add(new THREE.BoxGeometry(0.26, 0.15, 0.1), seatM, x, 1.6, 1.56));                                  // 뒷좌석 머리받침
-  add(new THREE.BoxGeometry(0.34, 0.3, 0.9), trim, 0, 0.66, 0.3);                                                               // 센터 콘솔 (윗면 0.81)
+  add(new THREE.BoxGeometry(1.4, 0.35, 0.5), seatM, 0, 0.68, 1.15); add(new THREE.BoxGeometry(1.4, 0.65, 0.15), seatM, 0, 1.125, 1.4);  // 뒷좌석 방석 z 0.9~1.4 · 등받이 z 1.325~1.475 (뒷유리 앞)
+  [-0.4, 0.4].forEach(x => add(new THREE.BoxGeometry(0.26, 0.13, 0.1), seatM, x, 1.52, 1.4));                                   // 뒷좌석 머리받침
+  add(new THREE.BoxGeometry(0.34, 0.3, 0.9), trim, 0, 0.66, 0.3);                                                               // 센터 콘솔
   add(new THREE.BoxGeometry(0.3, 0.05, 0.3), seatM, 0, 0.835, 0.62);                                                            // 팔걸이
   [-0.08, 0.08].forEach(x => add(new THREE.CylinderGeometry(0.04, 0.04, 0.02, 12), black, x, 0.815, 0.2));                       // 컵홀더
   g.add(bar([0, 0.8, -0.05], [0.02, 0.98, -0.12], 0.012, chrome, 8)); add(new THREE.SphereGeometry(0.035, 10, 8), black, 0.02, 0.99, -0.12);  // 기어 레버
   add(new THREE.BoxGeometry(1.8, 0.32, 0.5), dark, 0, 0.99, -0.95);                                                             // 대시보드 (앞면 z -0.7)
-  add(new THREE.BoxGeometry(0.55, 0.16, 0.02), trim, P, 0.95, -0.685);                                                          // 글로브박스 (조수석)
+  add(new THREE.BoxGeometry(0.55, 0.16, 0.02), trim, P, 0.95, -0.685);                                                          // 글로브박스
   add(new THREE.BoxGeometry(0.46, 0.26, 0.02), black, 0, 0.97, -0.685);                                                         // 디스플레이 베젤
-  add(new THREE.PlaneGeometry(0.42, 0.22), new THREE.MeshBasicMaterial({ map: naviTex }), 0, 0.97, -0.672);                     // 디스플레이 화면 (지도)
+  add(new THREE.PlaneGeometry(0.42, 0.22), new THREE.MeshBasicMaterial({ map: naviTex }), 0, 0.97, -0.672);                     // 디스플레이 화면
   [-0.3, 0.3].forEach(x => add(new THREE.BoxGeometry(0.06, 0.05, 0.02), black, x, 1.115, -0.685));                               // 송풍구
-  add(new THREE.BoxGeometry(0.5, 0.18, 0.03), black, D, 1.06, -0.675);                                                          // 계기판 (앞면 -0.66)
+  add(new THREE.BoxGeometry(0.5, 0.18, 0.03), black, D, 1.06, -0.675);                                                          // 계기판
   [D - 0.1, D + 0.1].forEach(x => add(new THREE.CylinderGeometry(0.055, 0.055, 0.01, 16), ivory, x, 1.06, -0.652, Math.PI / 2)); // 계기 다이얼
   g.add(bar([D, 0.98, -0.7], [D, 1.05, -0.45], 0.03, dark, 8));                                                                 // 핸들 기둥
-  add(new THREE.TorusGeometry(0.18, 0.025, 8, 24), dark, D, 1.05, -0.45, -0.45);                                                // 핸들 림 (위가 앞으로 기울게)
+  add(new THREE.TorusGeometry(0.18, 0.025, 8, 24), dark, D, 1.05, -0.45, -0.45);                                                // 핸들 림
   add(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 12), dark, D, 1.05, -0.45, Math.PI / 2 - 0.45);                            // 핸들 허브
-  [[D - 0.18, 1.05, -0.45], [D + 0.18, 1.05, -0.45], [D, 0.888, -0.372]].forEach(p => g.add(bar([D, 1.05, -0.45], p, 0.012, dark, 6)));  // 핸들 스포크
+  [[D - 0.18, 1.05, -0.45], [D + 0.18, 1.05, -0.45], [D, 0.888, -0.372]].forEach(p => g.add(bar([D, 1.05, -0.45], p, 0.012, dark, 6)));  // 스포크
   [D - 0.1, D + 0.1].forEach(x => add(new THREE.BoxGeometry(0.08, 0.12, 0.02), black, x, 0.6, -0.85, -0.5));                    // 페달
   add(new THREE.BoxGeometry(0.3, 0.08, 0.03), dark, 0, 1.66, -0.55);                                                             // 룸미러
   [-1, 1].forEach(s => { add(new THREE.BoxGeometry(0.1, 0.06, 0.55), trim, s * 0.8, 1.02, 0.3); add(new THREE.BoxGeometry(0.03, 0.03, 0.12), chrome, s * 0.78, 1.12, -0.1); });  // 도어 팔걸이·손잡이
-  add(new THREE.BoxGeometry(0.36, 0.06, 0.32), cloth(0x4b5a3f, 3), P, 0.885, 0.42, 0, 0.2);                                      // 조수석에 놓인 재킷
+  add(new THREE.BoxGeometry(0.36, 0.06, 0.32), cloth(0x4b5a3f, 3), P, 0.885, 0.42, 0, 0.2);                                      // 조수석 재킷
 
-  const lid = new THREE.Group(); lid.position.set(0, 1.245, 1.38); const lidM = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.06, 1.2), body); lidM.position.z = 0.6; lid.add(lidM); g.add(lid); W.trunkLid = lid;
-  const cooler = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 0.35), smoothM(0x3d6f9e)); cooler.position.set(-0.4, 1.06, 1.9); g.add(cooler);
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.4), cloth(0x6b5a3e, 3)); bag.position.set(0.4, 1.04, 2.0); g.add(bag);
+  /* 트렁크 뚜껑: 경첩을 뒷유리 아래(z 1.65)에 두어 실내로 들어오지 않게 */
+  const lid = new THREE.Group(); lid.position.set(0, 1.245, 1.65); const lidM = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.06, 0.93), body); lidM.position.z = 0.465; lid.add(lidM); g.add(lid); W.trunkLid = lid;
+  const cooler = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 0.35), smoothM(0x3d6f9e)); cooler.position.set(-0.4, 1.06, 1.95); g.add(cooler);
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.22, 0.4), cloth(0x6b5a3e, 3)); bag.position.set(0.4, 1.04, 2.05); g.add(bag);
   shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); return g;
 }
 export function makeProps() {
