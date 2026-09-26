@@ -1,12 +1,11 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
-import { rnd, fbm, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL } from './util.js';
+import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 
 const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.25), extra || {}));
 const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.3), extra || {}));
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 const lathe = (pts, seg) => new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg || 28);
 function sagPlane(w, h, sag, seg = 8) { const g = new THREE.PlaneGeometry(w, h, seg, seg); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getX(i) / w + 0.5, v = p.getY(i) / h + 0.5; p.setZ(i, sag * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)); } g.computeVertexNormals(); return g; }
@@ -107,7 +106,6 @@ export function makeFire() {
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.006, 6, 16, Math.PI), pole); handle.position.y = 0.16; kettle.add(handle);
   kettle.position.y = 0.85; g.add(kettle);
   shadowed(g);
-  /* 불꽃: 노이즈로 일렁이는 판 4장을 45° 간격으로 */
   const flameMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
     uniforms: { uTime: W.uTime, uK: { value: 0 }, uPh: { value: 0 } },
@@ -129,7 +127,7 @@ export function makeFire() {
   return g;
 }
 
-/* ── 자동차 (앞이 -z). 실내 z -1.0 ~ 1.7, 트렁크 z 1.7 ~ 2.4. 뒷유리는 좌석 뒤 35cm, 사이에 뒷선반 ── */
+/* ── 자동차 (앞이 -z) ── */
 export function makeCar() {
   const W = ctx.W, g = new THREE.Group(), body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.38, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.1 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x7f9fb8, transparent: true, opacity: 0.28, roughness: 0.03, metalness: 0.0, envMapIntensity: 1.6, side: THREE.DoubleSide });
@@ -199,7 +197,7 @@ export function makeCar() {
   shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); return g;
 }
 
-/* ── 쿨러, 배낭, 장작더미(4-3-2 피라미드), 도끼 박힌 그루터기, 잔가지 ── */
+/* ── 쿨러, 배낭, 장작더미, 도끼 박힌 그루터기, 잔가지 ── */
 export function makeProps() {
   const scene = ctx.scene, cooler = new THREE.Group();
   const cb = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.38, 0.38), smoothM(0x3d6f9e, { roughness: 0.6 })); cb.position.y = 0.19; cooler.add(cb);
@@ -212,7 +210,6 @@ export function makeProps() {
   [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
   pack.position.set(2.95, 0, 0.3); pack.rotation.set(0, -0.6, 0.12); scene.add(shadowed(pack));
 
-  /* 장작더미 */
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5))), cut = smoothM(0xc9a97c, Object.assign({ roughness: 0.85 }, tex('wood', 1, 1, 0.3)));
   const pile = new THREE.Group();
   [[-0.24, -0.08, 0.08, 0.24], [-0.16, 0, 0.16], [-0.08, 0.08]].forEach((zs, r) => zs.forEach(z => {
@@ -221,31 +218,26 @@ export function makeProps() {
   }));
   pile.position.set(1.85, 0, -2.55); pile.rotation.y = -0.35; scene.add(shadowed(pile)); contactShadow(1.85, -2.55, 0.95, 0.8, 0.6);
 
-  /* ── 도끼 박힌 그루터기 ── */
   const stump = new THREE.Group();
   const st = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.32, 12), [bark, cut, cut]); st.position.y = 0.16; stump.add(st);
   {
     const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.35 }), hickory = wood(0xb08a5a, 1, 1), leather = smoothM(0x4a3324, { roughness: 0.9 });
     const G = new THREE.Group();
-    /* 도끼머리 윤곽: 뒤쪽 폴(뭉툭) → 위로 벌어지는 날 → 곡선 날끝 → 아래로 벌어지는 날. 날이 +x 방향 */
     const s = new THREE.Shape();
     s.moveTo(-0.055, -0.03); s.lineTo(-0.055, 0.03); s.lineTo(0.0, 0.034);
     s.quadraticCurveTo(0.05, 0.04, 0.085, 0.075); s.quadraticCurveTo(0.108, 0.0, 0.085, -0.075); s.quadraticCurveTo(0.05, -0.04, 0.0, -0.034); s.closePath();
     const headG = new THREE.ExtrudeGeometry(s, { depth: 0.022, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 2 }); headG.translate(0, 0, -0.011);
-    const head = new THREE.Mesh(headG, steel); head.rotation.z = -Math.PI / 2;   // 날이 아래(-y)를 향하게
-    G.add(head);
-    /* 자루: 눈에서 +x 로 뻗으며 끝이 살짝 아래로 휘는 곡선 */
+    const head = new THREE.Mesh(headG, steel); head.rotation.z = -Math.PI / 2; G.add(head);
     const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-0.02, 0, 0), new THREE.Vector3(0.13, 0.006, 0), new THREE.Vector3(0.27, -0.002, 0), new THREE.Vector3(0.4, -0.022, 0)]);
     const handle = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.015, 10, false), hickory); G.add(handle);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.019, 10, 8), hickory); knob.position.set(0.4, -0.022, 0); knob.scale.set(1.3, 1, 1); G.add(knob);
     const wrap = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.24, 0.0, 0), new THREE.Vector3(0.33, -0.012, 0)]), 6, 0.017, 10, false), leather); G.add(wrap);
-    G.position.set(-0.03, 0.382, 0.02); G.rotation.set(0, 0.3, 0.6);   // 날끝이 윗면 2.5cm 아래, 자루는 35° 로 올라감
+    G.position.set(-0.03, 0.382, 0.02); G.rotation.set(0, 0.3, 0.6);
     stump.add(G);
     const slot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.004, 0.02), std(0x1a1410)); slot.position.set(0.03, 0.322, 0.01); slot.rotation.y = 0.3; stump.add(slot);
   }
   stump.position.set(2.55, 0, -1.95); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(2.55, -1.95, 0.55, 0.55, 0.6);
 
-  /* 잔가지와 껍질 조각 */
   for (let i = 0; i < 6; i++) { const x = rnd(1.5, 2.5), z = rnd(-2.95, -2.15), a = rnd(0, 6.3), L = rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], rnd(0.008, 0.014), bark, 6))); }
   for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(rnd(0.06, 0.12), 0.012, rnd(0.03, 0.06)), bark); c.position.set(rnd(1.6, 2.6), 0.008, rnd(-2.9, -2.1)); c.rotation.set(rnd(-0.2, 0.2), rnd(0, 6.3), 0); scene.add(shadowed(c)); }
 }
@@ -262,6 +254,50 @@ export function makeDock() {
   const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.06), METAL()); cleat.position.set(5.05, 0.39, -12.0); g.add(cleat);
   return shadowed(g);
 }
+
+/* ── 등대: 바위섬 위 흰 탑에 빨간 띠, 난간·등롱·빨간 지붕, 관리사. 밤에만 켜지고 광선 두 줄기가 돌며 카메라를 스칠 때 번쩍 ── */
+const beamTex = canvasTex(256, 32, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, 'rgba(255,255,255,.6)'); gr.addColorStop(0.25, 'rgba(255,255,255,.25)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  const v = g.createLinearGradient(0, 0, 0, h); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.5, 'rgba(0,0,0,1)'); v.addColorStop(1, 'rgba(0,0,0,0)'); g.globalCompositeOperation = 'destination-in'; g.fillStyle = v; g.fillRect(0, 0, w, h);
+});
+export function makeLighthouse() {
+  const W = ctx.W, g = new THREE.Group();
+  const white = smoothM(0xf2f0ea, { roughness: 0.7 }), red = smoothM(0xb8322a, { roughness: 0.6 }), dark = std(0x2a2c30, { roughness: 0.6 });
+  const rock = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(13, 1), 0.35), std(0x5a5f66, tex('rock', 3, 3, 0.5))); rock.scale.set(1.3, 0.5, 1); rock.position.y = -2.5; g.add(rock);
+  for (let i = 0; i < 5; i++) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(2, 4), 0), 0.4), std(0x555a60, tex('rock', 2, 2, 0.5))); const a = rnd(0, 6.3), d = rnd(12, 17); r.position.set(Math.cos(a) * d, rnd(-1.5, 0.5), Math.sin(a) * d * 0.8); r.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(r); }
+  const top = 4.0;
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 12, 18), white); tower.position.y = top + 6; g.add(tower);
+  [[3, 1.73], [6.6, 1.6]].forEach(([h, r]) => { const b = new THREE.Mesh(new THREE.CylinderGeometry(r - 0.06, r + 0.02, 1.5, 18), red); b.position.y = top + h; g.add(b); });
+  const gal = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 1.9, 0.35, 18), dark); gal.position.y = top + 12.1; g.add(gal);
+  const rail = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.05, 6, 24), dark); rail.rotation.x = Math.PI / 2; rail.position.y = top + 13.1; g.add(rail);
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; g.add(bar([Math.cos(a) * 2.05, top + 12.3, Math.sin(a) * 2.05], [Math.cos(a) * 2.05, top + 13.1, Math.sin(a) * 2.05], 0.03, dark, 4)); }
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 2.4, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fb8cc, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false })); glass.position.y = top + 13.5; g.add(glass);
+  for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; g.add(bar([Math.cos(a) * 1.15, top + 12.3, Math.sin(a) * 1.15], [Math.cos(a) * 1.15, top + 14.7, Math.sin(a) * 1.15], 0.05, dark, 4)); }
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.5, 1.4, 16), red); cap.position.y = top + 15.4; g.add(cap);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 10), new THREE.MeshBasicMaterial({ color: 0x8c8a80 })); lamp.position.y = top + 13.5; g.add(lamp);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xffe6a8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); glow.position.y = top + 13.5; glow.scale.setScalar(8); g.add(glow);
+  const beamMat = new THREE.MeshBasicMaterial({ map: beamTex, color: 0xffe9b8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const pivot = new THREE.Group(); pivot.position.y = top + 13.5; g.add(pivot);
+  const beams = [0, Math.PI].map(a => { const b = new THREE.Mesh(new THREE.PlaneGeometry(140, 7), beamMat); b.position.set(Math.cos(a) * 70, 0, Math.sin(a) * 70); b.rotation.y = -a; b.frustumCulled = false; pivot.add(b); return b; });
+  const house = new THREE.Mesh(new THREE.BoxGeometry(4.2, 3, 5), white); house.position.set(4.6, top + 1.5, 2.5); g.add(house);
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0, 3.2, 1.8, 4), red); roof.scale.set(1, 1, 1.3); roof.rotation.y = Math.PI / 4; roof.position.set(4.6, top + 3.9, 2.5); g.add(roof);
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.0), new THREE.MeshBasicMaterial({ color: 0x4a5560 })); win.position.set(6.71, top + 1.8, 2.0); win.rotation.y = Math.PI / 2; g.add(win);
+  shadowed(g); [glass, glow, lamp, ...beams].forEach(o => { o.castShadow = false; o.userData.noAO = true; });
+  W.lighthouse = { group: g, pivot, glow, beamMat, lamp, win };
+  return g;
+}
+const _lhD = new THREE.Vector3();
+export function updateLighthouse(T) {
+  const W = ctx.W, L = W.lighthouse; if (!L) return;
+  const on = smooth(0.15, 0.5, W.tm.stars);
+  L.pivot.rotation.y = T * 0.785;
+  L.beamMat.opacity = 0.14 * on;
+  L.lamp.material.color.setHex(on > 0.05 ? 0xfff1c0 : 0x8c8a80); L.win.material.color.setHex(on > 0.05 ? 0xffd28a : 0x4a5560);
+  _lhD.copy(ctx.camera.position).sub(L.group.position); _lhD.y = 0; _lhD.normalize();
+  const a = L.pivot.rotation.y, dot = Math.abs(_lhD.x * Math.cos(a) - _lhD.z * Math.sin(a)), flash = Math.pow(Math.max(0, (dot - 0.94) / 0.06), 1.5);
+  L.glow.material.opacity = on * (0.12 + 0.85 * flash); L.glow.scale.setScalar(8 + 22 * flash);
+}
+
 /* ── 손에 드는 것 ── */
 export function makeItem(type) {
   const g = new THREE.Group(); const emitter = new THREE.Object3D(); g.userData.emitter = emitter; g.userData.amount = 1;
@@ -293,7 +329,7 @@ export function makeItem(type) {
   g.userData.setAmount(1); g.add(emitter); return g;
 }
 
-/* ── 점 파티클 (김·불티·불꽃 잔입자) ── */
+/* ── 점 파티클 ── */
 export class Particles {
   constructor(n, opt) {
     this.n = n; this.pos = new Float32Array(n * 3); this.vel = new Float32Array(n * 3); this.life = new Float32Array(n); this.max = new Float32Array(n); this.i = 0;
@@ -316,7 +352,7 @@ export class Particles {
   }
 }
 
-/* ── 연기: 뭉게구름 텍스처, 자라면서 옅어지고 회전, 어릴 땐 불빛에 주황빛 ── */
+/* ── 연기 ── */
 const puffTex = canvasTex(128, 128, (g, w, h) => {
   g.clearRect(0, 0, w, h);
   for (let i = 0; i < 16; i++) { const a = Math.random() * Math.PI * 2, r = Math.random() * 28, x = 64 + Math.cos(a) * r, y = 64 + Math.sin(a) * r, rr = 18 + Math.random() * 22; const gr = g.createRadialGradient(x, y, 0, x, y, rr); gr.addColorStop(0, 'rgba(255,255,255,.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h); }
@@ -343,7 +379,6 @@ export class Smoke {
     }));
     this.mesh.frustumCulled = false; this.mesh.userData.noAO = true;
   }
-  /* p 위치, v 초기 속도, spread 퍼짐, life 수명(초), vs 속도 편차, s0→s1 크기(m), op 진하기 */
   spawn(p, v, spread, life, vs, s0, s1, op) {
     const i = this.i; this.i = (i + 1) % this.n; vs = vs || 0.08;
     this.pos[i * 3] = p.x + (Math.random() - .5) * spread; this.pos[i * 3 + 1] = p.y + (Math.random() - .5) * spread * 0.3; this.pos[i * 3 + 2] = p.z + (Math.random() - .5) * spread;
@@ -364,6 +399,46 @@ export class Smoke {
     }
     const at = this.mesh.geometry.attributes; at.position.needsUpdate = at.aAge.needsUpdate = at.aSize.needsUpdate = at.aRot.needsUpdate = at.aOp.needsUpdate = true;
     if (ctx.renderer) this.mesh.material.uniforms.uPx.value = ctx.renderer.domElement.height * 0.5;
+  }
+}
+
+/* ── 발자국: 곱하기 블렌딩 판을 지면에 얹는다. 시간에 따라 흰색으로 돌아가며 사라진다 ── */
+const printTex = canvasTex(64, 128, (g, w, h) => {
+  g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#000'; g.shadowColor = '#000'; g.shadowBlur = 9;
+  const el = (x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill(); };
+  el(32, 40, 19, 24); el(29, 66, 12, 14); el(31, 94, 15, 19);
+});
+const _fpN = new THREE.Vector3(), _fpUP = new THREE.Vector3(0, 1, 0), _fpQ1 = new THREE.Quaternion(), _fpQ2 = new THREE.Quaternion(), _fpM = new THREE.Matrix4(), _fpP = new THREE.Vector3(), _fpS = new THREE.Vector3(1, 1, 1);
+export class Footprints {
+  constructor(n, col, life) {
+    this.n = n; this.i = 0; this.life = life; this.age = new Float32Array(n).fill(1e9); this.k = new Float32Array(n);
+    const g = new THREE.PlaneGeometry(0.13, 0.28); g.rotateX(-Math.PI / 2);
+    g.setAttribute('aK', new THREE.InstancedBufferAttribute(this.k, 1));
+    this.mesh = new THREE.InstancedMesh(g, new THREE.ShaderMaterial({
+      uniforms: { uMap: { value: printTex }, uCol: { value: new THREE.Color(col[0], col[1], col[2]) } },
+      vertexShader: `attribute float aK;varying vec2 vUv;varying float vK;varying vec3 vW;
+        void main(){vUv=uv;vK=aK;vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.0);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
+      fragmentShader: `uniform sampler2D uMap;uniform vec3 uCol;varying vec2 vUv;varying float vK;varying vec3 vW;
+        void main(){float t=texture2D(uMap,vUv).r;float d=1.0-smoothstep(30.0,70.0,length(vW-cameraPosition));float k=(1.0-t)*vK*d;gl_FragColor=vec4(mix(vec3(1.0),uCol,k),1.0);}`,
+      blending: THREE.MultiplyBlending, depthWrite: false, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    }), n);
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < n; i++) this.mesh.setMatrixAt(i, zero);
+    this.mesh.frustumCulled = false; this.mesh.userData.noAO = true; this.mesh.castShadow = this.mesh.receiveShadow = false; this.mesh.renderOrder = 1;
+  }
+  stamp(x, z, fx, fz, side) {
+    const cfg = ctx.W.cfg, i = this.i; this.i = (i + 1) % this.n;
+    const L = Math.hypot(fx, fz) || 1; fx /= L; fz /= L;
+    const px = x - fx * 0.15 - fz * 0.12 * side, pz = z - fz * 0.15 + fx * 0.12 * side;
+    const h = terrainH(px, pz, cfg), nx = -(terrainH(px + 0.3, pz, cfg) - terrainH(px - 0.3, pz, cfg)) / 0.6, nz = -(terrainH(px, pz + 0.3, cfg) - terrainH(px, pz - 0.3, cfg)) / 0.6;
+    _fpN.set(nx, 1, nz).normalize(); _fpQ1.setFromUnitVectors(_fpUP, _fpN); _fpQ2.setFromAxisAngle(_fpUP, Math.atan2(-fx, -fz)); _fpQ1.multiply(_fpQ2);
+    _fpM.compose(_fpP.set(px, h + 0.02, pz), _fpQ1, _fpS); this.mesh.setMatrixAt(i, _fpM); this.mesh.instanceMatrix.needsUpdate = true;
+    this.age[i] = 0; this.k[i] = 1; this.mesh.geometry.attributes.aK.needsUpdate = true;
+  }
+  update(dt) {
+    let any = false;
+    for (let i = 0; i < this.n; i++) { if (this.age[i] >= this.life) continue; this.age[i] += dt; const t = this.age[i] / this.life; this.k[i] = t < 0.25 ? 1 : Math.max(0, 1 - (t - 0.25) / 0.75); any = true; }
+    if (any) this.mesh.geometry.attributes.aK.needsUpdate = true;
   }
 }
 
@@ -428,46 +503,4 @@ export function makeSnowCaps() {
   const cap = (w, d, h, x, y, z, ry, slope) => { const m = new THREE.Mesh(snowCapGeo(w, d, h, slope, seed += 2.3), snow); m.position.set(x, y, z); m.rotation.y = ry || 0; m.castShadow = false; m.receiveShadow = true; scene.add(m); };
   cap(1.8, 2.3, 0.1, 0, 1.895, 8.46);
   cap(1.75, 1.35, 0.07, 0, 1.14, 6.45);
-}
-
-/* ── 발자국: 곱하기 블렌딩 판을 지면에 얹는다. 흰색이면 안 보이고, 시간에 따라 흰색으로 돌아가며 사라진다.
-   눈·모래에서만 찍히며, 진행 방향으로 회전하고 지면 기울기에 맞춰 눕는다 ── */
-const printTex = canvasTex(64, 128, (g, w, h) => {
-  g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#000'; g.shadowColor = '#000'; g.shadowBlur = 9;
-  const el = (x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill(); };
-  el(32, 40, 19, 24); el(29, 66, 12, 14); el(31, 94, 15, 19);   // 앞꿈치 · 아치 · 뒤꿈치
-});
-const _fpN = new THREE.Vector3(), _fpUP = new THREE.Vector3(0, 1, 0), _fpQ1 = new THREE.Quaternion(), _fpQ2 = new THREE.Quaternion(), _fpM = new THREE.Matrix4(), _fpP = new THREE.Vector3(), _fpS = new THREE.Vector3(1, 1, 1);
-export class Footprints {
-  constructor(n, col, life) {
-    this.n = n; this.i = 0; this.life = life; this.age = new Float32Array(n).fill(1e9); this.k = new Float32Array(n);
-    const g = new THREE.PlaneGeometry(0.13, 0.28); g.rotateX(-Math.PI / 2);
-    g.setAttribute('aK', new THREE.InstancedBufferAttribute(this.k, 1));
-    this.mesh = new THREE.InstancedMesh(g, new THREE.ShaderMaterial({
-      uniforms: { uMap: { value: printTex }, uCol: { value: new THREE.Color(col[0], col[1], col[2]) } },
-      vertexShader: `attribute float aK;varying vec2 vUv;varying float vK;varying vec3 vW;
-        void main(){vUv=uv;vK=aK;vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.0);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
-      fragmentShader: `uniform sampler2D uMap;uniform vec3 uCol;varying vec2 vUv;varying float vK;varying vec3 vW;
-        void main(){float t=texture2D(uMap,vUv).r;float d=1.0-smoothstep(30.0,70.0,length(vW-cameraPosition));float k=(1.0-t)*vK*d;gl_FragColor=vec4(mix(vec3(1.0),uCol,k),1.0);}`,
-      blending: THREE.MultiplyBlending, depthWrite: false, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    }), n);
-    const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < n; i++) this.mesh.setMatrixAt(i, zero);
-    this.mesh.frustumCulled = false; this.mesh.userData.noAO = true; this.mesh.castShadow = this.mesh.receiveShadow = false; this.mesh.renderOrder = 1;
-  }
-  /* (x,z) 위치, (fx,fz) 진행 방향, side ±1 좌우 발 */
-  stamp(x, z, fx, fz, side) {
-    const cfg = ctx.W.cfg, i = this.i; this.i = (i + 1) % this.n;
-    const L = Math.hypot(fx, fz) || 1; fx /= L; fz /= L;
-    const px = x - fx * 0.15 - fz * 0.12 * side, pz = z - fz * 0.15 + fx * 0.12 * side;
-    const h = terrainH(px, pz, cfg), nx = -(terrainH(px + 0.3, pz, cfg) - terrainH(px - 0.3, pz, cfg)) / 0.6, nz = -(terrainH(px, pz + 0.3, cfg) - terrainH(px, pz - 0.3, cfg)) / 0.6;
-    _fpN.set(nx, 1, nz).normalize(); _fpQ1.setFromUnitVectors(_fpUP, _fpN); _fpQ2.setFromAxisAngle(_fpUP, Math.atan2(-fx, -fz)); _fpQ1.multiply(_fpQ2);
-    _fpM.compose(_fpP.set(px, h + 0.02, pz), _fpQ1, _fpS); this.mesh.setMatrixAt(i, _fpM); this.mesh.instanceMatrix.needsUpdate = true;
-    this.age[i] = 0; this.k[i] = 1; this.mesh.geometry.attributes.aK.needsUpdate = true;
-  }
-  update(dt) {
-    let any = false;
-    for (let i = 0; i < this.n; i++) { if (this.age[i] >= this.life) continue; this.age[i] += dt; const t = this.age[i] / this.life; this.k[i] = t < 0.25 ? 1 : Math.max(0, 1 - (t - 0.25) / 0.75); any = true; }
-    if (any) this.mesh.geometry.attributes.aK.needsUpdate = true;
-  }
 }
