@@ -304,3 +304,16 @@ export function updateFlocks(dt, T) {
     if (Math.abs(g.position.x) > 200) { ctx.scene.remove(g); return false; } return true;
   });
 }
+
+/* ── 설산: 소품 위에 쌓인 눈 ── */
+export function makeSnowCaps() {
+  const scene = ctx.scene, snow = smoothM(0xf5f8fc, Object.assign({ roughness: 0.92 }, tex('snow', 2, 2, 0.4)));
+  const cap = (w, h, d, x, y, z, ry) => { const m = new THREE.Mesh(jitter(new THREE.BoxGeometry(w, h, d, 3, 1, 3), 0.06), snow); m.position.set(x, y, z); m.rotation.y = ry || 0; m.castShadow = false; m.receiveShadow = true; scene.add(m); };
+  cap(0.42, 0.06, 3.3, -1.6, 1.78, 1.2);                                    // 텐트 용마루
+  cap(1.72, 0.06, 2.3, 0, 1.92, 8.35);                                      // 차 지붕
+  cap(1.7, 0.05, 1.3, 0, 1.165, 6.45);                                      // 보닛
+  cap(0.66, 0.03, 0.2, 0.6, 0.53, 0.3); cap(0.66, 0.03, 0.2, 0.6, 0.53, 0.7);  // 테이블 (가운데 랜턴 자리는 비움)
+  cap(0.6, 0.035, 0.44, 2.4, 0.47, 0.6, 0.2);                               // 쿨러 뚜껑
+  cap(0.74, 0.035, 0.42, 1.65, 0.265, -2.45);                               // 장작더미
+  cap(0.6, 0.03, 0.3, 1.5, 1.08, 1.18);                                     // 의자 등받이 윗단
+}
