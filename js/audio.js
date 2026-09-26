@@ -2,8 +2,6 @@ import * as THREE from 'three';
 import { ctx, settings } from './state.js';
 import { rnd } from './util.js';
 
-/* 구조: [월드 소리들] → worldLP(실내 필터) → worldGain → comp → master → 출력
-         [효과음]      → sfxBus ──────────────────────────→ comp */
 let AC = null, master, comp, worldLP, worldGain, sfxBus;
 let whiteBuf = null, brownBuf = null;
 let bed = null, evTimer = null, sceneKey = null;
@@ -44,12 +42,10 @@ const spanner = (v) => { const p = AC.createStereoPanner(); p.pan.value = v === 
 function setPos(n, x, y, z) { if (n.positionX) { n.positionX.value = x; n.positionY.value = y; n.positionZ.value = z; } else n.setPosition(x, y, z); }
 function panner(x, y, z, ref, max, roll) { const p = AC.createPanner(); p.panningModel = 'equalpower'; p.distanceModel = 'inverse'; p.refDistance = ref; p.maxDistance = max; p.rolloffFactor = roll; setPos(p, x, y, z); p.connect(worldLP); return p; }
 function kill(nodes) { nodes.forEach(n => { try { n.stop && n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} }); }
-/* 짧은 노이즈 한 방: 필터·엔벨로프·(선택)필터 스윕 */
 function burst(dest, brown, type, f0, q, a, peak, d, t, f1, sweepT) {
   const s = noise(brown), f = filt(type, f0, q), g = gain(0); if (f1 !== undefined) { f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + (sweepT || d)); }
   env(g, t, a, peak, d); chain(s, f, g, dest); s.start(t, off()); s.stop(t + a + d + 0.05); return s;
 }
-/* 짧은 사인 한 음: 주파수 f0→f1 글라이드 */
 function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine', f0), g = gain(0); if (f1) { o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + a + d); } env(g, t, a, peak, d); o.connect(g); g.connect(dest); o.start(t); o.stop(t + a + d + 0.05); return o; }
 
 /* ── 위치 음원 ── */
@@ -90,7 +86,7 @@ function killSpatial() {
   fire = water = lamps = null; sceneKey = null;
 }
 
-/* ── 배경 베드 (무위치) ── */
+/* ── 배경 베드 ── */
 function makeBed(type, timeKey) {
   const out = gain(0.0001), nodes = [out], timers = []; out.connect(worldLP);
   const wind = (f, g0, l1, l2) => { const s = noise(true, true), f1 = filt('lowpass', f), g = gain(g0); chain(s, f1, g, out); s.start(0, off()); nodes.push(s, f1, g, ...lfo(0.045, l1, f1.frequency), ...lfo(0.11, l2, g.gain)); };
@@ -99,7 +95,6 @@ function makeBed(type, timeKey) {
   else {
     wind(360, 0.05, 100, 0.02);
     if (timeKey === 'night') {
-      /* 풀벌레: 0.5~2초 울고 1~5초 쉬는 트릴, 좌우에 한 마리씩, 서로 다른 박자 */
       [[4300, 18, -0.55, 0.011], [3900, 23, 0.6, 0.008]].forEach(([f, am, pn, g0]) => {
         const o = osc('sine', f), amg = gain(0), eg = gain(0), p = AC.createStereoPanner(); p.pan.value = pn;
         const [a, ag] = lfo(am, g0, amg.gain); chain(o, amg, eg, p, out); o.start(); nodes.push(o, amg, eg, p, a, ag);
@@ -173,32 +168,57 @@ export function updateAudio(dt) {
   if (lamps) { lamps.lantern.gain.gain.value += ((W.lanternLit ? 1 : 0) - lamps.lantern.gain.gain.value) * k; lamps.tentLamp.gain.gain.value += ((W.tentLampLit ? 1 : 0) - lamps.tentLamp.gain.gain.value) * k; }
 }
 
+/* ── 발소리: 뒤꿈치 충격(저음) + 재질 질감(미세 알갱이 여러 개) + 앞꿈치, 좌우 번갈아 ── */
+let stepIdx = 0;
+function footstep(surface) {
+  const t0 = AC.currentTime, side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.85, 1.15);
+  const pan = AC.createStereoPanner(); pan.pan.value = side; pan.connect(sfxBus);
+  const grains = (n, span, brown, type, f0, q, peak, d, t, f1) => { for (let i = 0; i < n; i++) { const k = rnd(0.45, 1); burst(pan, brown, type, f0 * rnd(0.8, 1.25), q, 0.002, peak * k * v, d * rnd(0.7, 1.3), t + Math.random() * span, f1 ? f1 * rnd(0.8, 1.2) : undefined, d); } };
+  if (surface === 'snow') {
+    tone(pan, 65, 45, 0.004, 0.11 * v, 0.08, t0);
+    burst(pan, true, 'lowpass', 220, 1, 0.005, 0.06 * v, 0.15, t0);
+    grains(14, 0.12, false, 'highpass', 2400, 1, 0.045, 0.02, t0);
+    burst(pan, false, 'bandpass', 3000, 8, 0.02, 0.02 * v, 0.13, t0 + 0.02, 2200);
+    grains(8, 0.08, false, 'highpass', 2800, 1, 0.03, 0.018, t0 + 0.11);
+  } else if (surface === 'wood') {
+    tone(pan, 110, 75, 0.004, 0.16 * v, 0.16, t0);
+    burst(pan, false, 'bandpass', 240, 6, 0.003, 0.08 * v, 0.12, t0);
+    tone(pan, 330, 300, 0.004, 0.03 * v, 0.1, t0);
+    burst(pan, false, 'lowpass', 1200, 1, 0.002, 0.05 * v, 0.03, t0);
+    tone(pan, 95, 70, 0.004, 0.06 * v, 0.1, t0 + 0.09);
+    if (Math.random() < 0.25) { const o = tone(pan, 190, 150, 0.05, 0.02 * v, 0.25, t0 + 0.04); const w = osc('sine', 11), wg = gain(9); w.connect(wg); wg.connect(o.frequency); w.start(t0); w.stop(t0 + 0.4); }
+  } else if (surface === 'wet') {
+    burst(pan, false, 'bandpass', 2800, 0.8, 0.008, 0.07 * v, 0.14, t0, 1400, 0.14);
+    burst(pan, true, 'lowpass', 350, 1, 0.006, 0.06 * v, 0.1, t0);
+    grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05);
+    burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
+  } else if (surface === 'sand') {
+    tone(pan, 60, 40, 0.006, 0.1 * v, 0.1, t0);
+    burst(pan, true, 'lowpass', 260, 1, 0.01, 0.09 * v, 0.22, t0);
+    grains(10, 0.16, false, 'bandpass', 1500, 1, 0.012, 0.04, t0 + 0.01);
+    burst(pan, true, 'lowpass', 220, 1, 0.01, 0.04 * v, 0.14, t0 + 0.1);
+  } else {
+    tone(pan, 70, 45, 0.004, 0.16 * v, 0.08, t0);
+    burst(pan, true, 'lowpass', 500, 1, 0.004, 0.08 * v, 0.1, t0);
+    grains(6, 0.09, false, 'bandpass', 3200, 1.5, 0.02, 0.03, t0);
+    burst(pan, true, 'lowpass', 700, 1, 0.004, 0.05 * v, 0.08, t0 + 0.09);
+  }
+}
+
 /* ── 효과음 ── */
 export function sfx(type, surface) {
   if (!AC) return; const t = AC.currentTime, B = sfxBus;
   switch (type) {
-    /* 발소리 — 재질별로 확실히 다르게 */
-    case 'step': {
-      const v = 1.6;
-      if (surface === 'snow') { burst(B, false, 'highpass', 2200, 1, 0.005, 0.09 * v, 0.06, t); burst(B, false, 'highpass', 2600, 1, 0.004, 0.06 * v, 0.05, t + 0.05); burst(B, true, 'lowpass', 250, 1, 0.01, 0.06 * v, 0.1, t); }
-      else if (surface === 'wood') { tone(B, 120, 85, 0.005, 0.09 * v, 0.18, t); burst(B, false, 'bandpass', 500, 1.2, 0.004, 0.04 * v, 0.05, t); if (Math.random() < 0.3) tone(B, 180, 140, 0.03, 0.02 * v, 0.2, t + 0.05); }
-      else if (surface === 'wet') { burst(B, false, 'bandpass', 3200, 0.7, 0.01, 0.07 * v, 0.18, t); burst(B, true, 'lowpass', 350, 1, 0.01, 0.05 * v, 0.1, t); tone(B, 1200, 600, 0.01, 0.02 * v, 0.08, t + 0.1); }
-      else if (surface === 'sand') { burst(B, false, 'lowpass', 300, 1, 0.03, 0.06 * v, 0.24, t); burst(B, false, 'highpass', 3000, 1, 0.02, 0.015 * v, 0.15, t); }
-      else { burst(B, false, 'lowpass', 600, 1, 0.01, 0.07 * v, 0.11, t); burst(B, true, 'lowpass', 200, 1, 0.005, 0.03 * v, 0.08, t); }
-      return;
-    }
-    /* 문 */
+    case 'step': footstep(surface); return;
     case 'trunkOpen': burst(B, false, 'highpass', 4000, 1, 0.002, 0.12, 0.03, t); burst(B, true, 'lowpass', 300, 1, 0.05, 0.05, 0.3, t + 0.04, 900, 0.35); return;
     case 'trunkClose': tone(B, 95, 60, 0.004, 0.25, 0.22, t); burst(B, false, 'lowpass', 500, 1, 0.003, 0.18, 0.12, t); burst(B, false, 'bandpass', 2500, 2, 0.003, 0.03, 0.06, t + 0.02); return;
     case 'doorOpen': burst(B, false, 'highpass', 3500, 1, 0.002, 0.1, 0.04, t); { const o = tone(B, 220, 170, 0.06, 0.02, 0.25, t + 0.05); const v = osc('sine', 9), vg = gain(12); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 0.4); } burst(B, true, 'lowpass', 700, 1, 0.08, 0.02, 0.3, t + 0.05, 1400, 0.3); return;
     case 'doorClose': tone(B, 70, 45, 0.004, 0.32, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.22, 0.15, t); burst(B, false, 'highpass', 3000, 1, 0.002, 0.08, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.06, 0.35, t); return;
-    /* 마시기·피우기 */
-    case 'sip': burst(B, false, 'bandpass', 700, 1.2, 0.06, 0.05, 0.25, t, 1900, 0.25); return;                        // 커피 후루룩
-    case 'gulp': tone(B, 110, 70, 0.01, 0.08, 0.14, t); burst(B, false, 'lowpass', 500, 1, 0.01, 0.03, 0.1, t); return;   // 꿀꺽
+    case 'sip': burst(B, false, 'bandpass', 700, 1.2, 0.06, 0.05, 0.25, t, 1900, 0.25); return;
+    case 'gulp': tone(B, 110, 70, 0.01, 0.08, 0.14, t); burst(B, false, 'lowpass', 500, 1, 0.01, 0.03, 0.1, t); return;
     case 'clink': [2400, 3150].forEach((fq, i) => tone(B, fq, 0, 0.003, 0.08 - i * 0.03, 0.35, t)); return;
-    case 'inhale': burst(B, false, 'highpass', 1200, 1, 0.35, 0.04, 0.25, t, 2500, 0.6); return;                         // 빨아들이는 숨
-    case 'exhale': burst(B, false, 'bandpass', 900, 0.6, 0.05, 0.04, 0.7, t, 450, 0.7); return;                          // 내뱉는 숨
-    /* 기타 */
+    case 'inhale': burst(B, false, 'highpass', 1200, 1, 0.35, 0.04, 0.25, t, 2500, 0.6); return;
+    case 'exhale': burst(B, false, 'bandpass', 900, 0.6, 0.05, 0.04, 0.7, t, 450, 0.7); return;
     case 'lighter': burst(B, false, 'highpass', 3000, 1, 0.003, 0.12, 0.14, t); return;
     case 'sit': burst(B, false, 'highpass', 1500, 1, 0.03, 0.035, 0.18, t); return;
     case 'trunk': sfx('trunkOpen'); return;
