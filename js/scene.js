@@ -224,14 +224,16 @@ export function buildScene(bgKey) {
   }
 
   W.interact = [
-    { id: 'trunk',   pos: [0, 1.0, 10.9],     r: 2.6, hit: 0.9,  label: () => '트렁크 열기' },
-    { id: 'chair',   pos: [1.5, 0.6, 0.8],    r: 2.2, hit: 0.45, label: () => '의자에 앉기' },
-    { id: 'tent',    pos: [-1.6, 0.7, 0.0],   r: 2.3, hit: 1.0,  label: () => '텐트에 들어가기' },
-    { id: 'car',     pos: [-1.35, 1.0, 8.1],  r: 2.0, hit: 0.7,  label: () => '운전석에 앉기' },
-    { id: 'fire',    pos: [0.3, 0.4, -1.4],   r: 2.4, hit: 0.6,  label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
-    { id: 'lantern', pos: [0.65, 0.6, 0.5],   r: 1.6, hit: 0.22, label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
+    { id: 'trunk',    pos: [0, 1.0, 10.9],      r: 2.6, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기' },
+    { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 2.2, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기' },
+    { id: 'tent',     pos: [-1.6, 0.7, 0.0],    r: 2.3, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기' },
+    { id: 'car',      pos: [-1.35, 1.0, 8.1],   r: 2.0, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기' },
+    { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.4, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
+    { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
+    { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기' },
+    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기' },
   ];
-  if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.6], r: 2.0, hit: 0.6, label: () => '부두 끝에 앉기' });
+  if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.6], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉기' });
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();
   if (W.fireLit) startCrackle();
