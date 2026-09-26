@@ -3,8 +3,7 @@ import { ctx, settings } from './state.js';
 import { rnd } from './util.js';
 
 /* 구조: [월드 소리들] → worldLP(실내 필터) → worldGain → comp → master → 출력
-         [효과음]      → sfxBus ──────────────────────────→ comp
-   월드 소리 = 배경 베드(무위치) + 위치 음원(모닥불·물가·랜턴) + 간헐 이벤트 */
+         [효과음]      → sfxBus ──────────────────────────→ comp */
 let AC = null, master, comp, worldLP, worldGain, sfxBus;
 let whiteBuf = null, brownBuf = null;
 let bed = null, evTimer = null, sceneKey = null;
@@ -23,9 +22,8 @@ export function initAudio() {
 }
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.value = v; }
-/* 텐트·차 안: 고음이 먹먹해지고 조금 작아진다 */
 export function setIndoor(on) { if (!AC) return; const t = AC.currentTime; worldLP.frequency.setTargetAtTime(on ? 1100 : 20000, t, 0.15); worldGain.gain.setTargetAtTime(on ? 0.55 : 1, t, 0.15); }
-export function startCrackle() {}   // 호환용 — 장작 소리는 이제 위치 음원이 W.fireLit 을 보고 스스로 켜고 끈다
+export function startCrackle() {}
 
 /* ── 재료 ── */
 function noiseBuf(brown) {
@@ -42,22 +40,26 @@ const osc = (type, f) => { const o = AC.createOscillator(); o.type = type || 'si
 const chain = (...n) => { for (let i = 0; i < n.length - 1; i++) n[i].connect(n[i + 1]); return n[0]; };
 const env = (g, t, a, peak, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
 const lfo = (hz, depth, target) => { const o = osc('sine', hz), g = gain(depth); o.connect(g); g.connect(target); o.start(); return [o, g]; };
-const spanner = () => { const p = AC.createStereoPanner(); p.pan.value = rnd(-0.8, 0.8); p.connect(worldLP); return p; };
+const spanner = (v) => { const p = AC.createStereoPanner(); p.pan.value = v === undefined ? rnd(-0.8, 0.8) : v; p.connect(worldLP); return p; };
 function setPos(n, x, y, z) { if (n.positionX) { n.positionX.value = x; n.positionY.value = y; n.positionZ.value = z; } else n.setPosition(x, y, z); }
 function panner(x, y, z, ref, max, roll) { const p = AC.createPanner(); p.panningModel = 'equalpower'; p.distanceModel = 'inverse'; p.refDistance = ref; p.maxDistance = max; p.rolloffFactor = roll; setPos(p, x, y, z); p.connect(worldLP); return p; }
 function kill(nodes) { nodes.forEach(n => { try { n.stop && n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} }); }
+/* 짧은 노이즈 한 방: 필터·엔벨로프·(선택)필터 스윕 */
+function burst(dest, brown, type, f0, q, a, peak, d, t, f1, sweepT) {
+  const s = noise(brown), f = filt(type, f0, q), g = gain(0); if (f1 !== undefined) { f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + (sweepT || d)); }
+  env(g, t, a, peak, d); chain(s, f, g, dest); s.start(t, off()); s.stop(t + a + d + 0.05); return s;
+}
+/* 짧은 사인 한 음: 주파수 f0→f1 글라이드 */
+function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine', f0), g = gain(0); if (f1) { o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + a + d); } env(g, t, a, peak, d); o.connect(g); g.connect(dest); o.start(t); o.stop(t + a + d + 0.05); return o; }
 
 /* ── 위치 음원 ── */
 function makeFireSrc() {
   const pan = panner(0.3, 0.6, -1.4, 1.2, 45, 1.3), g = gain(0); g.connect(pan);
-  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.9); chain(rum, rl, rg, g); rum.start(0, off());     // 낮은 웅웅거림
-  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.05); chain(hs, hf, hg, g); hs.start(0, off());   // 불이 숨 쉬는 소리
+  const rum = noise(true, true), rl = filt('lowpass', 180), rg = gain(0.9); chain(rum, rl, rg, g); rum.start(0, off());
+  const hs = noise(false, true), hf = filt('bandpass', 900, 0.7), hg = gain(0.05); chain(hs, hf, hg, g); hs.start(0, off());
   const [lo, lg] = lfo(0.6, 0.03, hg.gain);
   const src = { pan, gain: g, nodes: [rum, rl, rg, hs, hf, hg, lo, lg, g, pan], popT: null };
-  const pop = big => {
-    const t = AC.currentTime, s = noise(false), f = big ? filt('lowpass', rnd(350, 600)) : filt('bandpass', rnd(1200, 3200), 1.5), pg = gain(0);
-    env(pg, t, 0.004, big ? rnd(0.12, 0.2) : rnd(0.02, 0.06), big ? 0.12 : 0.05); chain(s, f, pg, g); s.start(t, off()); s.stop(t + 0.2);
-  };
+  const pop = big => { const t = AC.currentTime; if (big) burst(g, false, 'lowpass', rnd(350, 600), 1, 0.004, rnd(0.12, 0.2), 0.12, t); else burst(g, false, 'bandpass', rnd(1200, 3200), 1.5, 0.004, rnd(0.02, 0.06), 0.05, t); };
   const loop = () => { if (!fire) return; if (ctx.W.fireLit) pop(Math.random() < 0.07); src.popT = setTimeout(loop, rnd(60, 420)); }; loop();
   fire = src;
 }
@@ -65,9 +67,9 @@ function makeWaterSrc(type, z) {
   const pan = panner(0, 0, z, 5, 160, 0.9), nodes = [pan];
   if (type === 'waves') {
     const s = noise(true, true), f = filt('lowpass', 700), g = gain(0.5); chain(s, f, g, pan); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.085, 0.3, g.gain));
-    const w = noise(false, true), wf = filt('bandpass', 1800, 0.5), wg = gain(0.05); chain(w, wf, wg, pan); w.start(0, off()); nodes.push(w, wf, wg, ...lfo(0.07, 0.04, wg.gain));   // 거품 쉬익
+    const w = noise(false, true), wf = filt('bandpass', 1800, 0.5), wg = gain(0.05); chain(w, wf, wg, pan); w.start(0, off()); nodes.push(w, wf, wg, ...lfo(0.07, 0.04, wg.gain));
   } else {
-    const s = noise(true, true), f = filt('lowpass', 450), g = gain(0.13); chain(s, f, g, pan); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.2, 0.06, g.gain));            // 찰랑임
+    const s = noise(true, true), f = filt('lowpass', 450), g = gain(0.13); chain(s, f, g, pan); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.2, 0.06, g.gain));
     const w = noise(false, true), wf = filt('bandpass', 2500, 0.6), wg = gain(0.012); chain(w, wf, wg, pan); w.start(0, off()); nodes.push(w, wf, wg, ...lfo(0.3, 0.01, wg.gain));
   }
   water = { pan, z, nodes };
@@ -90,30 +92,37 @@ function killSpatial() {
 
 /* ── 배경 베드 (무위치) ── */
 function makeBed(type, timeKey) {
-  const out = gain(0.0001), nodes = [out]; out.connect(worldLP);
+  const out = gain(0.0001), nodes = [out], timers = []; out.connect(worldLP);
   const wind = (f, g0, l1, l2) => { const s = noise(true, true), f1 = filt('lowpass', f), g = gain(g0); chain(s, f1, g, out); s.start(0, off()); nodes.push(s, f1, g, ...lfo(0.045, l1, f1.frequency), ...lfo(0.11, l2, g.gain)); };
   if (type === 'wind') wind(420, 0.28, 260, 0.12);
   else if (type === 'waves') wind(300, 0.06, 80, 0.02);
   else {
     wind(360, 0.05, 100, 0.02);
-    if (timeKey === 'night') [[4300, 18, 0.011], [3900, 23, 0.008]].forEach(([f, am, g0]) => { const o = osc('sine', f), og = gain(g0); const [a, ag] = lfo(am, g0, og.gain); o.connect(og); og.connect(out); o.start(); nodes.push(o, og, a, ag); });   // 풀벌레
-    else { const s = noise(true, true), f = filt('lowpass', 900), g = gain(0.03); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.015, g.gain)); }   // 잎 스치는 소리
+    if (timeKey === 'night') {
+      /* 풀벌레: 0.5~2초 울고 1~5초 쉬는 트릴, 좌우에 한 마리씩, 서로 다른 박자 */
+      [[4300, 18, -0.55, 0.011], [3900, 23, 0.6, 0.008]].forEach(([f, am, pn, g0]) => {
+        const o = osc('sine', f), amg = gain(0), eg = gain(0), p = AC.createStereoPanner(); p.pan.value = pn;
+        const [a, ag] = lfo(am, g0, amg.gain); chain(o, amg, eg, p, out); o.start(); nodes.push(o, amg, eg, p, a, ag);
+        const alive = { on: true }; nodes.push({ stop() { alive.on = false; }, disconnect() {} });
+        const trill = () => { if (!alive.on) return; const t = AC.currentTime, dur = rnd(0.5, 2.2); eg.gain.setTargetAtTime(1, t, 0.05); eg.gain.setTargetAtTime(0, t + dur, 0.08); timers.push(setTimeout(trill, (dur + rnd(1.2, 5)) * 1000)); };
+        timers.push(setTimeout(trill, rnd(300, 3000)));
+      });
+    } else { const s = noise(true, true), f = filt('lowpass', 900), g = gain(0.03); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.015, g.gain)); }
   }
-  return { out, nodes };
+  return { out, nodes, timers };
 }
-export function stopAmbience() {
-  clearTimeout(evTimer); if (bed) { kill(bed.nodes); bed = null; } killSpatial();
-}
+const killBed = b => { if (!b) return; b.timers.forEach(clearTimeout); kill(b.nodes); };
+export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); }
 export function startAmbience(type, timeKey) {
   if (!AC) return;
   if (sceneKey !== ctx.W.cfg.key) buildSpatial();
   const old = bed, t = AC.currentTime;
   bed = makeBed(type, timeKey); bed.out.gain.setValueAtTime(0.0001, t); bed.out.gain.exponentialRampToValueAtTime(1, t + 4);
-  if (old) { old.out.gain.cancelScheduledValues(t); old.out.gain.setValueAtTime(Math.max(0.0001, old.out.gain.value), t); old.out.gain.exponentialRampToValueAtTime(0.0001, t + 4); setTimeout(() => kill(old.nodes), 4600); }
+  if (old) { old.out.gain.cancelScheduledValues(t); old.out.gain.setValueAtTime(Math.max(0.0001, old.out.gain.value), t); old.out.gain.exponentialRampToValueAtTime(0.0001, t + 4); setTimeout(() => killBed(old), 4600); }
   startEvents(type, timeKey);
 }
 
-/* ── 간헐 이벤트: 7~24초 간격, 장소·시간에 따라 다른 것, 좌우 랜덤 ── */
+/* ── 간헐 이벤트 ── */
 function startEvents(type, timeKey) {
   clearTimeout(evTimer);
   const loop = () => { playEvent(type, timeKey); evTimer = setTimeout(loop, rnd(7000, 24000)); };
@@ -144,15 +153,15 @@ function chirp() {
     env(g, t, 0.015, 0.03, 0.1); o.connect(g); g.connect(pan); o.start(t); o.stop(t + 0.14);
   }
 }
-function woodpecker() { const n = 7 + Math.floor(Math.random() * 4), t0 = AC.currentTime, pan = spanner(); for (let i = 0; i < n; i++) { const t = t0 + i * 0.07, s = noise(false), f = filt('lowpass', 1200), g = gain(0); env(g, t, 0.003, 0.05, 0.02); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 0.04); } }
+function woodpecker() { const n = 7 + Math.floor(Math.random() * 4), t0 = AC.currentTime, pan = spanner(); for (let i = 0; i < n; i++) burst(pan, false, 'lowpass', 1200, 1, 0.003, 0.05, 0.02, t0 + i * 0.07); }
 function owl() { const t0 = AC.currentTime, pan = spanner(); [0, 0.55].forEach((d, i) => { const t = t0 + d, o = osc('sine', 390), f = filt('lowpass', 800), g = gain(0); o.frequency.setValueAtTime(400, t); o.frequency.exponentialRampToValueAtTime(340, t + 0.4); env(g, t, 0.08, i ? 0.05 : 0.06, 0.4); chain(o, f, g, pan); o.start(t); o.stop(t + 0.55); }); }
 function loon() { const t = AC.currentTime, pan = spanner(), o = osc('sine', 620), g = gain(0); o.frequency.setValueAtTime(620, t); o.frequency.exponentialRampToValueAtTime(980, t + 0.6); o.frequency.exponentialRampToValueAtTime(600, t + 1.5); const v = osc('sine', 5), vg = gain(15); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 1.7); env(g, t, 0.3, 0.028, 1.2); o.connect(g); g.connect(pan); o.start(t); o.stop(t + 1.7); }
 function gust(k) { const t = AC.currentTime, pan = spanner(), s = noise(true), f = filt('bandpass', 250, 0.8), g = gain(0); f.frequency.setValueAtTime(250, t); f.frequency.linearRampToValueAtTime(900, t + 1.6); f.frequency.linearRampToValueAtTime(300, t + 3.6); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.22 * k, t + 1.5); g.gain.linearRampToValueAtTime(0, t + 3.8); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 4); }
 function swell() { const t = AC.currentTime, pan = spanner(), s = noise(true), f = filt('lowpass', 500), g = gain(0); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.25, t + 2); g.gain.linearRampToValueAtTime(0, t + 5); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 5.2); }
-function snowSlide() { const t = AC.currentTime, pan = spanner(), s = noise(false), f = filt('lowpass', 900), g = gain(0); f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(300, t + 0.7); env(g, t, 0.15, 0.12, 0.6); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 0.9); }
-function creak() { const t = AC.currentTime, pan = spanner(), s = noise(false), f = filt('lowpass', 350), g = gain(0); env(g, t, 0.05, 0.05, 0.25); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 0.4); const o = osc('sine', 95), og = gain(0); o.frequency.exponentialRampToValueAtTime(70, t + 0.3); env(og, t, 0.05, 0.03, 0.25); o.connect(og); og.connect(pan); o.start(t); o.stop(t + 0.4); }
+function snowSlide() { const t = AC.currentTime, pan = spanner(); burst(pan, false, 'lowpass', 900, 1, 0.15, 0.12, 0.6, t, 300, 0.7); }
+function creak() { const t = AC.currentTime, pan = spanner(); burst(pan, false, 'lowpass', 350, 1, 0.05, 0.05, 0.25, t); tone(pan, 95, 70, 0.05, 0.03, 0.25, t); }
 
-/* ── 매 프레임: 리스너 위치·방향, 모닥불·랜턴 세기, 물가 위치 ── */
+/* ── 매 프레임 ── */
 export function updateAudio(dt) {
   if (!AC || !ctx.camera) return; const cam = ctx.camera, L = AC.listener, W = ctx.W;
   cam.getWorldDirection(_f); _u.set(0, 1, 0).applyQuaternion(cam.quaternion);
@@ -164,22 +173,34 @@ export function updateAudio(dt) {
   if (lamps) { lamps.lantern.gain.gain.value += ((W.lanternLit ? 1 : 0) - lamps.lantern.gain.gain.value) * k; lamps.tentLamp.gain.gain.value += ((W.tentLampLit ? 1 : 0) - lamps.tentLamp.gain.gain.value) * k; }
 }
 
-/* ── 효과음 (실내 필터를 거치지 않는다) ── */
+/* ── 효과음 ── */
 export function sfx(type, surface) {
-  if (!AC) return; const t = AC.currentTime;
-  if (type === 'clink') { [2400, 3150].forEach((fq, i) => { const o = osc('sine', fq), g = gain(0); g.gain.setValueAtTime(0.08 - i * 0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); o.connect(g); g.connect(sfxBus); o.start(t); o.stop(t + 0.4); }); return; }
-  if (type === 'step') {
-    const rate = rnd(0.88, 1.12), s = noise(false); s.playbackRate.value = rate;
-    if (surface === 'snow') { const f = filt('highpass', 1200), g = gain(0); env(g, t, 0.01, 0.045, 0.09); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.2); const s2 = noise(true), f2 = filt('lowpass', 300), g2 = gain(0); env(g2, t, 0.01, 0.05, 0.1); chain(s2, f2, g2, sfxBus); s2.start(t, off()); s2.stop(t + 0.2); }
-    else if (surface === 'wood') { const o = osc('sine', 140 * rate), og = gain(0); env(og, t, 0.005, 0.07, 0.14); o.connect(og); og.connect(sfxBus); o.start(t); o.stop(t + 0.2); const f = filt('lowpass', 900), g = gain(0); env(g, t, 0.005, 0.03, 0.06); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.1); }
-    else if (surface === 'wet') { const f = filt('bandpass', 2500, 0.8), g = gain(0); env(g, t, 0.02, 0.045, 0.16); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.25); const s2 = noise(true), f2 = filt('lowpass', 400), g2 = gain(0); env(g2, t, 0.01, 0.04, 0.1); chain(s2, f2, g2, sfxBus); s2.start(t, off()); s2.stop(t + 0.2); }
-    else if (surface === 'sand') { const f = filt('lowpass', 350), g = gain(0); env(g, t, 0.03, 0.05, 0.2); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.3); }
-    else { const f = filt('lowpass', 500), g = gain(0); env(g, t, 0.02, 0.05, 0.12); chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.2); }
-    return;
+  if (!AC) return; const t = AC.currentTime, B = sfxBus;
+  switch (type) {
+    /* 발소리 — 재질별로 확실히 다르게 */
+    case 'step': {
+      const v = 1.6;
+      if (surface === 'snow') { burst(B, false, 'highpass', 2200, 1, 0.005, 0.09 * v, 0.06, t); burst(B, false, 'highpass', 2600, 1, 0.004, 0.06 * v, 0.05, t + 0.05); burst(B, true, 'lowpass', 250, 1, 0.01, 0.06 * v, 0.1, t); }
+      else if (surface === 'wood') { tone(B, 120, 85, 0.005, 0.09 * v, 0.18, t); burst(B, false, 'bandpass', 500, 1.2, 0.004, 0.04 * v, 0.05, t); if (Math.random() < 0.3) tone(B, 180, 140, 0.03, 0.02 * v, 0.2, t + 0.05); }
+      else if (surface === 'wet') { burst(B, false, 'bandpass', 3200, 0.7, 0.01, 0.07 * v, 0.18, t); burst(B, true, 'lowpass', 350, 1, 0.01, 0.05 * v, 0.1, t); tone(B, 1200, 600, 0.01, 0.02 * v, 0.08, t + 0.1); }
+      else if (surface === 'sand') { burst(B, false, 'lowpass', 300, 1, 0.03, 0.06 * v, 0.24, t); burst(B, false, 'highpass', 3000, 1, 0.02, 0.015 * v, 0.15, t); }
+      else { burst(B, false, 'lowpass', 600, 1, 0.01, 0.07 * v, 0.11, t); burst(B, true, 'lowpass', 200, 1, 0.005, 0.03 * v, 0.08, t); }
+      return;
+    }
+    /* 문 */
+    case 'trunkOpen': burst(B, false, 'highpass', 4000, 1, 0.002, 0.12, 0.03, t); burst(B, true, 'lowpass', 300, 1, 0.05, 0.05, 0.3, t + 0.04, 900, 0.35); return;
+    case 'trunkClose': tone(B, 95, 60, 0.004, 0.25, 0.22, t); burst(B, false, 'lowpass', 500, 1, 0.003, 0.18, 0.12, t); burst(B, false, 'bandpass', 2500, 2, 0.003, 0.03, 0.06, t + 0.02); return;
+    case 'doorOpen': burst(B, false, 'highpass', 3500, 1, 0.002, 0.1, 0.04, t); { const o = tone(B, 220, 170, 0.06, 0.02, 0.25, t + 0.05); const v = osc('sine', 9), vg = gain(12); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 0.4); } burst(B, true, 'lowpass', 700, 1, 0.08, 0.02, 0.3, t + 0.05, 1400, 0.3); return;
+    case 'doorClose': tone(B, 70, 45, 0.004, 0.32, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.22, 0.15, t); burst(B, false, 'highpass', 3000, 1, 0.002, 0.08, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.06, 0.35, t); return;
+    /* 마시기·피우기 */
+    case 'sip': burst(B, false, 'bandpass', 700, 1.2, 0.06, 0.05, 0.25, t, 1900, 0.25); return;                        // 커피 후루룩
+    case 'gulp': tone(B, 110, 70, 0.01, 0.08, 0.14, t); burst(B, false, 'lowpass', 500, 1, 0.01, 0.03, 0.1, t); return;   // 꿀꺽
+    case 'clink': [2400, 3150].forEach((fq, i) => tone(B, fq, 0, 0.003, 0.08 - i * 0.03, 0.35, t)); return;
+    case 'inhale': burst(B, false, 'highpass', 1200, 1, 0.35, 0.04, 0.25, t, 2500, 0.6); return;                         // 빨아들이는 숨
+    case 'exhale': burst(B, false, 'bandpass', 900, 0.6, 0.05, 0.04, 0.7, t, 450, 0.7); return;                          // 내뱉는 숨
+    /* 기타 */
+    case 'lighter': burst(B, false, 'highpass', 3000, 1, 0.003, 0.12, 0.14, t); return;
+    case 'sit': burst(B, false, 'highpass', 1500, 1, 0.03, 0.035, 0.18, t); return;
+    case 'trunk': sfx('trunkOpen'); return;
   }
-  const s = noise(false), f = AC.createBiquadFilter(), g = gain(0);
-  const cfgs = { sip: ['bandpass', 1100, 0.06, 0.32], lighter: ['highpass', 3000, 0.12, 0.14], trunk: ['lowpass', 300, 0.15, 0.3], sit: ['highpass', 1500, 0.035, 0.18], exhale: ['bandpass', 520, 0.035, 0.7] }[type];
-  if (!cfgs) return;
-  f.type = cfgs[0]; f.frequency.value = cfgs[1]; env(g, t, 0.03, cfgs[2], cfgs[3]);
-  chain(s, f, g, sfxBus); s.start(t, off()); s.stop(t + 0.9);
 }
