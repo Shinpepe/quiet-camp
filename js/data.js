@@ -8,9 +8,10 @@ export const ICON = {
   afternoon: svg('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>'),
   sunset:    svg('<path d="M3 16h18"/><path d="M7 16a5 5 0 0 1 10 0"/><path d="M12 6v2M6 9l1.4 1.4M18 9l-1.4 1.4"/><path d="M9 20h6"/>'),
   night:     svg('<path d="M15.5 3.5a8 8 0 1 0 5 13.5 7 7 0 0 1-5-13.5z"/><path d="M6 4l.6 1.4L8 6l-1.4.6L6 8l-.6-1.4L4 6l1.4-.6z"/>'),
-  coffee: svg('<path d="M5 9h11v5a5 5 0 0 1-10 0z"/><path d="M16 10h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M4 21h14"/><path d="M8.5 3.5c-.8 1 .8 2 0 3M11.5 3.5c-.8 1 .8 2 0 3"/>'),
-  whisky: svg('<path d="M6 4h12l-1 16H7z"/><path d="M6.8 12h10.4"/><path d="M9.5 14.5h3v3h-3z"/>'),
-  smoke:  svg('<path d="M3 18l13-6 1.5 3.2-13 6z"/><path d="M13.6 13.8l1.5 3.2"/><path d="M17.5 8c-1 1 1 2 0 3M20 6c-1 1 1 2 0 3"/>'),
+  coffee:   svg('<path d="M5 9h11v5a5 5 0 0 1-10 0z"/><path d="M16 10h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M4 21h14"/><path d="M8.5 3.5c-.8 1 .8 2 0 3M11.5 3.5c-.8 1 .8 2 0 3"/>'),
+  whisky:   svg('<path d="M6 4h12l-1 16H7z"/><path d="M6.8 12h10.4"/><path d="M9.5 14.5h3v3h-3z"/>'),
+  smoke:    svg('<path d="M3 18l13-6 1.5 3.2-13 6z"/><path d="M13.6 13.8l1.5 3.2"/><path d="M17.5 8c-1 1 1 2 0 3M20 6c-1 1 1 2 0 3"/>'),
+  sparkler: svg('<path d="M6 21l7-9"/><path d="M13 12l-4-2M13 12l4-2M13 12l-2-5M13 12l2-5M13 12l5 1M13 12l-5 1M13 12l1 6M13 12l4 4"/>'),
 };
 
 export const BG = {
@@ -24,21 +25,23 @@ export const BG = {
 
 /* 시간대 키프레임. fogH: 안개 높이 스케일, insc: 해/달 쪽 산란 세기 */
 export const TIME = {
-  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: ICON.dawn, clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogFar: 650, fogH: 40, insc: 0.6, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a, mist: 0,
+  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: ICON.dawn, clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogFar: 650, fogH: 40, insc: 0.6, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a,
     grade: { tint: [1.0, 0.98, 1.02], sat: 0.95, con: 1.0, bloom: 0.28 } },
-  afternoon: { key: 'afternoon', name: '화창한 오후', ic: ICON.afternoon, clock: 0.58, top: 0x2b6fd6, bottom: 0xd8edff, sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogFar: 950, fogH: 90, insc: 0.3, exposure: 0.92, waterMul: 1, cloudCover: 0.45, cloudLit: 0xffffff, cloudShade: 0x8a96a8, mist: 0,
+  afternoon: { key: 'afternoon', name: '화창한 오후', ic: ICON.afternoon, clock: 0.58, top: 0x2b6fd6, bottom: 0xd8edff, sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogFar: 950, fogH: 90, insc: 0.3, exposure: 0.92, waterMul: 1, cloudCover: 0.45, cloudLit: 0xffffff, cloudShade: 0x8a96a8,
     grade: { tint: [1, 1, 1], sat: 1.04, con: 1.0, bloom: 0.12 } },
-  sunset: { key: 'sunset', name: '노을지는 저녁', ic: ICON.sunset, clock: 0.735, top: 0x2b2557, bottom: 0xff8c4c, sunColor: 0xffa25a, sunI: 3.4, amb: 0.5, hemi: 0.75, ibl: 0.5, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 6, tentLamp: 3, fireI: 18, fog: 0xf7925e, fogFar: 880, fogH: 60, insc: 0.8, exposure: 1.0, waterMul: 0.75, cloudCover: 0.5, cloudLit: 0xffb08a, cloudShade: 0x5a4a6a, mist: 0,
+  sunset: { key: 'sunset', name: '노을지는 저녁', ic: ICON.sunset, clock: 0.735, top: 0x2b2557, bottom: 0xff8c4c, sunColor: 0xffa25a, sunI: 3.4, amb: 0.5, hemi: 0.75, ibl: 0.5, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 6, tentLamp: 3, fireI: 18, fog: 0xf7925e, fogFar: 880, fogH: 60, insc: 0.8, exposure: 1.0, waterMul: 0.75, cloudCover: 0.5, cloudLit: 0xffb08a, cloudShade: 0x5a4a6a,
     grade: { tint: [1.03, 0.99, 0.96], sat: 1.08, con: 1.02, bloom: 0.34 } },
-  night: { key: 'night', name: '별이 빛나는 밤', ic: ICON.night, clock: 0.0, top: 0x030614, bottom: 0x18243b, sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogFar: 720, fogH: 70, insc: 0.3, exposure: 1.12, waterMul: 0.3, cloudCover: 0.35, cloudLit: 0x2a3550, cloudShade: 0x05070f, mist: 0,
+  night: { key: 'night', name: '별이 빛나는 밤', ic: ICON.night, clock: 0.0, top: 0x030614, bottom: 0x18243b, sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogFar: 720, fogH: 70, insc: 0.3, exposure: 1.12, waterMul: 0.3, cloudCover: 0.35, cloudLit: 0x2a3550, cloudShade: 0x05070f,
     grade: { tint: [0.96, 0.98, 1.05], sat: 0.97, con: 1.02, bloom: 0.5 } },
 };
 export const KEYS = [[0.0, 'night'], [0.27, 'dawn'], [0.58, 'afternoon'], [0.735, 'sunset'], [0.86, 'night'], [1.0, 'night']];
 
+/* 트렁크 아이템. hold: 길게 누르면 계속 (마시는 것) / 아니면 클릭 한 번 */
 export const ITEMS = {
-  coffee: { name: '커피', ic: ICON.coffee, act: '한 모금', ds: '따뜻한 김이 천천히 올라온다' },
-  whisky: { name: '위스키', ic: ICON.whisky, act: '한 잔', ds: '얼음이 잔에 부딪히는 소리' },
-  smoke:  { name: '담배', ic: ICON.smoke, act: '한 모금', ds: '연기가 바람에 흩어진다' },
+  coffee:   { name: '커피', ic: ICON.coffee, act: '한 모금', hold: true, ds: '따뜻한 김이 천천히 올라온다' },
+  whisky:   { name: '위스키', ic: ICON.whisky, act: '한 잔', hold: true, ds: '얼음이 잔에 부딪히는 소리' },
+  smoke:    { name: '담배', ic: ICON.smoke, act: '한 모금', hold: true, ds: '연기가 바람에 흩어진다' },
+  sparkler: { name: '불꽃놀이 스틱', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
 };
 export const SEAT = {
   car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },
