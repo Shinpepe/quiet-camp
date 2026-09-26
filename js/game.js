@@ -134,7 +134,7 @@ export function putBack() { state.item = null; ctx.hand.clear(); ctx.W.item = nu
 export function resetHand() {
   const h = ctx.hand;
   if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); }
-  else if (state.item === 'sparkler') { h.position.set(0.27, -0.26, -0.44); h.rotation.set(-0.2, 0, -0.3); }
+    else if (state.item === 'sparkler') { h.position.set(0.2, -0.28, -0.55); h.rotation.set(-0.2, 0, -0.25); }
   else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); }
 }
 
@@ -293,5 +293,5 @@ export function walk(dt) {
   } else player.bob += (0 - (player.bob % (Math.PI * 2))) * 0.1;
   const targetY = floorY(player.x, player.z) + EYE + Math.sin(player.bob) * 0.035;
   cam3.position.set(player.x, cam3.position.y + (targetY - cam3.position.y) * Math.min(1, dt * 12), player.z);
-  if (ctx.W.item && anim.sipT === null) { const b = state.item === 'smoke' ? [0.2, -0.13] : state.item === 'sparkler' ? [0.27, -0.26] : [0.22, -0.2]; ctx.hand.position.x = b[0] + Math.sin(player.bob * 0.5) * 0.01; ctx.hand.position.y = b[1] + Math.abs(Math.sin(player.bob)) * 0.012; }
+  if (ctx.W.item && anim.sipT === null) { const b = state.item === 'smoke' ? [0.2, -0.13] : state.item === 'sparkler' ? [0.2, -0.28] : [0.22, -0.2]; ctx.hand.position.x = b[0] + Math.sin(player.bob * 0.5) * 0.01; ctx.hand.position.y = b[1] + Math.abs(Math.sin(player.bob)) * 0.012; }
 }
