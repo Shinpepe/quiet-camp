@@ -16,13 +16,25 @@ const streakTex = canvasTex(128, 16, (g, w, h) => {
 });
 const _fc = new THREE.Color(), _ag = new THREE.Color(0x2fae70);
 
+/* 장소를 바꿀 때 이전 씬의 GPU 자원을 모두 놓는다.
+   재질만 dispose 하면 재질에 딸린 텍스처(tex() 가 재질마다 clone 한 것, 물의 ripple)가 남아 장소를 바꿀수록 메모리가 는다.
+   공유 텍스처(softTex 등)도 함께 dispose 되지만 three 가 다음 사용 때 다시 올리므로 문제없다. */
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
   if (W.envRT) { W.envRT.dispose(); W.envRT = null; }
   if (W.envScene) { W.envScene.children[0].geometry.dispose(); W.envScene = null; }
   if (W.heightTex) { W.heightTex.dispose(); W.heightTex = null; }
   if (W.shoreTex) { W.shoreTex.dispose(); W.shoreTex = null; }
-  scene.traverse(o => { if (o === ctx.camera || o.parent === ctx.camera || (o.parent && o.parent.parent === ctx.camera)) return; if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== birdMat) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose && m.dispose()); });
+  scene.traverse(o => {
+    if (o === ctx.camera || o.parent === ctx.camera || (o.parent && o.parent.parent === ctx.camera)) return;
+    if (o.geometry) o.geometry.dispose();
+    if (o.material && o.material !== birdMat) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if (!m) return;
+      ['map', 'normalMap', 'roughnessMap'].forEach(k => { if (m[k]) m[k].dispose(); });
+      if (m.uniforms && m.uniforms.uRipple && m.uniforms.uRipple.value) m.uniforms.uRipple.value.dispose();
+      if (m.dispose) m.dispose();
+    });
+  });
   scene.environment = null;
 }
 
