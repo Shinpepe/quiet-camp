@@ -5,7 +5,7 @@ import { buildScene, applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks, updateLighthouse } from './props.js';
-import { startAmbience, updateAudio, sfx } from './audio.js';
+import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel } from './audio.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep } from './game.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
@@ -26,6 +26,13 @@ let last = performance.now(), T = 0, lastSec = -1;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4);
 const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
 function startExhale(h) { const k = Math.min(h, 3) / 3; anim.exhale = 0.35 + k * 0.75; anim.exhaleStr = 0.6 + k * 0.8; sfx('exhale'); }
+/* 타는 스틱 한 프레임: 끝에서부터 타 들어가고, 불티가 튀고, 빛이 떨린다 */
+function burnSparkler(W, ud, dt) {
+  ud.amount = Math.max(0, ud.amount - dt / 40); ud.setAmount(ud.amount);
+  ud.emitter.getWorldPosition(tmpV);
+  const n = 2 + (Math.random() < 0.6 ? 1 : 0); for (let i = 0; i < n; i++) W.sparks.spawn(tmpV);
+  ud.light.intensity = 2.0 + Math.random() * 1.3; ud.glow.material.opacity = 0.6 + Math.random() * 0.4; ud.glow.scale.setScalar(0.12 + Math.random() * 0.05);
+}
 
 function loop(now) {
   requestAnimationFrame(loop);
@@ -86,14 +93,7 @@ function loop(now) {
   if (W.item && ctx.running) {
     const type = state.item, ud = W.item.userData;
     if (type === 'sparkler') {
-      /* 불꽃놀이 스틱: 켜져 있으면 끝에서부터 타 들어가고, 불티가 사방으로 튀며, 손 주변이 밝아진다 (약 40초) */
-      if (ud.lit && !ctx.paused) {
-        ud.amount = Math.max(0, ud.amount - dt / 40); ud.setAmount(ud.amount);
-        ud.emitter.getWorldPosition(tmpV);
-        const n = 2 + (Math.random() < 0.6 ? 1 : 0); for (let i = 0; i < n; i++) W.sparks.spawn(tmpV);
-        ud.light.intensity = 2.0 + Math.random() * 1.3; ud.glow.material.opacity = 0.6 + Math.random() * 0.4; ud.glow.scale.setScalar(0.12 + Math.random() * 0.05);
-        if (ud.amount === 0) { ud.setLit(false); itemEmptied(); }
-      }
+      if (ud.lit && !ctx.paused) { burnSparkler(W, ud, dt); if (ud.amount === 0) { ud.setLit(false); itemEmptied(); } }
     } else {
       if (anim.sipT !== null) {
         const atMouth = anim.holding && anim.sipT >= 0.5 && ud.amount > 0 && !ctx.paused;
@@ -121,6 +121,25 @@ function loop(now) {
     anim.exhale -= dt; camera.getWorldDirection(fwdV); tmpV.copy(camera.position).addScaledVector(fwdV, 0.22); tmpV.y -= 0.06;
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);
   }
+
+  /* ── 땅에 꽂힌 스틱: 계속 타다가, 다 타면 20초 뒤 2초에 걸쳐 사라진다. 치익 소리는 가장 가까운 타는 스틱 기준 ── */
+  let sparkLv = W.item && W.item.userData.lit ? 1 : 0;
+  for (const s of W.planted) {
+    const ud = s.ud;
+    if (ud.lit) {
+      if (!ctx.paused) {
+        burnSparkler(W, ud, dt);
+        sparkLv = Math.max(sparkLv, 1 / (1 + 0.35 * tmpV.distanceToSquared(camera.position)));
+        if (ud.amount === 0) { ud.setLit(false); s.doneT = 0; sfx('sparkOff'); }
+      } else sparkLv = 1;
+    } else if (s.doneT >= 0) {
+      s.doneT += dt; const k = 1 - smooth(18, 20, s.doneT); s.g.scale.setScalar(Math.max(0.001, k));
+      if (s.doneT >= 20) { scene.remove(s.g); s.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); s.gone = true; }
+    }
+  }
+  if (W.planted.length) W.planted = W.planted.filter(s => !s.gone);
+  setSparkler(sparkLv > 0); if (sparkLv > 0) sparklerLevel(sparkLv);
+
   if (W.prints) W.prints.update(dt);
   W.sparks.update(dt);
   W.steam.update(dt, 0.03); W.smoke.update(dt, 0.04); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
