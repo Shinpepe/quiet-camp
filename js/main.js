@@ -117,8 +117,8 @@ function loop(now) {
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
-  /* 텐트 랜턴이 켜지면 밖에서 천이 은은하게 빛난다 */
-  if (W.tentCloth) { W.tentGlow = (W.tentGlow || 0) + ((W.tentLampLit ? 1 : 0) - (W.tentGlow || 0)) * Math.min(1, dt * 3); const k = 0.32 * W.tentGlow * flick; W.tentCloth.forEach(m => { m.emissive.setHex(0xff8a30).multiplyScalar(k); }); }
+  /* 텐트 랜턴이 켜지면 밖에서 천이 은은하게 빛난다. 점광원의 빠른 떨림(flick)은 천에 곱하지 않는다 — 큰 면이 13Hz 로 깜빡이면 지직거림으로 보인다 */
+  if (W.tentCloth) { W.tentGlow = (W.tentGlow || 0) + ((W.tentLampLit ? 1 : 0) - (W.tentGlow || 0)) * Math.min(1, dt * 3); const k = 0.32 * W.tentGlow * (0.97 + 0.03 * Math.sin(T * 1.7)); W.tentCloth.forEach(m => { m.emissive.setHex(0xff8a30).multiplyScalar(k); }); }
   if (W.dockLight) { W.dockLight.intensity = W.tm.lantern * 0.8 * (0.96 + 0.04 * Math.sin(T * 3.1)); if (W.dockLampObj) W.dockLampObj.userData.setLit(W.tm.lantern > 0.5); }
   if (W.stars) W.stars.material.uniforms.uOp.value = W.tm.stars;
 

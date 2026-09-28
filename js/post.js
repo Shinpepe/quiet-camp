@@ -5,12 +5,14 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { ctx, settings } from './state.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
-/* RenderPass → GTAO → Bokeh(사진) → Bloom → OutputPass → Grade
+/* RenderPass → GTAO → Bokeh(사진) → Bloom → OutputPass → SMAA → Grade
+   SMAA: MSAA 가 못 잡는 표면 하이라이트 앨리어싱(얇은 크롬·clearcoat 반짝임)을 화면 공간에서 부드럽게. LDR 인 OutputPass 뒤에 둔다
    Grade: 채도·대비·틴트 + 스플릿 토닝(그림자는 하늘 색, 하이라이트는 햇빛 색) + 완만한 필름 커브 + 비네트 + 그레인(밝은 곳에서는 약하게) */
 const GradeShader = {
   uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, vig: { value: 0.35 }, grain: { value: 0.02 }, sat: { value: 1 }, con: { value: 1 }, tint: { value: new THREE.Vector3(1, 1, 1) }, sTint: { value: new THREE.Vector3(1, 1, 1) }, hTint: { value: new THREE.Vector3(1, 1, 1) }, filmK: { value: 0.3 } },
@@ -38,19 +40,21 @@ export function createPost(renderer, camera) {
   const renderPass = new RenderPass(dummy, camera);
   const gtao = new GTAOPass(dummy, camera, innerWidth, innerHeight);
   gtao.output = GTAOPass.OUTPUT.Default;
-  gtao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1, thickness: 1, scale: 1.2, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
-  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 7, radiusExponent: 1, rings: 3, samples: 16 });
-  gtao.blendIntensity = 0.65; gtao.enabled = settings.ao;
+  gtao.updateGtaoMaterial({ radius: 0.4, distanceExponent: 1, thickness: 1, scale: 1.2, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 9, radiusExponent: 1, rings: 4, samples: 16 });
+  gtao.blendIntensity = 0.6; gtao.enabled = settings.ao;
   if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
   if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
   /* BokehShader 의 focus 는 뷰 공간 거리(m). aperture 는 초점에서 1m 벗어날 때마다 uv 0.004 만큼 흐려지고 0.012 에서 포화 */
   const bokeh = new BokehPass(dummy, camera, { focus: 8, aperture: 0.004, maxblur: 0.012 }); bokeh.enabled = false;
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.4, 1.25);
   const output = new OutputPass();
+  const pr = renderer.getPixelRatio();
+  const smaa = new SMAAPass(innerWidth * pr, innerHeight * pr); smaa.enabled = FINE;
   const grade = new ShaderPass(GradeShader);
-  composer.addPass(renderPass); composer.addPass(gtao); composer.addPass(bokeh); composer.addPass(bloom); composer.addPass(output); composer.addPass(grade);
+  composer.addPass(renderPass); composer.addPass(gtao); composer.addPass(bokeh); composer.addPass(bloom); composer.addPass(output); composer.addPass(smaa); composer.addPass(grade);
   return {
-    composer, bloom, gtao, bokeh,
+    composer, bloom, gtao, bokeh, smaa,
     setScene(scene) { renderPass.scene = scene; gtao.scene = scene; bokeh.scene = scene; },
     setTime(tm) {
       const g = tm.grade, mul = ctx.W.cfg ? (ctx.W.cfg.bloomMul || 1) : 1;

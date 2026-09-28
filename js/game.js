@@ -172,7 +172,9 @@ function igniteSparkler() {
   ud.igniting = true; sfx('lighter');
   setTimeout(() => { if (ctx.W.item !== it || !ctx.running) return; ud.igniting = false; ud.setLit(true); sfx('sparkOn'); updateHUD(); }, 450);
 }
-/* 타는 스틱을 앞쪽 땅에 꽂는다 — 서 있을 때만. 남은 양을 그대로 이어받아 계속 탄다 */
+/* 타는 스틱을 앞쪽 땅에 꽂는다 — 서 있을 때만. 남은 양을 그대로 이어받아 계속 탄다.
+   그룹은 지면 기울기에 맞춰 세우고(발밑 데칼이 땅에 붙게), 스틱 자체만 살짝 비뚤게 */
+const _UP = new THREE.Vector3(0, 1, 0), _nrm = new THREE.Vector3();
 function plantSparkler() {
   const it = ctx.W.item, ud = it.userData; if (!ud.lit) return;
   if (state.mode !== 'walk') { showToast('서 있을 때 꽂을 수 있다'); return; }
@@ -180,7 +182,12 @@ function plantSparkler() {
   let px = player.x - s * 0.75, pz = player.z - c * 0.75;
   if (blockedAt(px, pz)) { px = player.x + c * 0.4; pz = player.z - s * 0.4; }
   const g = makeItem('sparkler'), nu = g.userData; nu.amount = ud.amount; nu.setAmount(nu.amount); nu.setLit(true);
-  g.position.set(px, floorY(px, pz) - 0.03, pz); g.rotation.set(rnd(-0.15, 0.15), rnd(0, 6.3), rnd(-0.15, 0.15));
+  const cfg = ctx.W.cfg;
+  if (onPlatform(px, pz)) _nrm.copy(_UP);
+  else _nrm.set(-(terrainH(px + 0.3, pz, cfg) - terrainH(px - 0.3, pz, cfg)) / 0.6, 1, -(terrainH(px, pz + 0.3, cfg) - terrainH(px, pz - 0.3, cfg)) / 0.6).normalize();
+  g.position.set(px, floorY(px, pz) - 0.03, pz);
+  g.quaternion.setFromUnitVectors(_UP, _nrm); g.rotateY(rnd(0, 6.3));
+  nu.stick.rotation.set(rnd(-0.15, 0.15), 0, rnd(-0.15, 0.15));
   ctx.scene.add(g); ctx.W.planted.push({ g, ud: nu, doneT: -1 });
   ud.setLit(false); putBack(); sfx('plant', surfaceAt(px, pz)); showToast('스틱을 땅에 꽂았다'); updateHUD();
 }

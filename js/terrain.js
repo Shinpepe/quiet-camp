@@ -33,12 +33,27 @@ function localNoise(x, z, cfg) {
   if (cfg.water) n *= smooth(0, 12, z - cfg.water.z - shoreOff(x, cfg));
   return n;
 }
+
+/* ── 산: 장소별 성격 ──
+   f: 능선 주파수, p: 능선 지수(클수록 날카로움), seed: 능선 시드, hill: 산기슭 구릉 진폭(m), on: 산이 시작·완성되는 거리(m)
+   호수 = 둥근 삼림 산, 설산 = 잔능선이 얹힌 날카로운 고산, 해변 = 낮은 해안 구릉 */
+const MT = {
+  lake:  { f: 0.0019, p: 1.15, seed: 11, hill: 16, on: [170, 780] },
+  snow:  { f: 0.0015, p: 1.7,  seed: 47, hill: 28, on: [150, 720] },
+  beach: { f: 0.0028, p: 1.2,  seed: 83, hill: 7,  on: [200, 620] },
+};
 function mountainH(x, z, cfg) {
-  const d = Math.hypot(x, z); let m = smooth(200, 340, d); if (m <= 0) return 0;
+  const d = Math.hypot(x, z), mt = MT[cfg.key] || MT.lake;
+  /* 산기슭 구릉: 40m 부터 서서히, 물가 땅 쪽에만 */
+  let hills = (fbm(x * 0.006 + mt.seed, z * 0.006 + mt.seed * 0.7, 3) - 0.5) * 2 * mt.hill * smooth(40, 220, d);
+  if (cfg.water) hills *= smooth(0, 15, z - cfg.water.z - shoreOff(x, cfg));
+  let m = Math.pow(smooth(mt.on[0], mt.on[1], d), 1.5); if (m <= 0) return hills;
   if (cfg.key === 'beach') m *= Math.max(smooth(30, 150, z), smooth(300, 450, Math.abs(x)));
-  else { const ang = Math.abs(Math.atan2(x, -z)); m *= 0.22 + 0.78 * smooth(0.35, 1.0, ang); }
-  const r = ridge(x * 0.0026, z * 0.0026);
-  return (Math.pow(r, 1.4) * cfg.mtAmp + cfg.mtBase) * m;
+  else { const ang = Math.abs(Math.atan2(x, -z)); m *= 0.3 + 0.7 * smooth(0.35, 1.0, ang); }
+  const r = ridge(x * mt.f + mt.seed, z * mt.f + mt.seed * 1.7), far = 1 + 0.5 * smooth(600, 1300, d);
+  /* 설산은 잔능선을 얹고, 숲·해변은 완만한 굴곡을 얹는다 */
+  const sec = cfg.key === 'snow' ? 0.28 * ridge(x * mt.f * 3.1 + mt.seed + 9, z * mt.f * 3.1 + mt.seed) : 0.14 * (fbm(x * 0.004 + mt.seed, z * 0.004, 3) - 0.5);
+  return hills + (Math.pow(r, mt.p) * (1 + sec) * cfg.mtAmp * far + cfg.mtBase * far) * m;
 }
 export function terrainH(x, z, cfg) {
   const d = Math.hypot(x, z);
@@ -70,35 +85,38 @@ export function bakeShoreTex(cfg) {
   t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.needsUpdate = true; return t;
 }
 
+/* 정점색: 근거리(150m 안) 변화만. 산의 색은 픽셀 셰이더가 고도 구역으로 결정한다 (코스한 격자에 얼룩이 생기지 않게) */
 function groundColor(cfg, x, z, h, ny, d) {
   _c.set(cfg.ground); const n = fbm(x * 0.06 + 7, z * 0.06 + 3, 3), n2 = fbm(x * 0.012 + 90, z * 0.012 + 40, 3);
-  const s = cfg.water ? z - cfg.water.z - shoreOff(x, cfg) : 99, dk = d < 12 ? campDirt(x, z) : 0;
+  const s = cfg.water ? z - cfg.water.z - shoreOff(x, cfg) : 99, dk = d < 12 ? campDirt(x, z) : 0, near = 1 - smooth(90, 150, d);
   if (cfg.key === 'lake') {
-    _c.lerp(_c2.set(0x8c7a46), smooth(0.5, 0.72, n) * 0.55);
-    if (d > 120) _c.lerp(_c2.set(0x2f4a30), smooth(120, 200, d) * (0.4 + 0.5 * smooth(0.4, 0.7, n2)));
-    _c.lerp(_c2.set(0x6a6d70), smooth(110, 170, h));
-    _c.lerp(_c2.set(0xe3e9f0), smooth(185, 240, h) * smooth(0.45, 0.8, ny));
+    _c.lerp(_c2.set(0x8c7a46), smooth(0.5, 0.72, n) * 0.55 * near);
+    _c.lerp(_c2.set(0x3f6a30), smooth(0.4, 0.7, n2) * 0.35);
     if (cfg.water && d < 150) _c.lerp(_c2.set(0x5c4c3a), 1 - smooth(-2.6, 1.4, s));
     _c.lerp(_c2.set(0x6a5940), dk * 0.85);
   } else if (cfg.key === 'beach') {
-    _c.multiplyScalar(0.92 + n * 0.16);
+    _c.multiplyScalar(0.92 + n * 0.16 * near);
     if (cfg.water && d < 150) _c.multiplyScalar(1 - 0.22 * (1 - smooth(-2.6, 2, s)));
     _c.lerp(_c2.set(0x7c8a55), smooth(2.5, 12, h) * (0.5 + 0.5 * n2));
-    _c.lerp(_c2.set(0x8a7a66), smooth(45, 90, h) * 0.6);
     _c.lerp(_c2.set(0xcdb98c), dk * 0.5);
   } else {
-    _c.lerp(_c2.set(0xdfe7f1), (1 - n2) * 0.35);
+    _c.lerp(_c2.set(0xdfe7f1), (1 - n2) * 0.35 * near);
     _c.lerp(_c2.set(0xc9d6e6), (1 - smooth(0.7, 0.95, ny)) * 0.5);
     _c.lerp(_c2.set(0xd3dae3), dk * 0.6);
   }
   return _c;
 }
 
-/* 먼 산 수목 띠: 장소별 숲 색과 수목한계 고도 */
-const FOREST = { lake: { col: 0x1f3622, line: 150 }, beach: { col: 0x3d5a34, line: 100 }, snow: { col: 0x2a3b38, line: 130 } };
+/* 고도 구역: 숲(수목한계 아래) → 고산 초지 → 바위(경사) → 눈(설선 위·평탄) */
+const ZONE = {
+  lake:  { forest: 0x1f3622, meadow: 0x8a8f4e, snow: 0xe8edf3, tree: 140, snowLine: 235 },
+  snow:  { forest: 0x2a3b38, meadow: 0xd9e0e8, snow: 0xf3f6fb, tree: 105, snowLine: 140 },
+  beach: { forest: 0x3d5a34, meadow: 0x9a9b5c, snow: 0xffffff, tree: 85,  snowLine: 9999 },
+};
 
 /* 극좌표 격자 지면.
-   셰이더: 두 스케일 디테일 텍스처(색·노멀, 30m 밖으로 페이드) + 경사면 바위 + 먼 산 수목 띠 + 물가 젖은 띠 + 물속 색·커스틱 + 설면 반짝임 */
+   셰이더: 두 스케일 디테일 텍스처(색·노멀, 30m 밖으로 페이드) + 경사면 바위 + 고도 구역(숲·초지·눈) + 물가 젖은 띠 + 물속 색·커스틱 + 설면 반짝임
+   미세 노이즈는 120~260m 에서 전부 사라지고, 원경은 채도를 낮춘다 */
 export function makeGround(cfg, uTime, shoreTex) {
   const R = 116, S = 200, radii = [];
   for (let i = 0; i < R; i++) radii.push(i < 50 ? i * 1.2 : 60 * Math.pow(1.05, i - 50));
@@ -112,7 +130,7 @@ export function makeGround(cfg, uTime, shoreTex) {
   const nor = geo.attributes.normal;
   for (let i = 0; i < R * S; i++) { const x = pos[i * 3], z = pos[i * 3 + 2]; const c = groundColor(cfg, x, z, pos[i * 3 + 1], nor.getY(i), Math.hypot(x, z)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const det = cfg.snow ? T.snow : cfg.key === 'beach' ? T.sand : T.dirt, fo = FOREST[cfg.key] || FOREST.lake;
+  const det = cfg.snow ? T.snow : cfg.key === 'beach' ? T.sand : T.dirt, zo = ZONE[cfg.key] || ZONE.lake;
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
   mat.onBeforeCompile = sh => {
     sh.uniforms.uRock = { value: new THREE.Color(cfg.rock) };
@@ -127,28 +145,35 @@ export function makeGround(cfg, uTime, shoreTex) {
     sh.uniforms.uDet = { value: det.map }; sh.uniforms.uDetN = { value: det.normalMap };
     sh.uniforms.uRockM = { value: T.rock.map }; sh.uniforms.uRockN = { value: T.rock.normalMap };
     sh.uniforms.uSnow = { value: cfg.snow ? 1 : 0 }; sh.uniforms.uSpark = { value: 0 };
-    sh.uniforms.uForest = { value: new THREE.Color(fo.col) }; sh.uniforms.uTreeLine = { value: fo.line };
+    sh.uniforms.uForest = { value: new THREE.Color(zo.forest) }; sh.uniforms.uMeadow = { value: new THREE.Color(zo.meadow) }; sh.uniforms.uSnowCol = { value: new THREE.Color(zo.snow) };
+    sh.uniforms.uTreeLine = { value: zo.tree }; sh.uniforms.uSnowLine = { value: zo.snowLine };
     mat.userData.shader = sh;
     sh.vertexShader = 'varying vec3 vWPos;varying vec3 vWNorm;\n' + sh.vertexShader
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvWNorm=normalize(mat3(modelMatrix)*objectNormal);')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.0)).xyz;');
-    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock,uForest;uniform float uTime,uHasWater,uCaust,uShoreZ,uWaterEdge,uWaterY,uHR,uSnow,uSpark,uTreeLine;uniform sampler2D uShore,uDet,uDetN,uRockM,uRockN;\n' + sh.fragmentShader
+    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock,uForest,uMeadow,uSnowCol;uniform float uTime,uHasWater,uCaust,uShoreZ,uWaterEdge,uWaterY,uHR,uSnow,uSpark,uTreeLine,uSnowLine;uniform sampler2D uShore,uDet,uDetN,uRockM,uRockN;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
+        float dcam=length(vWPos-cameraPosition);float dfar=1.0-smoothstep(30.0,90.0,dcam);float far=smoothstep(120.0,260.0,dcam);
         float n1=vnoise(vWPos.xz*0.35);float n2=vnoise(vWPos.xz*1.7);float n3=vnoise(vWPos.xz*7.0);
-        float det=(n1-0.5)*0.22+(n2-0.5)*0.12+(n3-0.5)*0.07;
-        float dcam=length(vWPos-cameraPosition);float dfar=1.0-smoothstep(30.0,90.0,dcam);
+        float det=((n1-0.5)*0.22+(n2-0.5)*0.12+(n3-0.5)*0.07)*(1.0-far);
         vec2 uvA=vWPos.xz*0.7;vec2 uvB=vWPos.xz*0.125;vec2 uvR=vWPos.xz*0.35;
         float dA=texture2D(uDet,uvA).r;float dB=texture2D(uDet,uvB).r;float rk=texture2D(uRockM,uvR).r;
-        float up=clamp(vWNorm.y,0.0,1.0);float rockK=1.0-smoothstep(0.6,0.82,up+(n2-0.5)*0.18);
+        float up=clamp(vWNorm.y,0.0,1.0);float rockK=1.0-smoothstep(0.6,0.82,up+(n2-0.5)*0.18*(1.0-far)+(vnoise(vWPos.xz*0.04)-0.5)*0.12*far);
         vec3 gcol=diffuseColor.rgb*mix(1.0,dA*dB*1.18,dfar);
-        vec3 rcol=uRock*(0.8+n2*0.4)*mix(1.0,rk*1.12,dfar);
+        vec3 rcol=uRock*(0.8+n2*0.4*(1.0-far)+0.2*far)*mix(1.0,rk*1.12,dfar);
         diffuseColor.rgb=mix(gcol,rcol,rockK);
         diffuseColor.rgb*=1.0+det;
-        { float mtn=smoothstep(200.0,260.0,length(vWPos.xz));
-          float tl=smoothstep(uTreeLine+40.0,uTreeLine-30.0,vWPos.y);
-          float tn=vnoise(vWPos.xz*0.06)*0.6+vnoise(vWPos.xz*0.21)*0.4;
-          float forest=mtn*tl*smoothstep(0.42,0.62,tn)*(1.0-rockK)*smoothstep(0.35,0.7,up);
-          diffuseColor.rgb=mix(diffuseColor.rgb,uForest*(0.85+0.3*n2),forest*0.85); }
+        { float alt=vWPos.y;float wob=(vnoise(vWPos.xz*0.008)-0.5)*30.0;float mtn=smoothstep(150.0,280.0,length(vWPos.xz));
+          float clump=smoothstep(0.35,0.65,vnoise(vWPos.xz*0.02)*0.6+vnoise(vWPos.xz*0.05+3.0)*0.4);
+          float forest=(1.0-smoothstep(uTreeLine-25.0+wob,uTreeLine+25.0+wob,alt))*smoothstep(0.35,0.72,up)*mtn*mix(1.0,clump,0.55);
+          float meadow=smoothstep(uTreeLine-25.0+wob,uTreeLine+45.0+wob,alt)*mtn;
+          float snow=smoothstep(uSnowLine-30.0+wob,uSnowLine+30.0+wob,alt)*smoothstep(0.5,0.82,up+(vnoise(vWPos.xz*0.03)-0.5)*0.15);
+          vec3 c=diffuseColor.rgb;
+          c=mix(c,uMeadow*(0.92+0.16*vnoise(vWPos.xz*0.015)),meadow*(1.0-rockK));
+          c=mix(c,uForest*(0.9+0.2*vnoise(vWPos.xz*0.03)),forest*0.85*(1.0-rockK));
+          c=mix(c,uSnowCol,snow*(1.0-0.65*rockK));
+          float lum=dot(c,vec3(0.3,0.59,0.11));c=mix(c,vec3(lum),0.14*far);
+          diffuseColor.rgb=c; }
         if(uSnow>0.5){float sp=step(0.982,hashg(floor(vWPos.xz*45.0)+floor(cameraPosition.xz*0.7)));diffuseColor.rgb+=sp*uSpark*(1.0-rockK)*dfar;}
         if(uHasWater>0.5){
           float off=texture2D(uShore,vec2(clamp(vWPos.x/(2.0*uHR)+0.5,0.0,1.0),0.5)).r*32.0-16.0;
@@ -164,7 +189,7 @@ export function makeGround(cfg, uTime, shoreTex) {
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
         { float nk=1.0-smoothstep(20.0,70.0,dcam);
           vec3 tA=texture2D(uDetN,uvA).xyz*2.0-1.0;vec3 tB=texture2D(uDetN,uvB).xyz*2.0-1.0;vec3 tR=texture2D(uRockN,uvR).xyz*2.0-1.0;
-          vec2 pt=mix(tA.xy*0.55+tB.xy*0.45,tR.xy*1.3,rockK)*nk*0.9+vec2(n2-0.5,n3-0.5)*0.12;
+          vec2 pt=mix(tA.xy*0.55+tB.xy*0.45,tR.xy*1.3,rockK)*nk*0.9+vec2(n2-0.5,n3-0.5)*0.12*(1.0-far);
           normal=normalize(normal+(viewMatrix*vec4(pt.x,0.0,pt.y,0.0)).xyz); }`);
   };
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
