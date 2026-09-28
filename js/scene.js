@@ -7,6 +7,8 @@ import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, contactShadow, Particles, Smoke, Sparks, Footprints, birdMat } from './props.js';
 import { paramsAt, sunDirAt } from './time.js';
 
+const FINE = matchMedia('(pointer:fine)').matches;
+
 const streakTex = canvasTex(128, 16, (g, w, h) => {
   const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.7, 'rgba(255,255,255,.5)'); gr.addColorStop(1, 'rgba(255,255,255,1)');
   g.fillStyle = gr; g.fillRect(0, 0, w, h);
@@ -85,6 +87,48 @@ function makeAurora(W, scene) {
   }
 }
 
+/* 별: 대부분 작고 소수만 밝은 분포, 미세한 색온도 차이, 밝은 별만 아주 약하게 깜빡임, 지평선 근처는 대기에 가려 어둡다 */
+function makeStars(W, scene) {
+  const n = 2600, sp = new Float32Array(n * 3), sz = new Float32Array(n), ph = new Float32Array(n), tint = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const th = Math.random() * Math.PI * 2, el = Math.acos(Math.random() * 0.97), r = 1700;
+    sp[i * 3] = r * Math.sin(el) * Math.cos(th); sp[i * 3 + 1] = r * Math.cos(el); sp[i * 3 + 2] = r * Math.sin(el) * Math.sin(th);
+    const q = Math.random(); sz[i] = 0.55 + 2.0 * q * q * q; ph[i] = rnd(0, 6.28);
+    const w = Math.random(), c = w < 0.22 ? [1.0, 0.93, 0.84] : w < 0.78 ? [1, 1, 1] : [0.86, 0.91, 1.0];
+    tint[i * 3] = c[0]; tint[i * 3 + 1] = c[1]; tint[i * 3 + 2] = c[2];
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(sp, 3)); g.setAttribute('aSize', new THREE.BufferAttribute(sz, 1)); g.setAttribute('aPh', new THREE.BufferAttribute(ph, 1)); g.setAttribute('aTint', new THREE.BufferAttribute(tint, 3));
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uOp: { value: 0 }, uTime: W.uTime, uPx: { value: ctx.renderer.getPixelRatio() * 1.5 } },
+    vertexShader: `attribute float aSize,aPh;attribute vec3 aTint;uniform float uTime,uPx;varying float vA;varying vec3 vT;
+      void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;
+        float horizon=smoothstep(0.0,0.22,normalize(position).y);
+        float bright=0.45+0.55*smoothstep(0.5,2.0,aSize);
+        float tw=1.0-0.18*(0.5+0.5*sin(uTime*(1.1+aSize*0.5)+aPh))*smoothstep(1.2,2.4,aSize);
+        vA=horizon*bright*tw;vT=aTint;gl_PointSize=aSize*uPx;}`,
+    fragmentShader: `uniform float uOp;varying float vA;varying vec3 vT;
+      void main(){vec2 c=gl_PointCoord-0.5;float d=length(c)*2.0;float a=smoothstep(1.0,0.35,d);float core=smoothstep(0.5,0.0,d);
+        gl_FragColor=vec4(vT*(0.75+0.25*core),a*vA*uOp);}`,
+  });
+  W.stars = new THREE.Points(g, m); W.stars.frustumCulled = false; W.stars.userData.noAO = true; scene.add(W.stars);
+}
+/* 달: 노이즈 바다(mare)와 크레이터, 태양 방향에 따른 위상, 어두운 면의 지구조 */
+function makeMoon(W, scene) {
+  const m = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uLight: { value: new THREE.Vector3(0, 1, 0) }, uOp: { value: 0 }, uCol: { value: new THREE.Color(0xe8ecf7) } },
+    vertexShader: 'varying vec3 vN;void main(){vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: NOISE_GLSL + `uniform vec3 uLight,uCol;uniform float uOp;varying vec3 vN;
+      void main(){vec3 n=normalize(vN);float d=smoothstep(-0.12,0.3,dot(n,uLight));
+        vec2 p=vec2(atan(n.z,n.x)*3.0,n.y*6.0);float c=vnoise(p)*0.5+vnoise(p*2.3+4.0)*0.3+vnoise(p*5.1+9.0)*0.2;
+        float mare=smoothstep(0.55,0.75,c);float alb=mix(1.0,0.72,mare)*(0.92+0.16*vnoise(p*9.0));
+        vec3 col=uCol*alb*(d*1.4+0.05);gl_FragColor=vec4(col,uOp);}`,
+  });
+  W.moon = new THREE.Mesh(new THREE.SphereGeometry(11, 24, 24), m); W.moon.userData.noAO = true; scene.add(W.moon);
+}
+
 export function applyTime() {
   const W = ctx.W, cur = W.tm; if (!W.sun) return;
   const sd = sunDirAt(state.clock, W.sunDir), md = sunDirAt(state.clock + 0.5, W.moonDir);
@@ -105,7 +149,8 @@ export function applyTime() {
   W.sunDisc.position.copy(sd).multiplyScalar(1500); W.sunDisc.scale.setScalar(cur.sunSize * 1.3); W.sunDisc.material.color.copy(cur.disc).multiplyScalar(2.5); W.sunDisc.visible = sd.y > -0.05;
   W.sunGlow.position.copy(W.sunDisc.position); W.sunGlow.scale.setScalar(cur.sunSize * 13); W.sunGlow.material.color.copy(cur.disc); W.sunGlow.material.opacity = cur.glow * 0.7 * smooth(-0.05, 0.05, sd.y);
   const mk = cur.stars * smooth(-0.05, 0.05, md.y);
-  W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.opacity = mk; W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
+  W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.uniforms.uOp.value = mk; W.moon.material.uniforms.uLight.value.copy(sd);
+  W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
   ctx.scene.fog.color.copy(cur.fog); ctx.scene.fog.far = cur.fogFar; ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
   FOG[0] = L.x; FOG[1] = L.y; FOG[2] = L.z; FOG[3] = cur.insc * fade;
   FOG[4] = 2.3 / cur.fogFar; FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
@@ -160,7 +205,7 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [] };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0 };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
@@ -173,19 +218,16 @@ export function buildScene(bgKey) {
   scene.add(new THREE.Mesh(new THREE.SphereGeometry(1800, 40, 20), skyMat)); W.skyMat = skyMat;
 
   W.sun = new THREE.DirectionalLight(0xffffff, 1); W.sun.castShadow = settings.shadow;
-  Object.assign(W.sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 260 }); W.sun.shadow.mapSize.set(2048, 2048); W.sun.shadow.bias = -0.0006; W.sun.shadow.normalBias = 0.02;
+  Object.assign(W.sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 260 }); W.sun.shadow.mapSize.set(FINE ? 2048 : 1024, FINE ? 2048 : 1024); W.sun.shadow.bias = -0.0006; W.sun.shadow.normalBias = 0.02;
   scene.add(W.sun, W.sun.target);
   W.hemi = new THREE.HemisphereLight(0xffffff, cfg.ground, 1); scene.add(W.hemi);
   W.amb = new THREE.AmbientLight(0xffffff, 1); scene.add(W.amb);
   W.sunDisc = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 20), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })); scene.add(W.sunDisc);
   W.sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, fog: false, depthWrite: false })); scene.add(W.sunGlow);
-  W.moon = new THREE.Mesh(new THREE.SphereGeometry(11, 20, 20), new THREE.MeshBasicMaterial({ color: 0xdfe6ff, transparent: true, opacity: 0, fog: false })); scene.add(W.moon);
+  makeMoon(W, scene);
   W.moonGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0x9fb0ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, fog: false, depthWrite: false })); W.moonGlow.scale.setScalar(120); scene.add(W.moonGlow);
-  { const n = 2600, sp = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 0.97), r = 1700; sp[i * 3] = r * Math.sin(ph) * Math.cos(th); sp[i * 3 + 1] = r * Math.cos(ph); sp[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th); }
-    const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
-    W.stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0, fog: false })); scene.add(W.stars); }
-  W.sunDisc.userData.noAO = W.moon.userData.noAO = W.stars.userData.noAO = true;
+  makeStars(W, scene);
+  W.sunDisc.userData.noAO = true;
   for (let i = 0; i < 3; i++) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: streakTex, color: 0xf4f6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide }));
     m.visible = false; m.frustumCulled = false; m.userData.noAO = true; scene.add(m);
@@ -208,6 +250,8 @@ export function buildScene(bgKey) {
   const table = makeTable(); table.position.set(0.6, 0, 0.5); scene.add(table);
   W.lantern = new THREE.PointLight(0xffc07a, W.lanternLit ? cur.lantern : 0, 12, 2); W.lantern.position.set(0.65, 0.75, 0.5); scene.add(W.lantern);
   const fire = makeFire(); fire.position.set(0.3, 0, -1.4); scene.add(fire);
+  /* 모닥불 그림자는 켜고 끄면 셰이더 재컴파일이 나므로 고정. 낮엔 강도가 0이라 그림자도 안 보인다 */
+  W.fireLight.castShadow = settings.shadow && FINE;
   const car = makeCar(); car.position.set(0, 0, 8); scene.add(car);
   makeProps();
   if (cfg.snow) makeSnowCaps();
@@ -219,8 +263,11 @@ export function buildScene(bgKey) {
   W.fireCore = new Particles(90, { color: 0xfff2b0, size: 0.11, opacity: 0.75, blending: THREE.AdditiveBlending }); scene.add(W.fireCore.mesh);
   W.embers = new Particles(80, { color: 0xffa040, size: 0.035, opacity: 0.95, blending: THREE.AdditiveBlending }); scene.add(W.embers.mesh);
   W.sparks = new Sparks(260); scene.add(W.sparks.mesh);
+  /* 스파클러 라이트 풀: 개수가 고정이라 스틱을 아무리 꽂아도 재컴파일이 없다. 배정은 main.js assignSparkLights */
+  { const n = FINE ? 6 : 3;
+    for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffd8a0, 0, 3.5, 2); scene.add(l); W.sparkLights.push(l); } }
   W.prints = cfg.snow ? new Footprints(140, [0.66, 0.7, 0.8], 45) : cfg.key === 'beach' ? new Footprints(140, [0.72, 0.65, 0.55], 90) : null;
-  if (W.prints) scene.add(W.prints.mesh);
+  if (W.prints) { W.prints.mesh.userData.noRefl = true; scene.add(W.prints.mesh); }
   if (cfg.snow) {
     const n = 2800, sp = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { sp[i * 3] = rnd(-35, 35); sp[i * 3 + 1] = rnd(0, 30); sp[i * 3 + 2] = rnd(-40, 20); }
@@ -233,6 +280,8 @@ export function buildScene(bgKey) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.ff = new THREE.Points(g, new THREE.PointsMaterial({ map: softTex, color: 0xd6ff7a, size: 0.14, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); W.ff.frustumCulled = false; scene.add(W.ff);
   }
+  /* 물 반사 렌더에서 뺄 것들 (풀·낙엽·자갈·조개·발자국) */
+  scene.traverse(o => { if (o.userData.noRefl) W.noRefl.push(o); });
 
   W.interact = [
     { id: 'trunk',    pos: [0, 1.0, 10.9],      r: 2.6, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기' },

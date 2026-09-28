@@ -50,7 +50,9 @@ export function makeLantern(lit) {
 }
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
-  const clothM = cloth(0xe0783a, 8), flyM = cloth(0xc4602a, 8), liningM = cloth(0xc9673a, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
+  const clothM = cloth(0xe0783a, 8), flyM = cloth(0xc4602a, 8), backM = cloth(0xb8562a, 4), liningM = cloth(0xc9673a, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
+  /* 텐트 랜턴이 켜지면 main.js 가 이 천들의 emissive 를 올린다 */
+  W.tentCloth = [clothM, flyM, backM];
   const slab = (m, halfW, h, y0, len, sag, inner) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => {
     const geo = sagPlane(side, len, -sag, 10); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w);
     if (inner) { const li = new THREE.Mesh(geo, inner); li.position.copy(w.position); li.rotation.copy(w.rotation); li.translateY(-0.035); g.add(li); linings.push(li); }
@@ -60,7 +62,7 @@ export function makeTent() {
   [-L / 2 - 0.05, L / 2 + 0.05].forEach(z => [-1, 1].forEach(sx => g.add(bar([sx * (Wd / 2 + 0.12), 0, z], [0, H + 0.03, z], 0.018, pole, 8))));
   const sh = new THREE.Shape(); sh.moveTo(-Wd / 2, 0); sh.lineTo(Wd / 2, 0); sh.lineTo(0, H);
   const backGeo = new THREE.ShapeGeometry(sh);
-  const back = new THREE.Mesh(backGeo, cloth(0xb8562a, 4)); back.position.z = L / 2; g.add(back);
+  const back = new THREE.Mesh(backGeo, backM); back.position.z = L / 2; g.add(back);
   const backIn = new THREE.Mesh(backGeo, cloth(0xa8502a, 4, { side: THREE.BackSide })); backIn.position.z = L / 2 - 0.035; g.add(backIn); linings.push(backIn);
   [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, cloth(0xd46a30, 2), 8)));
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd, 0.05, L), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
@@ -131,6 +133,8 @@ export function makeFire() {
 export function makeCar() {
   const W = ctx.W, g = new THREE.Group(), body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.46, metalness: 0.2, clearcoat: 0.8, clearcoatRoughness: 0.28 }), dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.3 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x7f9fb8, transparent: true, opacity: 0.28, roughness: 0.03, metalness: 0.0, envMapIntensity: 1.6, side: THREE.DoubleSide });
+  /* 세워 둔 차: 전조등·후미등은 꺼져 있다. 유리 질감에 아주 약한 emissive 만 */
+  const headM = std(0xd8d2b8, { roughness: 0.25, metalness: 0.1, emissive: 0xfff1c4, emissiveIntensity: 0.08 }), tailM = std(0x7a1a18, { roughness: 0.3, emissive: 0xff2a2a, emissiveIntensity: 0.12 });
   const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
   add(new THREE.BoxGeometry(1.9, 0.5, 1.4), body, 0, 0.66, -1.7);
   add(new THREE.BoxGeometry(1.9, 0.5, 0.875), body, 0, 0.66, 2.0);
@@ -149,8 +153,8 @@ export function makeCar() {
     add(new THREE.PlaneGeometry(0.85, 0.62), glass, x, 1.47, 1.2, 0, Math.PI / 2);
     add(new THREE.BoxGeometry(0.03, 0.03, 0.18), chrome, x * 1.06, 1.0, 0.1); add(new THREE.BoxGeometry(0.03, 0.03, 0.18), chrome, x * 1.06, 1.0, 1.3);
     add(new THREE.BoxGeometry(0.22, 0.12, 0.08), dark, x * 1.1, 1.22, -0.65);
-    add(new THREE.BoxGeometry(0.28, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), x * 0.65, 0.85, -2.31);
-    add(new THREE.BoxGeometry(0.34, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: 0xff2a2a }), x * 0.62, 0.9, 2.55);
+    add(new THREE.BoxGeometry(0.28, 0.14, 0.06), headM, x * 0.65, 0.85, -2.31);
+    add(new THREE.BoxGeometry(0.34, 0.12, 0.05), tailM, x * 0.62, 0.9, 2.55);
   });
   add(new THREE.PlaneGeometry(1.7, 0.95), glass, 0, 1.48, -0.95, 0.6);
   add(new THREE.PlaneGeometry(1.6, 0.74), glass, 0, 1.525, 1.775, -0.49);
@@ -325,7 +329,10 @@ export function makeItem(type) {
     const burnt = new THREE.Mesh(new THREE.CylinderGeometry(0.0034, 0.0034, 1, 8), smoothM(0x2b2622, { roughness: 1 })); g.add(burnt);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 8), new THREE.MeshBasicMaterial({ color: 0xfff6d8 })); tip.visible = false; g.add(tip); g.userData.tip = tip;
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xffd08a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); glow.scale.setScalar(0.14); g.add(glow); g.userData.glow = glow;
-    const light = new THREE.PointLight(0xffd8a0, 0, 3.5, 2); g.add(light); g.userData.light = light;
+    /* 빛은 씬의 라이트 풀(W.sparkLights)이 담당. 여기엔 위치 마커와 발밑 데칼만 */
+    const light = new THREE.Object3D(); g.add(light); g.userData.light = light;
+    const decal = new THREE.Mesh(new THREE.CircleGeometry(0.8, 24), new THREE.MeshBasicMaterial({ map: softTex, color: 0xffa040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    decal.rotation.x = -Math.PI / 2; decal.position.y = 0.06; decal.visible = false; decal.userData.noAO = true; decal.castShadow = decal.receiveShadow = false; g.add(decal); g.userData.decal = decal;
     g.userData.lit = false; g.userData.igniting = false;
     g.userData.setAmount = a => {
       const y0 = 0.08, L = 0.22, end = y0 + L * a;
@@ -333,7 +340,7 @@ export function makeItem(type) {
       burnt.scale.y = Math.max(0.001, L * (1 - a)); burnt.position.y = end + L * (1 - a) * 0.5; burnt.visible = a < 0.995;
       tip.position.y = end; glow.position.y = end; light.position.y = end; emitter.position.y = end;
     };
-    g.userData.setLit = on => { g.userData.lit = on; tip.visible = on; if (!on) { glow.material.opacity = 0; light.intensity = 0; } };
+    g.userData.setLit = on => { g.userData.lit = on; tip.visible = on; if (!on) { glow.material.opacity = 0; decal.visible = false; } };
   } else {
     const paper = smoothM(0xf4f1ea, { roughness: 0.9 });
     const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 12), paper); cig.rotation.z = Math.PI / 2; g.add(cig);

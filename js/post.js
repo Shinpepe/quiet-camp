@@ -32,6 +32,8 @@ function hueTint(out, c, k) { _s.copy(c); const L = Math.max(lum(_s), 1e-3); _s.
 export function createPost(renderer, camera) {
   const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: FINE ? 4 : 0 });
   const composer = new EffectComposer(renderer, rt);
+  /* 직접 만든 RT를 넘기면 컴포저가 setSize 를 부르지 않아 DPR 이 반영되지 않는다 → 명시적으로 한 번 */
+  composer.setSize(innerWidth, innerHeight);
   const dummy = new THREE.Scene();
   const renderPass = new RenderPass(dummy, camera);
   const gtao = new GTAOPass(dummy, camera, innerWidth, innerHeight);
@@ -41,7 +43,8 @@ export function createPost(renderer, camera) {
   gtao.blendIntensity = 0.65; gtao.enabled = settings.ao;
   if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
   if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
-  const bokeh = new BokehPass(dummy, camera, { focus: 0.002, aperture: 1.2, maxblur: 0.01 }); bokeh.enabled = false;
+  /* BokehShader 의 focus 는 뷰 공간 거리(m). aperture 는 초점에서 1m 벗어날 때마다 uv 0.004 만큼 흐려지고 0.012 에서 포화 */
+  const bokeh = new BokehPass(dummy, camera, { focus: 8, aperture: 0.004, maxblur: 0.012 }); bokeh.enabled = false;
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.4, 1.25);
   const output = new OutputPass();
   const grade = new ShaderPass(GradeShader);
@@ -58,6 +61,6 @@ export function createPost(renderer, camera) {
     resize(w, h) { composer.setSize(w, h); },
     update(T) { grade.uniforms.uTime.value = T; },
     render() { composer.render(); },
-    renderPhoto(focusDist) { bokeh.uniforms.focus.value = Math.max(0, (focusDist - camera.near) / (camera.far - camera.near)); bokeh.enabled = true; composer.render(); bokeh.enabled = false; },
+    renderPhoto(focusDist) { bokeh.uniforms.focus.value = Math.max(camera.near, focusDist); bokeh.enabled = true; composer.render(); bokeh.enabled = false; },
   };
 }

@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
 import { BLOCKS } from './data.js';
-import { rnd, fbm, std, smoothM, shadowed, bar, jitter, mergeParts, tintOf, pushAll } from './util.js';
+import { rnd, fbm, std, smoothM, shadowed, bar, jitter, mergeParts, tintOf, pushAll, isTouch } from './util.js';
 import { terrainH, slopeUp, shoreOff, campDirt, WATER_Y } from './terrain.js';
 import { tex } from './textures.js';
+
+/* 모바일은 식생 밀도를 낮춘다 */
+const M = isTouch ? 0.55 : 1;
 
 /* 잎 재질: 바람 흔들림 + 역광 투과 + 림 라이트 + 아랫면 어두움 */
 export function swayMat(extra, strength, from) {
@@ -152,6 +155,7 @@ function reserved(x, z) { if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true
 
 export function makeVegetation(cfg) {
   const W = ctx.W, scene = ctx.scene, pines = [], leafs = [], bushes = [];
+  const nPines = Math.round(cfg.pines * M), nLeafs = Math.round(cfg.leafs * M), nBushes = Math.round(cfg.bushes * M);
   const tryPlace = (rMin, rMax, list, minH, maxH, radius, minUp, cluster, zmin) => {
     const a = rnd(0, Math.PI * 2), r = rMax * Math.sqrt(rnd((rMin * rMin) / (rMax * rMax), 1)), x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (reserved(x, z) || (zmin !== undefined && z < zmin)) return; const h = terrainH(x, z, cfg); if (h < minH || h > maxH) return;
@@ -159,11 +163,11 @@ export function makeVegetation(cfg) {
     if (slopeUp(x, z, cfg) < minUp) return;
     const s = rnd(0.8, 1.6); list.push({ x, y: h - 0.15, z, s, rot: rnd(0, 6.3), tint: tintOf(0, rnd(-0.05, 0.05)) }); W.trees.push([x, z, radius * s]);
   };
-  const near = Math.round(cfg.pines * 0.45);
+  const near = Math.round(nPines * 0.45);
   for (let i = 0; i < near * 5 && pines.length < near; i++) tryPlace(10, 65, pines, 0.3, 60, 0.32, 0.68, cfg.key === 'lake' ? 0.34 : 0.42);
-  for (let i = 0; i < cfg.pines * 4 && pines.length < cfg.pines; i++) tryPlace(55, 180, pines, 0.3, 130, 0.32, 0.7, cfg.key === 'lake' ? 0.4 : 0.45);
-  for (let i = 0; i < cfg.leafs * 4 && leafs.length < cfg.leafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.35, 0.72, 0.36);
-  for (let i = 0; i < cfg.bushes * 4 && bushes.length < cfg.bushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin);
+  for (let i = 0; i < nPines * 4 && pines.length < nPines; i++) tryPlace(55, 180, pines, 0.3, 130, 0.32, 0.7, cfg.key === 'lake' ? 0.4 : 0.45);
+  for (let i = 0; i < nLeafs * 4 && leafs.length < nLeafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.35, 0.72, 0.36);
+  for (let i = 0; i < nBushes * 4 && bushes.length < nBushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin);
   const treeColor = cfg.key === 'snow' ? 0x2f4f46 : 0x2b5a2b, fol = () => tex('foliage', 1, 1, 0.3);
   if (pines.length) scene.add(instanced(pineGeo(treeColor, cfg.snow), swayMat(fol(), 0.012, 1.5), pines, true));
   if (leafs.length) {
@@ -174,18 +178,18 @@ export function makeVegetation(cfg) {
   for (let i = 0; i < cfg.palms; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(5, 42), z = rnd(-2, 34); if (reserved(x, z)) continue; const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); }
   for (let i = 0; i < (cfg.rocks || 0); i++) { const a = rnd(0, 6.3), r = rnd(9, 70), x = Math.cos(a) * r, z = Math.sin(a) * r; if (reserved(x, z)) continue; const h = terrainH(x, z, cfg); if (h < 0.05) continue; const s = rnd(0.35, 1.4), rk = makeRock(s, cfg.snow ? 0xa8b3c0 : 0x6f7276); rk.position.set(x, h + s * 0.15, z); scene.add(rk); W.trees.push([x, z, s * 0.9]); }
 
-  /* 낙엽: 활엽수 밑에만 (눈·모래사장 제외) */
+  /* 낙엽: 활엽수 밑에만 (눈·모래사장 제외). 물 반사에서는 제외 */
   if (leafs.length && !cfg.snow) {
     const lv = [], cols = [0xc8742a, 0x8a5a2e, 0xd6a33a, 0x9a4a22], c = new THREE.Color();
     leafs.forEach(t => { for (let i = 0; i < 7; i++) { const a = rnd(0, 6.3), r = rnd(0.5, 4.5) * t.s, x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r; const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.1) continue; c.set(cols[Math.floor(Math.random() * 4)]).multiplyScalar(rnd(0.75, 1.15)); lv.push({ x, y: h + 0.012, z, s: rnd(0.7, 1.2), rot: rnd(0, 6.3), rx: rnd(-0.15, 0.15), tint: [c.r, c.g, c.b] }); } });
     const lg = new THREE.PlaneGeometry(0.14, 0.09); lg.rotateX(-Math.PI / 2);
-    if (lv.length) scene.add(instanced(lg, new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide }), lv, false));
+    if (lv.length) { const im = instanced(lg, new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide }), lv, false); im.userData.noRefl = true; scene.add(im); }
   }
   /* 물가: 갈대(호수) + 자갈(호수) + 조개껍데기(모래사장) */
   if (cfg.water) {
     if (cfg.key === 'lake') {
-      const reeds = [];
-      for (let t = 0; t < 1100 && reeds.length < 520; t++) {
+      const reeds = [], nReeds = Math.round(520 * M);
+      for (let t = 0; t < 1100 && reeds.length < nReeds; t++) {
         const x = rnd(-110, 110); if (cfg.dock && x > 2 && x < 9.5) continue;
         const z = cfg.water.z + shoreOff(x, cfg) - 2.3 + rnd(-1.6, 1.4);
         const h = terrainH(x, z, cfg); if (h < WATER_Y - 0.4 || h > WATER_Y + 0.15) continue;
@@ -201,7 +205,7 @@ export function makeVegetation(cfg) {
         const z = cfg.water.z + shoreOff(x, cfg) - 2.3 + rnd(-1.8, 1.8), h = terrainH(x, z, cfg); if (h < WATER_Y - 0.25) continue;
         const g = rnd(0.55, 0.85); pb.push({ x, y: h + 0.01, z, s: rnd(0.03, 0.08), rot: rnd(0, 6.3), tint: [g, g, g * 0.97] });
       }
-      if (pb.length) scene.add(instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false));
+      if (pb.length) { const im = instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false); im.userData.noRefl = true; scene.add(im); }
     }
     if (cfg.key === 'beach') {
       const tints = [[0.96, 0.92, 0.82], [0.95, 0.84, 0.8], [0.97, 0.97, 0.94], [0.86, 0.76, 0.62], [0.92, 0.88, 0.9]], conch = [], clam = [];
@@ -213,14 +217,14 @@ export function makeVegetation(cfg) {
         else { const s = rnd(0.045, 0.07); conch.push({ x, y: h + s * rnd(0.55, 0.85), z, s, rot: rnd(0, 6.3), rx: rnd(-0.25, 0.25), tint }); }
       }
       const shellM = smoothM(0xffffff, { roughness: 0.5, side: THREE.DoubleSide });
-      if (conch.length) scene.add(instanced(conchGeo(), shellM, conch, false));
-      if (clam.length) scene.add(instanced(clamGeo(), shellM, clam, false));
+      if (conch.length) { const im = instanced(conchGeo(), shellM, conch, false); im.userData.noRefl = true; scene.add(im); }
+      if (clam.length) { const im = instanced(clamGeo(), shellM, clam, false); im.userData.noRefl = true; scene.add(im); }
     }
   }
 
   const gr = cfg.grass; if (!gr) return;
-  const list = [], base = new THREE.Color(gr.color), c = new THREE.Color();
-  for (let tries = 0; tries < gr.n * 4 && list.length < gr.n; tries++) {
+  const list = [], base = new THREE.Color(gr.color), c = new THREE.Color(), nGrass = Math.round(gr.n * M);
+  for (let tries = 0; tries < nGrass * 4 && list.length < nGrass; tries++) {
     const a = rnd(0, Math.PI * 2), r = 3.5 + 44 * Math.pow(Math.random(), 0.7), x = Math.cos(a) * r, z = 3 + Math.sin(a) * r;
     if (z < gr.zmin || Math.hypot(x, z) > 48) continue;
     if (campDirt(x, z) > 0.35) continue;
@@ -242,5 +246,5 @@ export function makeVegetation(cfg) {
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         { vec3 Vd=normalize(vViewPosition);float back=pow(max(dot(-Vd,uSunV),0.0),3.0);totalEmissiveRadiance+=diffuseColor.rgb*uLeafCol*back*0.8*smoothstep(0.2,0.9,vGH); }`);
   };
-  scene.add(instanced(grassGeo(), gm, list, false));
+  const grass = instanced(grassGeo(), gm, list, false); grass.userData.noRefl = true; scene.add(grass);
 }

@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { settings } from './state.js';
+import { ctx, settings } from './state.js';
 import { smooth, fbm, ridge, NOISE_GLSL, SKY_GLSL, FOG, FOG_GLSL } from './util.js';
 import { T } from './textures.js';
 
+const FINE = matchMedia('(pointer:fine)').matches;
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 export const HMAP_R = 160;
 /* 수면 높이. 캠프 바닥(y=0)이 수면보다 위에 있어야 파도가 땅을 뚫고 올라오지 않는다 */
@@ -93,8 +94,11 @@ function groundColor(cfg, x, z, h, ny, d) {
   return _c;
 }
 
+/* 먼 산 수목 띠: 장소별 숲 색과 수목한계 고도 */
+const FOREST = { lake: { col: 0x1f3622, line: 150 }, beach: { col: 0x3d5a34, line: 100 }, snow: { col: 0x2a3b38, line: 130 } };
+
 /* 극좌표 격자 지면.
-   셰이더: 두 스케일 디테일 텍스처(색·노멀, 30m 밖으로 페이드) + 경사면 바위 + 물가 젖은 띠 + 물속 색·커스틱 + 설면 반짝임 */
+   셰이더: 두 스케일 디테일 텍스처(색·노멀, 30m 밖으로 페이드) + 경사면 바위 + 먼 산 수목 띠 + 물가 젖은 띠 + 물속 색·커스틱 + 설면 반짝임 */
 export function makeGround(cfg, uTime, shoreTex) {
   const R = 116, S = 200, radii = [];
   for (let i = 0; i < R; i++) radii.push(i < 50 ? i * 1.2 : 60 * Math.pow(1.05, i - 50));
@@ -108,7 +112,7 @@ export function makeGround(cfg, uTime, shoreTex) {
   const nor = geo.attributes.normal;
   for (let i = 0; i < R * S; i++) { const x = pos[i * 3], z = pos[i * 3 + 2]; const c = groundColor(cfg, x, z, pos[i * 3 + 1], nor.getY(i), Math.hypot(x, z)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const det = cfg.snow ? T.snow : cfg.key === 'beach' ? T.sand : T.dirt;
+  const det = cfg.snow ? T.snow : cfg.key === 'beach' ? T.sand : T.dirt, fo = FOREST[cfg.key] || FOREST.lake;
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
   mat.onBeforeCompile = sh => {
     sh.uniforms.uRock = { value: new THREE.Color(cfg.rock) };
@@ -123,11 +127,12 @@ export function makeGround(cfg, uTime, shoreTex) {
     sh.uniforms.uDet = { value: det.map }; sh.uniforms.uDetN = { value: det.normalMap };
     sh.uniforms.uRockM = { value: T.rock.map }; sh.uniforms.uRockN = { value: T.rock.normalMap };
     sh.uniforms.uSnow = { value: cfg.snow ? 1 : 0 }; sh.uniforms.uSpark = { value: 0 };
+    sh.uniforms.uForest = { value: new THREE.Color(fo.col) }; sh.uniforms.uTreeLine = { value: fo.line };
     mat.userData.shader = sh;
     sh.vertexShader = 'varying vec3 vWPos;varying vec3 vWNorm;\n' + sh.vertexShader
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvWNorm=normalize(mat3(modelMatrix)*objectNormal);')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.0)).xyz;');
-    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock;uniform float uTime,uHasWater,uCaust,uShoreZ,uWaterEdge,uWaterY,uHR,uSnow,uSpark;uniform sampler2D uShore,uDet,uDetN,uRockM,uRockN;\n' + sh.fragmentShader
+    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vWPos;varying vec3 vWNorm;uniform vec3 uRock,uForest;uniform float uTime,uHasWater,uCaust,uShoreZ,uWaterEdge,uWaterY,uHR,uSnow,uSpark,uTreeLine;uniform sampler2D uShore,uDet,uDetN,uRockM,uRockN;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         float n1=vnoise(vWPos.xz*0.35);float n2=vnoise(vWPos.xz*1.7);float n3=vnoise(vWPos.xz*7.0);
         float det=(n1-0.5)*0.22+(n2-0.5)*0.12+(n3-0.5)*0.07;
@@ -139,6 +144,11 @@ export function makeGround(cfg, uTime, shoreTex) {
         vec3 rcol=uRock*(0.8+n2*0.4)*mix(1.0,rk*1.12,dfar);
         diffuseColor.rgb=mix(gcol,rcol,rockK);
         diffuseColor.rgb*=1.0+det;
+        { float mtn=smoothstep(200.0,260.0,length(vWPos.xz));
+          float tl=smoothstep(uTreeLine+40.0,uTreeLine-30.0,vWPos.y);
+          float tn=vnoise(vWPos.xz*0.06)*0.6+vnoise(vWPos.xz*0.21)*0.4;
+          float forest=mtn*tl*smoothstep(0.42,0.62,tn)*(1.0-rockK)*smoothstep(0.35,0.7,up);
+          diffuseColor.rgb=mix(diffuseColor.rgb,uForest*(0.85+0.3*n2),forest*0.85); }
         if(uSnow>0.5){float sp=step(0.982,hashg(floor(vWPos.xz*45.0)+floor(cameraPosition.xz*0.7)));diffuseColor.rgb+=sp*uSpark*(1.0-rockK)*dfar;}
         if(uHasWater>0.5){
           float off=texture2D(uShore,vec2(clamp(vWPos.x/(2.0*uHR)+0.5,0.0,1.0),0.5)).r*32.0-16.0;
@@ -160,14 +170,16 @@ export function makeGround(cfg, uTime, shoreTex) {
   const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; return m;
 }
 
-/* 물 — 정점: 큰 파도. 프래그먼트: 잔물결 노멀 + 높이맵 수심 + 하늘 반사(별 없음) + 태양고도별 하이라이트 + 수심 거품 + 대기 원근 안개 */
+/* 물 — 정점: 큰 파도. 프래그먼트: 잔물결 노멀 + 높이맵 수심 + 평면 반사(있으면) 또는 하늘 반사 + 태양고도별 하이라이트 + 수심 거품 + 대기 원근 안개
+   uRefl: main.js 가 수면에 미러링한 카메라로 그린 씬. uReflMat 으로 투영 좌표를 얻고 잔물결 노멀로 살짝 흔든다 */
 export function makeWater(w, tm, uTime, heightTex, edgeZ) {
   const geo = new THREE.PlaneGeometry(w.size, w.size, 180, 180); geo.rotateX(-Math.PI / 2);
   const ripple = T.ripple.normalMap.clone(); ripple.wrapS = ripple.wrapT = THREE.RepeatWrapping; ripple.needsUpdate = true;
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     uniforms: {
-      uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z }, uReflect: { value: settings.reflect ? 1 : 0 },
+      uTime, waveAmp: { value: w.wave }, shoreZ: { value: w.z }, uReflect: { value: settings.reflect && FINE ? 1 : 0 },
+      uRefl: { value: ctx.reflRT ? ctx.reflRT.texture : null }, uReflMat: { value: new THREE.Matrix4() },
       uHeight: { value: heightTex }, uHR: { value: HMAP_R }, uWaterY: { value: WATER_Y }, uRipple: { value: ripple }, uRip: { value: 0.45 + 0.55 * w.wave },
       deep: { value: new THREE.Color(w.deep).multiplyScalar(tm.waterMul) }, shallow: { value: new THREE.Color(w.shallow).multiplyScalar(tm.waterMul) },
       skyTop: { value: new THREE.Color(tm.top) }, skyBottom: { value: new THREE.Color(tm.bottom) },
@@ -182,8 +194,8 @@ export function makeWater(w, tm, uTime, heightTex, edgeZ) {
         vN=normalize(vec3(-(hx-h)/e,1.0,-(hz-h)/e));wp.y+=h;vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
     fragmentShader: NOISE_GLSL + SKY_GLSL + FOG_GLSL + `
       uniform vec3 deep,shallow,skyTop,skyBottom,sunDir,sunColor,fogColor,uSunD,moonDir,disc,cloudLit,cloudShade;
-      uniform float shoreZ,uTime,uReflect,uHR,uWaterY,uRip,glow,uMoon,uCover;uniform vec4 uFog[3];
-      uniform sampler2D uHeight,uRipple;varying vec3 vW,vN;
+      uniform float shoreZ,uTime,uReflect,uHR,uWaterY,uRip,glow,uMoon,uCover;uniform vec4 uFog[3];uniform mat4 uReflMat;
+      uniform sampler2D uHeight,uRipple,uRefl;varying vec3 vW,vN;
       void main(){
         vec3 V=normalize(cameraPosition-vW);float dist=length(cameraPosition-vW);
         vec2 u1=vW.xz*0.33+vec2(uTime*0.028,uTime*0.017);vec2 u2=vW.xz*0.19-vec2(uTime*0.02,uTime*0.024);
@@ -195,8 +207,11 @@ export function makeWater(w, tm, uTime, heightTex, edgeZ) {
         float dk=1.0-exp(-dpt*0.5);vec3 base=mix(shallow,deep,dk);
         vec3 R=reflect(-V,N);R.y=max(R.y,0.04);R=normalize(R);
         vec3 sky=skyColor(R,skyTop,skyBottom,uSunD,moonDir,disc,cloudLit,cloudShade,glow,uMoon,uCover,uTime,0.45);
-        float fres=pow(1.0-max(dot(N,V),0.0),4.0);float refl=mix(0.06,0.6,fres)*(0.75+0.25*uReflect);
-        vec3 col=mix(base,sky,refl);
+        vec4 rp=uReflMat*vec4(vW,1.0);vec2 ruv=rp.xy/max(rp.w,0.001)+N.xz*0.045;
+        float ok=step(0.0,rp.w)*uReflect;vec3 rc=texture2D(uRefl,clamp(ruv,0.002,0.998)).rgb;
+        vec3 mirror=mix(sky,rc,ok*0.9);
+        float fres=pow(1.0-max(dot(N,V),0.0),4.0);float refl=mix(0.08,0.72,fres);
+        vec3 col=mix(base,mirror,refl);
         vec3 H=normalize(sunDir+V);float el=smoothstep(0.0,0.5,sunDir.y);float e=mix(40.0,240.0,el);
         float spec=pow(max(dot(N,H),0.0),e);col+=sunColor*spec*mix(2.2,1.0,el);
         float fn=vnoise(vW.xz*0.9+vec2(uTime*0.15,0.0))*0.6+vnoise(vW.xz*2.8-vec2(0.0,uTime*0.22))*0.4;
