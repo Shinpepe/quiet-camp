@@ -109,7 +109,7 @@ function groundColor(cfg, x, z, h, ny, d) {
 
 /* 고도 구역: 숲(수목한계 아래) → 고산 초지 → 바위(경사) → 눈(설선 위·평탄) */
 const ZONE = {
-  lake:  { forest: 0x1f3622, meadow: 0x6f8a44, snow: 0xe8edf3, tree: 160, snowLine: 9999 },,
+  lake:  { forest: 0x1f3622, meadow: 0x6f8a44, snow: 0xe8edf3, tree: 160, snowLine: 9999 },
   snow:  { forest: 0x2a3b38, meadow: 0xd9e0e8, snow: 0xf3f6fb, tree: 105, snowLine: 140 },
   beach: { forest: 0x3d5a34, meadow: 0x9a9b5c, snow: 0xffffff, tree: 85,  snowLine: 9999 },
 };
