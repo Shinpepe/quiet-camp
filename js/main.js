@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
-import { $, rnd, smooth, wrapPI } from './util.js';
-import { buildScene, applyTime, rebakeEnv, updateMeteors } from './scene.js';
+import { $, rnd, smooth, clamp, wrapPI } from './util.js';
+import { buildScene, applyTime, rebakeEnv, updateMeteors, precompileScene } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks, updateLighthouse } from './props.js';
@@ -16,7 +16,8 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, FINE ? 2 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+/* AgX: 밝아질수록 하얗게 수렴해 불꽃·노을의 주황이 노랗게 틀어지지 않는다. 채도 보정은 post.js 에서 */
+renderer.toneMapping = THREE.AgXToneMapping;
 const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 3000);
 camera.rotation.order = 'YXZ';
 ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
@@ -33,6 +34,7 @@ const reflSize = () => [Math.max(256, Math.round(innerWidth * 0.45)), Math.max(1
 ctx.reflRT = new THREE.WebGLRenderTarget(...reflSize(), { type: THREE.HalfFloatType });
 ctx.reflCam = new THREE.PerspectiveCamera(70, 1, 0.05, 3000);
 const reflMat = new THREE.Matrix4(), _lk = new THREE.Vector3(), _rd = new THREE.Vector3(), clipArr = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y + 0.02)];
+ctx.reflClip = clipArr;   // 사전 컴파일이 클리핑 변형 셰이더도 만들 수 있게
 function renderReflection(scene) {
   const W = ctx.W; if (!W.water || !settings.reflect || !FINE) return;
   const rc = ctx.reflCam;
@@ -48,6 +50,15 @@ function renderReflection(scene) {
 }
 fitView();
 addEventListener('resize', () => { fitView(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); ctx.reflRT.setSize(...reflSize()); });
+
+/* ── 바람: 풀·나무·연기·배경음·돌풍 소리가 모두 이 값 하나(0..1)를 읽는다.
+   느린 기본 흐름 위에 가끔 돌풍이 솟는다. 장소마다 기본 세기가 조금 다르다 ── */
+const WIND_BIAS = { lake: 0, beach: 0.05, snow: 0.1 };
+function windAt(T, key) {
+  const base = 0.35 + 0.12 * Math.sin(T * 0.023 + 1.1) + (WIND_BIAS[key] || 0);
+  const g = Math.max(0, 0.6 * Math.sin(T * 0.091) + 0.5 * Math.sin(T * 0.047 + 2.3) + 0.15 * Math.sin(T * 0.31 + 0.7));
+  return clamp(base + g * 0.55, 0, 1);
+}
 
 let last = performance.now(), T = 0, lastSec = -1;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4), _sp = new THREE.Vector3();
@@ -82,7 +93,11 @@ function assignSparkLights(W) {
 
 function loop(now) {
   requestAnimationFrame(loop);
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene; if (!scene) return; T += dt; W.uTime.value = T; ctx.post.update(T);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene;
+  /* 사전 컴파일 중에는 숨긴 물체가 잠깐 보이는 상태라 그리지 않는다 (로딩 화면이 덮고 있다) */
+  if (!scene || ctx.compiling) return;
+  T += dt; W.uTime.value = T; ctx.post.update(T);
+  W.wind.value = windAt(T, W.cfg.key);
   const hand = ctx.hand;
 
   if (settings.flow && !ctx.paused && state.mode !== 'sleep') state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
@@ -122,18 +137,27 @@ function loop(now) {
   if (W.dockLight) { W.dockLight.intensity = W.tm.lantern * 0.8 * (0.96 + 0.04 * Math.sin(T * 3.1)); if (W.dockLampObj) W.dockLampObj.userData.setLit(W.tm.lantern > 0.5); }
   if (W.stars) W.stars.material.uniforms.uOp.value = W.tm.stars;
 
+  /* ── 모닥불: 빛의 기본 세기는 부드럽게 따라가고, 오디오의 "파칙"(W.firePop)이 그 위에 순간적으로 얹힌다.
+     큰 파칙(W.fireBurst)에는 불티가 한 번에 솟는다 ── */
   W.fireK = (W.fireK || 0) + ((W.fireLit ? 1 : 0) - (W.fireK || 0)) * Math.min(1, dt * 2.5);
-  if (W.flames) W.flames.forEach((f, i) => { f.material.uniforms.uK.value = W.fireK; f.visible = W.fireK > 0.02; f.scale.y = W.fireK * (0.85 + 0.2 * Math.sin(T * 8.5 + i * 1.3) + 0.1 * Math.sin(T * 21 + i)); f.scale.x = 0.9 + 0.1 * Math.sin(T * 6.7 + i * 2); });
-  if (W.logGlow) W.logGlow.forEach((s, i) => { s.material.opacity = W.fireK * (0.55 + 0.45 * Math.sin(T * 13 + i * 1.9)); });
+  W.firePop *= Math.exp(-dt * 10);
+  if (W.flames) W.flames.forEach((f, i) => { f.material.uniforms.uK.value = W.fireK; f.visible = W.fireK > 0.02; f.scale.y = W.fireK * (0.85 + 0.2 * Math.sin(T * 8.5 + i * 1.3) + 0.1 * Math.sin(T * 21 + i) + 0.25 * W.firePop); f.scale.x = 0.9 + 0.1 * Math.sin(T * 6.7 + i * 2); });
+  if (W.logGlow) W.logGlow.forEach((s, i) => { s.material.opacity = Math.min(1, W.fireK * (0.55 + 0.45 * Math.sin(T * 13 + i * 1.9) + 0.3 * W.firePop)); });
   if (W.fireLight) {
-    const tgt = W.fireLit ? W.tm.fireI : 0; W.fireLight.intensity += (tgt * (0.85 + 0.12 * Math.sin(T * 17) + 0.08 * Math.sin(T * 41)) - W.fireLight.intensity) * Math.min(1, dt * 4);
+    W.fireBase += ((W.fireLit ? W.tm.fireI : 0) - W.fireBase) * Math.min(1, dt * 4);
+    W.fireLight.intensity = W.fireBase * (0.88 + 0.07 * Math.sin(T * 17) + 0.05 * Math.sin(T * 41) + 0.45 * W.firePop);
     W.emberCore.material.color.lerp(_c.setHex(W.fireLit ? 0xff6a1a : 0x2a1c14), Math.min(1, dt * 3));
     if (W.fireLit) {
       if (Math.random() < 0.45) W.fire.spawn(firePos, { x: 0, y: 1.3, z: 0 }, 0.3, 0.45, 0.3);
       if (Math.random() < 0.3) W.fireCore.spawn(firePos, { x: 0, y: 1.4, z: 0 }, 0.12, 0.35, 0.2);
       if (Math.random() < 0.14) W.embers.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.3, 1.6, 0.6);
       if (Math.random() < 0.09) W.smoke.spawn(tmpV.copy(firePos).setY(1.2), { x: 0.04, y: 0.5, z: 0 }, 0.2, 5.0, 0.1, 0.2, 1.0, 0.16);
-    }
+      if (W.fireBurst) {
+        W.fireBurst = false;
+        for (let i = 0; i < 8; i++) W.embers.spawn(firePos, { x: 0, y: 2.6, z: 0 }, 0.25, 1.4, 1.2);
+        for (let i = 0; i < 3; i++) W.fireCore.spawn(firePos, { x: 0, y: 1.8, z: 0 }, 0.15, 0.3, 0.3);
+      }
+    } else W.fireBurst = false;
   }
 
   /* ── 손에 든 것 ── */
@@ -192,11 +216,16 @@ function loop(now) {
 
   if (W.prints) W.prints.update(dt);
   W.sparks.update(dt);
-  W.steam.update(dt, 0.03); W.smoke.update(dt, 0.04); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
+  /* 연기·김은 바람을 따라 옆으로 흐른다 */
+  const wv = W.wind.value;
+  W.steam.update(dt, 0.01 + 0.04 * wv); W.smoke.update(dt, 0.015 + 0.06 * wv); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
   renderReflection(scene);
   ctx.post.render();
 }
 
 bindInput();
 $('#loading').classList.add('on');
-setTimeout(() => { buildScene(state.bg); $('#loading').classList.remove('on'); requestAnimationFrame(loop); }, 50);
+setTimeout(() => {
+  buildScene(state.bg);
+  precompileScene().then(() => { $('#loading').classList.remove('on'); requestAnimationFrame(loop); });
+}, 50);

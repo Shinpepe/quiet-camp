@@ -4,7 +4,7 @@ import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd } from './util.js';
 import { terrainH, shoreOff, WATER_Y } from './terrain.js';
 import { makeItem } from './props.js';
-import { buildScene } from './scene.js';
+import { buildScene, precompileScene } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
 
@@ -278,10 +278,14 @@ function renderMenu() {
   const tl = $('#timeList'); tl.innerHTML = '';
   Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { sfx('ui'); state.time = t.key; state.clock = t.clock; renderMenu(); const W = ctx.W; if (W.tm) { W.fireLit = W.tm.stars > 0.1; W.lanternLit = W.tm.lantern > 0.5; W.tentLampLit = W.tm.tentLamp > 0.5; } if (!ctx.running) menuAmbience(state.bg); }; tl.append(d); });
 }
-/* 씬 재구성은 동기라서, 로딩 오버레이가 화면에 먼저 그려지도록 한 틱 띄운다 */
+/* 씬 재구성은 동기라서, 로딩 오버레이가 화면에 먼저 그려지도록 한 틱 띄운다.
+   씬을 만든 뒤 셰이더 사전 컴파일이 끝나야 로딩을 내린다 (첫 점화·첫 유성에서 멈칫하지 않게) */
 function buildWithLoading(after) {
   $('#loading').classList.add('on');
-  setTimeout(() => { buildScene(state.bg); $('#loading').classList.remove('on'); after && after(); }, 40);
+  setTimeout(() => {
+    buildScene(state.bg);
+    precompileScene().then(() => { $('#loading').classList.remove('on'); after && after(); });
+  }, 40);
 }
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }

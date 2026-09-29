@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
-import { BG } from './data.js';
+import { BG, ITEMS } from './data.js';
 import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
-import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, contactShadow, Particles, Smoke, Sparks, Footprints, birdMat } from './props.js';
+import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints, birdMat } from './props.js';
 import { paramsAt, sunDirAt } from './time.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
@@ -46,6 +46,35 @@ export function rebakeEnv() {
     if (W.envRT) W.envRT.dispose();
     W.envRT = rt;
   } catch (e) { console.warn('IBL skipped', e); }
+}
+
+/* ── 사전 컴파일: 로딩 화면 뒤에서 셰이더를 미리 만든다 ──
+   - 숨겨진 것(불꽃·유성·오로라·스파클러 데칼 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다
+   - 손에 드는 아이템은 임시로 한 벌 만들어 같은 프로그램을 캐시에 올린다.
+     재질을 dispose 하면 프로그램도 해제되므로 임시 아이템은 지오메트리만 정리한다
+   - 물 반사는 클리핑 평면이 켜진 셰이더 변형이 따로 있어서, 반사 타깃에 한 번 실제로 그려서 만든다
+   - ctx.compiling 동안 메인 루프는 그리지 않는다 */
+export function precompileScene() {
+  const scene = ctx.scene, r = ctx.renderer, W = ctx.W; if (!scene) return Promise.resolve();
+  ctx.compiling = true;
+  const temp = new THREE.Group();
+  Object.keys(ITEMS).forEach(k => { const it = makeItem(k); if (it.userData.setLit) it.userData.setLit(true); temp.add(it); });
+  scene.add(temp);
+  const shown = []; scene.traverse(o => { if (!o.visible) { o.visible = true; shown.push(o); } });
+  const run = async () => {
+    await r.compileAsync(scene, ctx.camera);
+    /* compile 은 renderer.clippingPlanes 를 반영하지 않으므로, 반사 타깃에 한 번 실제로 그려서
+       클리핑 변형 셰이더를 만든다 (로딩 화면이 덮고 있어 보이지 않는다) */
+    if (W.water && settings.reflect && FINE && ctx.reflClip) {
+      r.clippingPlanes = ctx.reflClip; r.setRenderTarget(ctx.reflRT);
+      try { r.render(scene, ctx.camera); } finally { r.setRenderTarget(null); r.clippingPlanes = []; }
+    }
+  };
+  return run().catch(e => console.warn('precompile skipped', e)).finally(() => {
+    shown.forEach(o => { o.visible = false; });
+    scene.remove(temp); temp.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    ctx.compiling = false;
+  });
 }
 
 function makeAurora(W, scene) {
@@ -205,7 +234,11 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0 };
+  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
+    /* 바람(0..1): main.js 가 매 프레임 계산, 풀·나무 셰이더와 오디오가 같이 읽는다 */
+    wind: { value: 0.4 },
+    /* 모닥불: fireBase = 부드럽게 따라가는 기본 밝기, firePop = 오디오 파칙이 올려 주는 순간 밝기, fireBurst = 큰 파칙 → 불티 */
+    fireBase: 0, firePop: 0, fireBurst: false };
   scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
   ctx.renderer.toneMappingExposure = cur.exposure;
 

@@ -8,16 +8,17 @@ import { tex } from './textures.js';
 /* 모바일은 식생 밀도를 낮춘다 */
 const M = isTouch ? 0.55 : 1;
 
-/* 잎 재질: 바람 흔들림 + 역광 투과 + 림 라이트 + 아랫면 어두움 */
+/* 잎 재질: 바람 흔들림 + 역광 투과 + 림 라이트 + 아랫면 어두움.
+   흔들림 폭은 W.wind(0..1)를 따른다 — 바람 0.5 에서 예전과 같은 폭 */
 export function swayMat(extra, strength, from) {
   const W = ctx.W, mat = new THREE.MeshStandardMaterial(Object.assign({ vertexColors: true, roughness: 0.95 }, extra || {}));
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uTime = W.uTime; sh.uniforms.uSunV = W.uSunV; sh.uniforms.uLeafCol = W.uLeafCol;
-    sh.vertexShader = 'uniform float uTime;varying vec3 vWN;\n' + sh.vertexShader
+    sh.uniforms.uTime = W.uTime; sh.uniforms.uSunV = W.uSunV; sh.uniforms.uLeafCol = W.uLeafCol; sh.uniforms.uWind = W.wind;
+    sh.vertexShader = 'uniform float uTime;uniform float uWind;varying vec3 vWN;\n' + sh.vertexShader
       .replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\nvWN=inverseTransformDirection(transformedNormal,viewMatrix);')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
     #ifdef USE_INSTANCING
-    vec3 ip=instanceMatrix[3].xyz;float hh=max(transformed.y-${from.toFixed(2)},0.0);float sw=(sin(uTime*0.9+ip.x*0.25+ip.z*0.2)+0.5*sin(uTime*2.3+ip.x*0.9))*${strength.toFixed(4)}*hh;transformed.x+=sw;transformed.z+=sw*0.6;
+    vec3 ip=instanceMatrix[3].xyz;float hh=max(transformed.y-${from.toFixed(2)},0.0);float sw=(sin(uTime*0.9+ip.x*0.25+ip.z*0.2)+0.5*sin(uTime*2.3+ip.x*0.9))*${strength.toFixed(4)}*hh*(0.35+1.3*uWind);transformed.x+=sw;transformed.z+=sw*0.6;
     #endif`);
     sh.fragmentShader = 'uniform vec3 uSunV,uLeafCol;varying vec3 vWN;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -234,12 +235,13 @@ export function makeVegetation(cfg) {
     const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.3 && cfg.water) continue;
     c.copy(base).multiplyScalar(rnd(0.7, 1.25)); list.push({ x, y: h - 0.02, z, s: rnd(0.6, 1.4), sy: rnd(0.8, 1.3), rot: rnd(0, 6.3), tint: [c.r, c.g, c.b] });
   }
+  /* 풀: 돌풍 세기는 W.wind 를 따르고, 위치마다 약간의 변화만 남긴다 */
   const gm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide });
   gm.onBeforeCompile = sh => {
-    sh.uniforms.uTime = W.uTime; sh.uniforms.uSunV = W.uSunV; sh.uniforms.uLeafCol = W.uLeafCol; sh.uniforms.uGroundCol = { value: new THREE.Color(cfg.ground).multiplyScalar(0.85) };
-    sh.vertexShader = 'uniform float uTime;varying float vGH;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.wind; sh.uniforms.uSunV = W.uSunV; sh.uniforms.uLeafCol = W.uLeafCol; sh.uniforms.uGroundCol = { value: new THREE.Color(cfg.ground).multiplyScalar(0.85) };
+    sh.vertexShader = 'uniform float uTime;uniform float uWind;varying float vGH;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
     vGH=position.y/0.5;
-    vec3 ip=instanceMatrix[3].xyz;float gust=0.6+0.4*sin(uTime*0.35+ip.x*0.05+ip.z*0.08);float sw=(sin(uTime*1.7+ip.x*0.7+ip.z*0.5)+0.5*sin(uTime*3.4+ip.x*1.3+ip.z*0.4))*gust;float k=transformed.y*transformed.y*4.0;transformed.x+=sw*0.1*k;transformed.z+=sw*0.05*k;`);
+    vec3 ip=instanceMatrix[3].xyz;float gust=(0.25+1.0*uWind)*(0.85+0.15*sin(uTime*0.35+ip.x*0.05+ip.z*0.08));float sw=(sin(uTime*1.7+ip.x*0.7+ip.z*0.5)+0.5*sin(uTime*3.4+ip.x*1.3+ip.z*0.4))*gust;float k=transformed.y*transformed.y*4.0;transformed.x+=sw*0.1*k;transformed.z+=sw*0.05*k;`);
     sh.fragmentShader = 'uniform vec3 uSunV,uLeafCol,uGroundCol;varying float vGH;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         diffuseColor.rgb=mix(uGroundCol,diffuseColor.rgb,smoothstep(0.0,0.5,vGH));`)

@@ -10,6 +10,8 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { ctx, settings } from './state.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
+/* AgX 는 ACES 보다 채도·대비가 낮게 나온다. 시간대별 grade 값은 그대로 두고 여기서 한꺼번에 보정 */
+const AGX_SAT = 0.1, AGX_CON = 0.04;
 
 /* RenderPass → GTAO → Bokeh(사진) → Bloom → OutputPass → SMAA → Grade
    SMAA: MSAA 가 못 잡는 표면 하이라이트 앨리어싱(얇은 크롬·clearcoat 반짝임)을 화면 공간에서 부드럽게. LDR 인 OutputPass 뒤에 둔다
@@ -58,7 +60,7 @@ export function createPost(renderer, camera) {
     setScene(scene) { renderPass.scene = scene; gtao.scene = scene; bokeh.scene = scene; },
     setTime(tm) {
       const g = tm.grade, mul = ctx.W.cfg ? (ctx.W.cfg.bloomMul || 1) : 1;
-      grade.uniforms.tint.value.set(...g.tint); grade.uniforms.sat.value = g.sat; grade.uniforms.con.value = g.con; bloom.strength = g.bloom * mul;
+      grade.uniforms.tint.value.set(...g.tint); grade.uniforms.sat.value = g.sat + AGX_SAT; grade.uniforms.con.value = g.con + AGX_CON; bloom.strength = g.bloom * mul;
       hueTint(grade.uniforms.sTint.value, tm.top, 0.16); hueTint(grade.uniforms.hTint.value, tm.sunColor, 0.2);
     },
     setBloom(on) { bloom.enabled = on; }, setAO(on) { gtao.enabled = on; },

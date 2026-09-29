@@ -4,12 +4,14 @@ import { BG } from './data.js';
 import { rnd } from './util.js';
 
 /* ── 방향: 힐링 캠핑. 모든 소리는 멀리·부드럽게·드물게. 날카로운 고역 없음, 긴 어택, 밤엔 더 뜸하게.
-   버스: world(환경·위치음, 실내 필터+초기반사) / sfx(손·몸 근처) / ui(메뉴·셔터, 컴프레서 우회) ── */
+   버스: world(환경·위치음, 실내 필터) / sfx(손·몸 근처) / ui(메뉴·셔터, 컴프레서 우회)
+   공간 잔향: world 와 sfx 가 같은 절차적 임펄스 응답을 공유한다 (텐트·차·숲·해변·설원) ── */
 
-let AC = null, master, comp, worldLP, worldGain, roomIn, sfxBus, uiBus;
-let whiteBuf = null, brownBuf = null;
+let AC = null, master, comp, worldLP, worldGain, sfxBus, uiBus, verb = null;
+const bufs = {}, irCache = {};
 let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false;
 let fire = null, water = null, lamps = null, spark = null, engine = null, engineDone = false;
+let windAcc = 0, lastWind = 0, lastGust = -99;
 const flockAudio = new Map();
 const _f = new THREE.Vector3(), _u = new THREE.Vector3();
 const isNight = c => c < 0.22 || c > 0.8;
@@ -19,36 +21,84 @@ const killT = list => { list.forEach(clearTimeout); list.length = 0; };
 export function initAudio() {
   if (AC) return;
   AC = new (window.AudioContext || window.webkitAudioContext)();
-  whiteBuf = brownBuf = null;
+  for (const k in bufs) delete bufs[k]; for (const k in irCache) delete irCache[k];
   master = gainN(settings.vol); master.connect(AC.destination);
   comp = AC.createDynamicsCompressor(); comp.threshold.value = -16; comp.knee.value = 14; comp.ratio.value = 2.5; comp.attack.value = 0.015; comp.release.value = 0.3; comp.connect(master);
   worldLP = filt('lowpass', 20000); worldGain = gainN(1); worldLP.connect(worldGain); worldGain.connect(comp);
-  /* 실내(텐트·차) 초기 반사: 짧은 딜레이 세 줄 */
-  roomIn = gainN(0); worldGain.connect(roomIn);
-  [[0.011, 0.5], [0.017, 0.35], [0.029, 0.25]].forEach(([d, g]) => { const dl = AC.createDelay(0.1); dl.delayTime.value = d; const fb = gainN(0.22), out = gainN(g), lp = filt('lowpass', 2500); roomIn.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(out); out.connect(comp); });
   sfxBus = gainN(1); sfxBus.connect(comp);
   uiBus = gainN(0.8); uiBus.connect(master);
+  /* 잔향 입력: world 전부 + sfx 는 조금 덜 (손 근처 소리는 직접음이 더 커야 한다) */
+  const vin = gainN(1), sfxSend = gainN(0.7); worldGain.connect(vin); sfxBus.connect(sfxSend); sfxSend.connect(vin);
+  verb = { in: vin, slot: null, key: null };
 }
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.setTargetAtTime(v, AC.currentTime, 0.03); }
+
+/* ── 공간 잔향: 감쇠하는 저역통과 노이즈로 임펄스 응답을 만든다. 설원은 먼 산에서 되돌아오는 메아리 두 번 ──
+   dur: 길이(초), decay: 감쇠 곡선 지수(클수록 빨리 죽음), lp: 잔향 음색(Hz), wet: 잔향 크기 */
+const SPACE = {
+  tent:   { dur: 0.35, decay: 4,   lp: 2500, wet: 0.45 },
+  car:    { dur: 0.25, decay: 5,   lp: 1800, wet: 0.5 },
+  forest: { dur: 1.8,  decay: 3,   lp: 5000, wet: 0.12 },
+  beach:  { dur: 1.2,  decay: 3.5, lp: 4000, wet: 0.06 },
+  snow:   { dur: 2.5,  decay: 2,   lp: 3000, wet: 0.08, echo: [[0.32, 0.35], [0.74, 0.2]] },
+};
+const OUTDOOR = { lake: 'forest', beach: 'beach', snow: 'snow' };
+function makeIR(sp) {
+  const sr = AC.sampleRate, len = Math.floor(sr * sp.dur), b = AC.createBuffer(2, len, sr), k = Math.exp(-2 * Math.PI * sp.lp / sr);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = b.getChannelData(ch); let lp = 0;
+    for (let i = 0; i < len; i++) { lp = lp * k + (Math.random() * 2 - 1) * (1 - k); d[i] = lp * Math.pow(1 - i / len, sp.decay); }
+    /* 메아리: 좌우를 3% 어긋나게 두어 넓게 퍼지게 */
+    if (sp.echo) sp.echo.forEach(([at, g]) => {
+      const i0 = Math.floor(at * sr * (ch ? 1.03 : 1)), n = Math.floor(0.03 * sr); let e = 0;
+      for (let i = 0; i < n && i0 + i < len; i++) { e = e * k + (Math.random() * 2 - 1) * (1 - k); d[i0 + i] += e * g * 2 * (1 - i / n); }
+    });
+  }
+  return b;
+}
+/* 공간이 바뀌면 새 컨볼버를 만들어 크로스페이드하고, 이전 것은 잔향 꼬리가 끝난 뒤 정리한다 */
+function setSpace(key) {
+  if (!verb || !key || verb.key === key) return;
+  const sp = SPACE[key], t = AC.currentTime, old = verb.slot, oldDur = verb.key ? SPACE[verb.key].dur : 0; verb.key = key;
+  const c = AC.createConvolver(); c.buffer = irCache[key] || (irCache[key] = makeIR(sp));
+  const w = gainN(0); verb.in.connect(c); c.connect(w); w.connect(comp); w.gain.setTargetAtTime(sp.wet, t, 0.15);
+  verb.slot = { c, w };
+  if (old) { old.w.gain.cancelScheduledValues(t); old.w.gain.setTargetAtTime(0, t, 0.15); setTimeout(() => kill([old.c, old.w]), (oldDur + 1.5) * 1000); }
+}
 function applyWorld() {
   if (!AC) return; const t = AC.currentTime;
   worldGain.gain.setTargetAtTime((menuMode ? 0.35 : 1) * (indoor ? 0.5 : 1), t, 0.2);
   worldLP.frequency.setTargetAtTime(indoor ? 1300 : 20000, t, 0.15);
-  roomIn.gain.setTargetAtTime(indoor ? 0.5 : 0, t, 0.2);
+  const out = ctx.W.cfg ? OUTDOOR[ctx.W.cfg.key] : 'forest';
+  setSpace(indoor ? (state.seat === 'car' ? 'car' : 'tent') : out || 'forest');
 }
 export function setIndoor(on) { indoor = !!on; applyWorld(); }
 
-/* ── 재료 ── */
-function noiseBuf(brown) {
-  if (brown && brownBuf) return brownBuf; if (!brown && whiteBuf) return whiteBuf;
-  const len = AC.sampleRate * 8, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0); let last = 0;
-  for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; if (brown) { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } else d[i] = w; }
-  if (brown) { /* 루프 이음새 제거 + DC 제거 */ const drift = d[len - 1] - d[0]; let mean = 0; for (let i = 0; i < len; i++) { d[i] -= drift * i / len; mean += d[i]; } mean /= len; for (let i = 0; i < len; i++) d[i] -= mean; }
-  if (brown) brownBuf = b; else whiteBuf = b; return b;
+/* ── 재료: 노이즈 버퍼 세 종류 ──
+   white: 날카로운 쉭 / pink: 자연음 대부분(잎·물거품·불) / brown: 먹먹한 바람·럼블
+   예전 호출과 호환: true = brown, false·생략 = white */
+const kindOf = k => k === true ? 'brown' : typeof k === 'string' ? k : 'white';
+function noiseBuf(kind) {
+  kind = kindOf(kind); if (bufs[kind]) return bufs[kind];
+  const len = AC.sampleRate * 8, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0);
+  if (kind === 'white') for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  else if (kind === 'pink') {
+    /* Paul Kellet 필터 */
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362; b6 = w * 0.115926;
+    }
+  } else { let last = 0; for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } }
+  if (kind !== 'white') { /* 루프 이음새 제거 + DC 제거 */ const drift = d[len - 1] - d[0]; let mean = 0; for (let i = 0; i < len; i++) { d[i] -= drift * i / len; mean += d[i]; } mean /= len; for (let i = 0; i < len; i++) d[i] -= mean; }
+  if (kind === 'pink') { /* 화이트와 같은 RMS 로 맞춰 게인 감각을 유지 (2~4kHz 대역에서 거의 같은 크기) */ let s = 0; for (let i = 0; i < len; i++) s += d[i] * d[i]; const g = 0.577 / Math.sqrt(s / len); for (let i = 0; i < len; i++) d[i] *= g; }
+  return bufs[kind] = b;
 }
 const off = () => Math.random() * 6;
-const noise = (brown, loop) => { const s = AC.createBufferSource(); s.buffer = noiseBuf(brown); s.loop = !!loop; return s; };
+const noise = (kind, loop) => { const s = AC.createBufferSource(); s.buffer = noiseBuf(kind); s.loop = !!loop; return s; };
 const filt = (type, f, q) => { const n = AC.createBiquadFilter(); n.type = type; n.frequency.value = f; if (q !== undefined) n.Q.value = q; return n; };
 const gainN = v => { const g = AC.createGain(); g.gain.value = v; return g; };
 const osc = (type, f) => { const o = AC.createOscillator(); o.type = type || 'sine'; o.frequency.value = f; return o; };
@@ -57,7 +107,8 @@ const env = (g, t, a, peak, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.lin
 const lfo = (hz, depth, target) => { const o = osc('sine', hz), g = gainN(depth); o.connect(g); g.connect(target); o.start(); return [o, g]; };
 const spanner = v => { const p = AC.createStereoPanner(); p.pan.value = v === undefined ? rnd(-0.7, 0.7) : v; p.connect(worldLP); return p; };
 function setPos(n, x, y, z) { if (n.positionX) { n.positionX.value = x; n.positionY.value = y; n.positionZ.value = z; } else n.setPosition(x, y, z); }
-function panner(x, y, z, ref, max, roll) { const p = AC.createPanner(); p.panningModel = 'equalpower'; p.distanceModel = 'inverse'; p.refDistance = ref; p.maxDistance = max; p.rolloffFactor = roll; setPos(p, x, y, z); p.connect(worldLP); return p; }
+/* HRTF: 헤드폰에서 앞뒤·위아래까지 구분된다 */
+function panner(x, y, z, ref, max, roll) { const p = AC.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = ref; p.maxDistance = max; p.rolloffFactor = roll; setPos(p, x, y, z); p.connect(worldLP); return p; }
 function kill(nodes) { nodes.forEach(n => { try { n.stop && n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} }); }
 /* 먼 곳의 일회성 음원: 카메라 주변 dist 미터 랜덤 방향, 거리만큼 고역이 깎임. dur 뒤 자동 정리 */
 function farSrc(dist, dur, y) {
@@ -65,8 +116,8 @@ function farSrc(dist, dur, y) {
   const lp = filt('lowpass', Math.max(1600, 8000 - dist * 90)); lp.connect(p);
   setTimeout(() => kill([lp, p]), (dur + 1) * 1000); return lp;
 }
-function burst(dest, brown, type, f0, q, a, peak, d, t, f1, sweepT) {
-  const s = noise(brown), f = filt(type, f0, q), g = gainN(0); if (f1 !== undefined) { f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + (sweepT || d)); }
+function burst(dest, kind, type, f0, q, a, peak, d, t, f1, sweepT) {
+  const s = noise(kind), f = filt(type, f0, q), g = gainN(0); if (f1 !== undefined) { f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + (sweepT || d)); }
   env(g, t, a, peak, d); chain(s, f, g, dest); s.start(t, off()); s.stop(t + a + d + 0.05); return s;
 }
 function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine', f0), g = gainN(0); if (f1) { o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + a + d); } env(g, t, a, peak, d); o.connect(g); g.connect(dest); o.start(t); o.stop(t + a + d + 0.05); return o; }
@@ -74,13 +125,15 @@ function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine',
 /* ── 위치 음원 ── */
 function makeFireSrc() {
   const pan = panner(0.3, 0.6, -1.4, 1.6, 45, 1.1), g = gainN(0), t = []; g.connect(pan);
-  const rum = noise(true, true), rl = filt('lowpass', 160), rg = gainN(0.2); chain(rum, rl, rg, g); rum.start(0, off());
-  const fl = noise(false, true), ff = filt('bandpass', 420, 0.9), fg = gainN(0.03); chain(fl, ff, fg, g); fl.start(0, off());   // 불꽃 펄럭임
-  const hs = noise(false, true), hf = filt('bandpass', 1400, 0.6), hg = gainN(0.018); chain(hs, hf, hg, g); hs.start(0, off());  // 잔잔한 쉭
-  const src = { pan, gain: g, t, nodes: [rum, rl, rg, fl, ff, fg, hs, hf, hg, ...lfo(4.3, 0.018, fg.gain), ...lfo(0.37, 0.01, fg.gain), ...lfo(0.6, 0.007, hg.gain), g, pan] };
+  const rum = noise('brown', true), rl = filt('lowpass', 160), rg = gainN(0.2); chain(rum, rl, rg, g); rum.start(0, off());
+  const fl = noise('pink', true), ff = filt('bandpass', 420, 0.9), fg = gainN(0.012); chain(fl, ff, fg, g); fl.start(0, off());   // 불꽃 펄럭임
+  const hs = noise('pink', true), hf = filt('bandpass', 1400, 0.6), hg = gainN(0.013); chain(hs, hf, hg, g); hs.start(0, off());  // 잔잔한 쉭
+  const src = { pan, gain: g, t, nodes: [rum, rl, rg, fl, ff, fg, hs, hf, hg, ...lfo(4.3, 0.007, fg.gain), ...lfo(0.37, 0.004, fg.gain), ...lfo(0.6, 0.005, hg.gain), g, pan] };
   fire = src;
+  /* 파칙: 소리를 내는 순간 화면에도 알린다 → main.js 가 불빛을 번쩍이고, 큰 파칙이면 불티를 솟게 한다 */
   const pop = big => {
-    const now = AC.currentTime;
+    const now = AC.currentTime, W = ctx.W;
+    W.firePop = Math.max(W.firePop || 0, big ? 1 : rnd(0.12, 0.3)); if (big) W.fireBurst = true;
     if (big) { burst(g, false, 'lowpass', rnd(320, 600), 1, 0.004, rnd(0.12, 0.2), 0.14, now); for (let i = 0; i < 2; i++) burst(g, false, 'highpass', rnd(2200, 3800), 1, 0.002, rnd(0.02, 0.04), 0.03, now + 0.04 + Math.random() * 0.12); }
     else burst(g, false, 'bandpass', rnd(1300, 3200), 1.6, 0.003, rnd(0.04, 0.09), 0.05, now);
   };
@@ -89,16 +142,16 @@ function makeFireSrc() {
 /* 파도: 밀려오고(저역 상승) → 부서지고 → 빠지는(hiss 감쇠) 이벤트 두 줄이 엇갈려 반복. 호수: 잔잔한 찰랑임 */
 function makeWaterSrc(type, z) {
   const pan = panner(0, 0, z, 6, 160, 0.9), t = [], nodes = [pan];
-  const bs = noise(true, true), bf = filt('lowpass', type === 'waves' ? 420 : 340), bg = gainN(type === 'waves' ? 0.12 : 0.08); chain(bs, bf, bg, pan); bs.start(0, off()); nodes.push(bs, bf, bg, ...lfo(0.07, type === 'waves' ? 0.05 : 0.03, bg.gain));
+  const bs = noise('brown', true), bf = filt('lowpass', type === 'waves' ? 420 : 340), bg = gainN(type === 'waves' ? 0.12 : 0.08); chain(bs, bf, bg, pan); bs.start(0, off()); nodes.push(bs, bf, bg, ...lfo(0.07, type === 'waves' ? 0.05 : 0.03, bg.gain));
   const src = { pan, z, t, nodes }; water = src;
   if (type === 'waves') {
     const wave = () => {
       const now = AC.currentTime, d = rnd(1.8, 2.6);
-      const s = noise(true), f = filt('lowpass', 220), g = gainN(0); chain(s, f, g, pan);
+      const s = noise('brown'), f = filt('lowpass', 220), g = gainN(0); chain(s, f, g, pan);
       f.frequency.setValueAtTime(220, now); f.frequency.exponentialRampToValueAtTime(1100, now + d); f.frequency.exponentialRampToValueAtTime(300, now + d + 3);
       g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(rnd(0.2, 0.3), now + d); g.gain.exponentialRampToValueAtTime(0.0001, now + d + 3.5);
       s.start(now, off()); s.stop(now + d + 3.6);
-      const h = noise(false), hf = filt('bandpass', 2400, 0.5), hg = gainN(0); chain(h, hf, hg, pan);
+      const h = noise('pink'), hf = filt('bandpass', 2400, 0.5), hg = gainN(0); chain(h, hf, hg, pan);
       hg.gain.setValueAtTime(0.0001, now + d - 0.3); hg.gain.exponentialRampToValueAtTime(rnd(0.035, 0.055), now + d + 0.2); hg.gain.exponentialRampToValueAtTime(0.0001, now + d + 5);
       h.start(now + d - 0.3, off()); h.stop(now + d + 5.1);
     };
@@ -106,11 +159,11 @@ function makeWaterSrc(type, z) {
     const loopB = () => { if (water !== src) return; wave(); sched(t, loopB, rnd(7000, 12000)); };
     loopA(); sched(t, loopB, 4200);
   } else {
-    const lap = () => { if (water !== src) return; burst(pan, true, 'lowpass', rnd(500, 900), 1, 0.08, rnd(0.03, 0.06), 0.5, AC.currentTime, rnd(250, 400), 0.5); sched(t, lap, rnd(1800, 5200)); }; lap();
+    const lap = () => { if (water !== src) return; burst(pan, 'brown', 'lowpass', rnd(500, 900), 1, 0.08, rnd(0.03, 0.06), 0.5, AC.currentTime, rnd(250, 400), 0.5); sched(t, lap, rnd(1800, 5200)); }; lap();
   }
 }
 function makeHiss(x, y, z) {
-  const pan = panner(x, y, z, 0.5, 8, 2.2), g = gainN(0), s = noise(false, true), f = filt('bandpass', 3000, 1.5), ig = gainN(0.006);
+  const pan = panner(x, y, z, 0.5, 8, 2.2), g = gainN(0), s = noise('white', true), f = filt('bandpass', 3000, 1.5), ig = gainN(0.006);
   chain(s, f, ig, g, pan); s.start(0, off()); return { gain: g, nodes: [s, f, ig, g, pan, ...lfo(8, 0.0015, ig.gain)] };
 }
 /* 방금 도착한 차: 2분 남짓 엔진이 식으며 틱틱 */
@@ -140,7 +193,7 @@ function killSpatial() {
 export function setSparkler(on) {
   if (!AC) return;
   if (on && !spark) {
-    const g = gainN(0), s = noise(false, true), f = filt('bandpass', 5000, 0.8), ig = gainN(0.03); chain(s, f, ig, g, sfxBus); s.start(0, off());
+    const g = gainN(0), s = noise('white', true), f = filt('bandpass', 5000, 0.8), ig = gainN(0.03); chain(s, f, ig, g, sfxBus); s.start(0, off());
     g.gain.setTargetAtTime(1, AC.currentTime, 0.1);
     const st = { gain: g, nodes: [s, f, ig, g], t: [] };
     const crack = () => { if (spark !== st) return; burst(g, false, 'bandpass', rnd(4500, 8000), 2, 0.002, rnd(0.02, 0.05), 0.02, AC.currentTime); sched(st.t, crack, rnd(20, 80)); }; crack();
@@ -162,19 +215,20 @@ function cricketVoice(out, nodes, timers) {
     sched(timers, chirp, (Math.random() < 0.12 ? rnd(3, 8) : per * rnd(0.9, 1.1)) * 1000); };
   sched(timers, chirp, rnd(0, 1500));
 }
+/* 바람 베드의 크기·음색과 잎 스침은 updateAudio 가 W.wind 를 따라 움직인다 (예전의 고정 LFO 대신) */
 function makeBed(type, timeKey) {
   const out = gainN(0.0001), nodes = [out], timers = []; out.connect(worldLP);
-  const wind = (f, g0, l1, l2) => { const s = noise(true, true), f1 = filt('lowpass', f), g = gainN(g0); chain(s, f1, g, out); s.start(0, off()); const [a, ag] = lfo(0.045, l1, f1.frequency), [b, bg] = lfo(0.11, l2, g.gain); nodes.push(s, f1, g, a, ag, b, bg); return b; };
-  if (type === 'wind') wind(380, 0.16, 220, 0.06);
-  else if (type === 'waves') wind(280, 0.035, 60, 0.012);
+  const bed = { out, nodes, timers, type, timeKey, wind: null, leaves: null };
+  const wind = (f, g0, l1) => { const s = noise('brown', true), f1 = filt('lowpass', f), g = gainN(g0); chain(s, f1, g, out); s.start(0, off()); const [a, ag] = lfo(0.045, l1, f1.frequency); nodes.push(s, f1, g, a, ag); return { g, f: f1, g0, f0: f }; };
+  if (type === 'wind') bed.wind = wind(380, 0.16, 220);
+  else if (type === 'waves') bed.wind = wind(280, 0.035, 60);
   else {
-    const gustOsc = wind(340, 0.045, 90, 0.018);
-    /* 잎 스침: 바람 게인과 같은 LFO 를 공유해 돌풍을 따라 올라온다 */
-    const lv = noise(false, true), lf = filt('bandpass', 3000, 0.7), lg = gainN(0.006), lm = gainN(0.005); chain(lv, lf, lg, out); lv.start(0, off()); gustOsc.connect(lm); lm.connect(lg.gain); nodes.push(lv, lf, lg, lm);
+    bed.wind = wind(340, 0.045, 90);
+    const lv = noise('pink', true), lf = filt('bandpass', 3000, 0.7), lg = gainN(0.006); chain(lv, lf, lg, out); lv.start(0, off()); nodes.push(lv, lf, lg); bed.leaves = lg.gain;
     if (timeKey === 'night') for (let i = 0; i < 5; i++) cricketVoice(out, nodes, timers);
-    else { const s = noise(true, true), f = filt('lowpass', 900), g = gainN(0.015); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.008, g.gain)); }
+    else { const s = noise('brown', true), f = filt('lowpass', 900), g = gainN(0.015); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.008, g.gain)); }
   }
-  return { out, nodes, timers, type, timeKey };
+  return bed;
 }
 const killBed = b => { if (!b) return; killT(b.timers); kill(b.nodes); };
 function startAmb(type, timeKey) {
@@ -190,7 +244,8 @@ export function startAmbience(type, timeKey) { if (!AC) return; menuMode = false
 export function menuAmbience(bgKey) { if (!AC || !ctx.W.cfg) return; menuMode = true; indoor = false; applyWorld(); startAmb(BG[bgKey].ambience, isNight(state.clock) ? 'night' : 'day'); }
 export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); }
 
-/* ── 간헐 이벤트: 낮 9~26초, 밤 14~40초. 일부 확률은 일부러 비워 둔다(침묵도 소리) ── */
+/* ── 간헐 이벤트: 낮 9~26초, 밤 14~40초. 일부 확률은 일부러 비워 둔다(침묵도 소리).
+   돌풍은 여기서 빠지고 바람 값(W.wind)이 솟을 때 updateAudio 가 낸다 ── */
 function startEvents(type, timeKey) {
   clearTimeout(evTimer);
   const night = timeKey === 'night';
@@ -200,11 +255,11 @@ function startEvents(type, timeKey) {
 function playEvent(type, timeKey) {
   if (!AC || ctx.paused) return; const r = Math.random(), night = timeKey === 'night';
   if (state.seat === 'dock' && Math.random() < 0.4) ropeCreak();
-  if (type === 'waves') { if (!night && r < 0.5) gull(); else if (r < 0.8) gust(0.35, type); else if (night && r < 0.92) foghorn(); }
+  if (type === 'waves') { if (!night && r < 0.5) gull(); else if (night && r >= 0.8 && r < 0.92) foghorn(); }
   else if (type === 'forest') {
-    if (!night) { if (r < 0.55) chirp(); else if (r < 0.68) woodpecker(); else if (r < 0.85) gust(0.3, type); }
-    else { if (r < 0.35) owl(); else if (r < 0.45) loon(); else if (r < 0.75) gust(0.25, type); else if (r < 0.85) creak(); }
-  } else { if (r < 0.55) gust(0.7, type); else if (r < 0.75) snowSlide(); else if (r < 0.85) creak(); }
+    if (!night) { if (r < 0.55) chirp(); else if (r < 0.68) woodpecker(); }
+    else { if (r < 0.35) owl(); else if (r < 0.45) loon(); else if (r >= 0.75 && r < 0.85) creak(); }
+  } else { if (r >= 0.55 && r < 0.75) snowSlide(); else if (r >= 0.75 && r < 0.85) creak(); }
 }
 function dawnChorus() { for (let i = 0; i < 10; i++) setTimeout(() => { if (bed && bed.timeKey === 'day') chirp(rnd(10, 40)); }, 1500 + i * rnd(1800, 3200)); }
 function chirp(dist) {
@@ -231,26 +286,43 @@ function woodpecker() { const n = 7 + Math.floor(Math.random() * 4), t0 = AC.cur
 function owl() { const t0 = AC.currentTime, out = farSrc(rnd(20, 60), 1.4, 6); [0, 0.55].forEach((d, i) => { const t = t0 + d, o = osc('sine', 400), o2 = osc('sine', 800), g2 = gainN(0.1), f = filt('lowpass', 800), g = gainN(0); o.frequency.setValueAtTime(400, t); o.frequency.exponentialRampToValueAtTime(340, t + 0.4); o2.frequency.setValueAtTime(800, t); o2.frequency.exponentialRampToValueAtTime(680, t + 0.4); o.connect(g); o2.connect(g2); g2.connect(g); env(g, t, 0.1, i ? 0.06 : 0.07, 0.4); chain(g, f, out); o.start(t); o2.start(t); o.stop(t + 0.55); o2.stop(t + 0.55); }); }
 function loon() { const t = AC.currentTime, out = farSrc(rnd(40, 90), 2, 2), o = osc('sine', 620), g = gainN(0); o.frequency.setValueAtTime(620, t); o.frequency.exponentialRampToValueAtTime(980, t + 0.6); o.frequency.exponentialRampToValueAtTime(600, t + 1.5); const v = osc('sine', 5), vg = gainN(15); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 1.7); env(g, t, 0.35, 0.05, 1.2); o.connect(g); g.connect(out); o.start(t); o.stop(t + 1.7); }
 function gust(k, type) {
-  const t = AC.currentTime, pan = spanner(), s = noise(true), f = filt('bandpass', 250, 0.8), g = gainN(0);
+  const t = AC.currentTime, pan = spanner(), s = noise('brown'), f = filt('bandpass', 250, 0.8), g = gainN(0);
   f.frequency.setValueAtTime(250, t); f.frequency.linearRampToValueAtTime(900, t + 1.8); f.frequency.linearRampToValueAtTime(300, t + 4.0);
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16 * k, t + 1.7); g.gain.linearRampToValueAtTime(0, t + 4.2); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 4.4);
-  if (type === 'forest') { const l = noise(false), lf = filt('bandpass', 3200, 0.7), lg = gainN(0); lg.gain.setValueAtTime(0, t + 0.4); lg.gain.linearRampToValueAtTime(0.012 * k, t + 2.0); lg.gain.linearRampToValueAtTime(0, t + 4.2); chain(l, lf, lg, pan); l.start(t, off()); l.stop(t + 4.4); }
-  if (type === 'wind') { /* 텐트 천 펄럭임 */ const p = panner(-1.6, 1.0, 1.2, 1.5, 20, 1.2), fl = noise(false), ff = filt('lowpass', 700), fg = gainN(0), am = gainN(0); fg.gain.setValueAtTime(0, t + 0.6); fg.gain.linearRampToValueAtTime(0.04 * k, t + 1.8); fg.gain.linearRampToValueAtTime(0, t + 4.0); const [lo, lg2] = lfo(rnd(6, 9), 0.02 * k, fg.gain); chain(fl, ff, fg, p); fl.start(t, off()); fl.stop(t + 4.2); setTimeout(() => kill([lo, lg2, p, am]), 4500); }
+  if (type === 'forest') { const l = noise('pink'), lf = filt('bandpass', 3200, 0.7), lg = gainN(0); lg.gain.setValueAtTime(0, t + 0.4); lg.gain.linearRampToValueAtTime(0.012 * k, t + 2.0); lg.gain.linearRampToValueAtTime(0, t + 4.2); chain(l, lf, lg, pan); l.start(t, off()); l.stop(t + 4.4); }
+  if (type === 'wind') { /* 텐트 천 펄럭임 */ const p = panner(-1.6, 1.0, 1.2, 1.5, 20, 1.2), fl = noise('white'), ff = filt('lowpass', 700), fg = gainN(0), am = gainN(0); fg.gain.setValueAtTime(0, t + 0.6); fg.gain.linearRampToValueAtTime(0.04 * k, t + 1.8); fg.gain.linearRampToValueAtTime(0, t + 4.0); const [lo, lg2] = lfo(rnd(6, 9), 0.02 * k, fg.gain); chain(fl, ff, fg, p); fl.start(t, off()); fl.stop(t + 4.2); setTimeout(() => kill([lo, lg2, p, am]), 4500); }
 }
 function foghorn() { const t = AC.currentTime, p = panner(-160, 15, -70, 60, 800, 0.6), lp = filt('lowpass', 500); lp.connect(p); const o = osc('sine', 95), o2 = osc('sine', 190), g2 = gainN(0.25), g = gainN(0); o.connect(g); o2.connect(g2); g2.connect(g); g.connect(lp); env(g, t, 0.6, 0.06, 2.6); o.start(t); o2.start(t); o.stop(t + 3.4); o2.stop(t + 3.4); setTimeout(() => kill([lp, p]), 4000); }
 function snowSlide() { const t = AC.currentTime, out = farSrc(rnd(40, 120), 1.5, 20); burst(out, false, 'lowpass', 900, 1, 0.25, 0.14, 0.8, t, 300, 0.9); }
 function creak() { const t = AC.currentTime, pan = spanner(rnd(-0.4, 0.4)); burst(pan, false, 'lowpass', 350, 1, 0.08, 0.035, 0.3, t); tone(pan, 95, 70, 0.08, 0.02, 0.3, t); }
-function ropeCreak() { const t = AC.currentTime, p = panner(5.2, 0.4, -18.6, 1, 12, 1.5); tone(p, rnd(150, 200), rnd(110, 140), 0.12, 0.025, 0.35, t); burst(p, true, 'lowpass', 600, 1, 0.1, 0.03, 0.4, t); setTimeout(() => kill([p]), 1200); }
+function ropeCreak() { const t = AC.currentTime, p = panner(5.2, 0.4, -18.6, 1, 12, 1.5); tone(p, rnd(150, 200), rnd(110, 140), 0.12, 0.025, 0.35, t); burst(p, 'brown', 'lowpass', 600, 1, 0.1, 0.03, 0.4, t); setTimeout(() => kill([p]), 1200); }
 
-/* ── 매 프레임: 리스너, 불·랜턴 게인, 물 위치, 새떼 ── */
+/* ── 매 프레임: 리스너, 불·랜턴 게인, 물 위치, 바람, 새떼 ── */
+const GUST_K = { waves: 0.35, forest: 0.3, wind: 0.7 };
 export function updateAudio(dt) {
   if (!AC || !ctx.camera) return; const cam = ctx.camera, L = AC.listener, W = ctx.W, t = AC.currentTime;
   cam.getWorldDirection(_f); _u.set(0, 1, 0).applyQuaternion(cam.quaternion);
   if (L.positionX) { L.positionX.value = cam.position.x; L.positionY.value = cam.position.y; L.positionZ.value = cam.position.z; L.forwardX.value = _f.x; L.forwardY.value = _f.y; L.forwardZ.value = _f.z; L.upX.value = _u.x; L.upY.value = _u.y; L.upZ.value = _u.z; }
   else { L.setPosition(cam.position.x, cam.position.y, cam.position.z); L.setOrientation(_f.x, _f.y, _f.z, _u.x, _u.y, _u.z); }
-  if (fire) fire.gain.gain.setTargetAtTime(W.fireLit ? 1 : 0, t, 0.5);
+  /* 불소리는 화면의 불꽃 크기(fireK)를 그대로 따라 커지고 작아진다 */
+  if (fire) fire.gain.gain.setTargetAtTime(W.fireK || 0, t, 0.1);
   if (water) setPos(water.pan, cam.position.x, 0, water.z);
   if (lamps) { lamps.lantern.gain.gain.setTargetAtTime(W.lanternLit ? 1 : 0, t, 0.4); lamps.tentLamp.gain.gain.setTargetAtTime(W.tentLampLit ? 1 : 0, t, 0.4); }
+  /* 바람: 0.1초마다 베드를 갱신하고, 바람이 0.7 을 위로 넘는 순간 돌풍 소리를 낸다 (최소 8초 간격) */
+  if (bed && W.wind) {
+    windAcc += dt;
+    if (windAcc >= 0.1) {
+      windAcc = 0; const w = W.wind.value, bw = bed.wind;
+      if (bw) { bw.g.gain.setTargetAtTime(bw.g0 * (0.45 + 1.1 * w), t, 0.5); bw.f.frequency.setTargetAtTime(bw.f0 * (0.75 + 0.5 * w), t, 0.5); }
+      if (bed.leaves) bed.leaves.setTargetAtTime(0.003 + 0.009 * w, t, 0.4);
+      if (!ctx.paused && w > 0.7 && lastWind <= 0.7 && t - lastGust > 8) {
+        lastGust = t;
+        const nightK = bed.type === 'forest' && bed.timeKey === 'night' ? 0.85 : 1;
+        gust((GUST_K[bed.type] || 0.3) * nightK * (0.8 + (w - 0.7)), bed.type);
+      }
+      lastWind = w;
+    }
+  }
   /* 새떼: 무리 위치를 따라가는 먼 기러기 울음 */
   if (W.flocks) {
     for (const g of W.flocks) {
@@ -272,7 +344,7 @@ let stepIdx = 0;
 function footstep(surface) {
   const t0 = AC.currentTime, side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.72, 0.98);
   const pan = AC.createStereoPanner(); pan.pan.value = side; pan.connect(sfxBus);
-  const grains = (n, span, brown, type, f0, q, peak, d, t, f1) => { for (let i = 0; i < n; i++) { const k = rnd(0.45, 1); burst(pan, brown, type, f0 * rnd(0.8, 1.25), q, 0.002, peak * k * v, d * rnd(0.7, 1.3), t + Math.random() * span, f1 ? f1 * rnd(0.8, 1.2) : undefined, d); } };
+  const grains = (n, span, kind, type, f0, q, peak, d, t, f1) => { for (let i = 0; i < n; i++) { const k = rnd(0.45, 1); burst(pan, kind, type, f0 * rnd(0.8, 1.25), q, 0.002, peak * k * v, d * rnd(0.7, 1.3), t + Math.random() * span, f1 ? f1 * rnd(0.8, 1.2) : undefined, d); } };
   if (surface === 'snow') {
     tone(pan, 65, 45, 0.004, 0.11 * v, 0.08, t0); burst(pan, true, 'lowpass', 220, 1, 0.005, 0.06 * v, 0.15, t0);
     grains(14, 0.12, false, 'highpass', 2400, 1, 0.04, 0.02, t0); burst(pan, false, 'bandpass', 3000, 8, 0.02, 0.02 * v, 0.13, t0 + 0.02, 2200); grains(8, 0.08, false, 'highpass', 2800, 1, 0.025, 0.018, t0 + 0.11);
@@ -303,7 +375,7 @@ function zipper(open) {
 function pour() {
   const t = AC.currentTime, B = sfxBus;
   burst(B, false, 'highpass', 2500, 1, 0.003, 0.04, 0.05, t);
-  const s = noise(false), f = filt('bandpass', 600, 1.4), g = gainN(0); chain(s, f, g, B);
+  const s = noise('white'), f = filt('bandpass', 600, 1.4), g = gainN(0); chain(s, f, g, B);
   f.frequency.setValueAtTime(600, t + 0.25); f.frequency.exponentialRampToValueAtTime(1500, t + 1.6);
   g.gain.setValueAtTime(0.0001, t + 0.25); g.gain.linearRampToValueAtTime(0.04, t + 0.5); g.gain.setValueAtTime(0.04, t + 1.4); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.75);
   s.start(t + 0.25, off()); s.stop(t + 1.8);
