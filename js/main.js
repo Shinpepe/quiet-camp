@@ -1,20 +1,22 @@
 import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { $, rnd, smooth, clamp, wrapPI } from './util.js';
-import { buildScene, applyTime, rebakeEnv, updateMeteors, precompileScene } from './scene.js';
+import { applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks, updateLighthouse } from './props.js';
 import { WATER_Y } from './terrain.js';
-import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel } from './audio.js';
-import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep } from './game.js';
+import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience } from './audio.js';
+import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep, buildWithLoading } from './game.js';
+import { updateChop, chopCamera } from './chop.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
 const renderer = ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, FINE ? 2 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+/* 저장된 설정을 그대로 반영 (그림자를 꺼 두었으면 처음부터 끈다) */
+renderer.shadowMap.enabled = settings.shadow; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false;
 /* AgX: 밝아질수록 하얗게 수렴해 불꽃·노을의 주황이 노랗게 틀어지지 않는다. 채도 보정은 post.js 에서 */
 renderer.toneMapping = THREE.AgXToneMapping;
@@ -22,11 +24,13 @@ const camera = ctx.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHe
 camera.rotation.order = 'YXZ';
 ctx.hand = new THREE.Group(); camera.add(ctx.hand); ctx.hand.visible = false;
 ctx.post = createPost(renderer, camera);
+ctx.post.setBloom(settings.bloom);
 
-/* 세로 화면(폰)에서는 수평 시야 78° 를 기준으로 수직 FOV 를 다시 계산한다 */
+/* 세로 화면(폰)에서는 수평 시야 78° 를 기준으로 수직 FOV 를 다시 계산한다.
+   기준 시야는 ctx.baseFov 에 저장 — 장작 패기의 시야 펀치가 이 위에 더해진다 */
 function fitView() {
   const a = innerWidth / innerHeight; camera.aspect = a;
-  camera.fov = a < 1 ? Math.min(100, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(78) / 2) / a))) : 70;
+  camera.fov = ctx.baseFov = a < 1 ? Math.min(100, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(78) / 2) / a))) : 70;
   camera.updateProjectionMatrix();
 }
 /* 물 반사용 렌더타깃·카메라 (데스크톱, 설정 켜짐일 때만 사용) */
@@ -64,15 +68,15 @@ let last = performance.now(), T = 0, lastSec = -1;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4), _sp = new THREE.Vector3();
 const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
 function startExhale(h) { const k = Math.min(h, 3) / 3; anim.exhale = 0.35 + k * 0.75; anim.exhaleStr = 0.6 + k * 0.8; sfx('exhale'); }
-/* 타는 스틱 한 프레임: 끝에서부터 타 들어가고, 불티가 튀고, 글로우가 떨린다. 빛은 아래 라이트 풀이 담당 */
+/* 타는 스파클라 한 프레임: 끝에서부터 타 들어가고, 불티가 튀고, 글로우가 떨린다. 빛은 아래 라이트 풀이 담당 */
 function burnSparkler(W, ud, dt) {
   ud.amount = Math.max(0, ud.amount - dt / 40); ud.setAmount(ud.amount);
   ud.emitter.getWorldPosition(tmpV);
   const n = 2 + (Math.random() < 0.6 ? 1 : 0); for (let i = 0; i < n; i++) W.sparks.spawn(tmpV);
   ud.glow.material.opacity = 0.6 + Math.random() * 0.4; ud.glow.scale.setScalar(0.12 + Math.random() * 0.05);
 }
-/* ── 스파클러 조명: 타는 스틱을 1.2m 안에서 한 묶음으로 합치고, 카메라에 가까운 묶음부터 풀 라이트를 배정한다.
-   라이트 개수가 절대 바뀌지 않으므로 셰이더 재컴파일이 없고, 스틱 수에는 제한이 없다 ── */
+/* ── 스파클라 조명: 타는 스파클라를 1.2m 안에서 한 묶음으로 합치고, 카메라에 가까운 묶음부터 풀 라이트를 배정한다.
+   라이트 개수가 절대 바뀌지 않으므로 셰이더 재컴파일이 없고, 개수에는 제한이 없다 ── */
 const groups = [];
 function assignSparkLights(W) {
   groups.length = 0;
@@ -94,7 +98,7 @@ function assignSparkLights(W) {
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene;
-  /* 사전 컴파일 중에는 숨긴 물체가 잠깐 보이는 상태라 그리지 않는다 (로딩 화면이 덮고 있다) */
+  /* 씬이 아직 없거나 사전 컴파일 중에는 그리지 않는다 (숨긴 물체가 잠깐 보이는 상태라 로딩 화면이 덮고 있다) */
   if (!scene || ctx.compiling) return;
   T += dt; W.uTime.value = T; ctx.post.update(T);
   W.wind.value = windAt(T, W.cfg.key);
@@ -116,11 +120,15 @@ function loop(now) {
     camera.rotation.y = player.yaw; camera.rotation.x = player.pitch + Math.sin(T * 0.7) * 0.003; camera.rotation.z = Math.sin(T * 0.5) * 0.002;
     updatePrompt(); if (!ctx.paused) updateSleep(dt);
   }
+  /* 장작 패기 카메라 효과(흔들림·시선 반동·시야 펀치). 패는 중이 아니면 남은 효과만 가라앉힌다 */
+  chopCamera(camera, dt, cam.t >= 1);
   camera.updateMatrixWorld();
   applyTime();
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
-  W.shT += dt; if (W.shT >= 0.1) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  /* 그림자맵은 보통 0.1초마다 갱신한다. 장작을 패는 동안에는 눈앞에서 도끼·장작·반쪽이 빠르게 움직여
+     10Hz 로 끊기는 게 보이므로 매 프레임 갱신한다 */
+  W.shT += dt; if (W.shT >= (ctx.running && state.mode === 'chop' ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
@@ -129,6 +137,7 @@ function loop(now) {
   updateFlocks(dt, T);
   updateMeteors(dt);
   updateLighthouse(T);
+  if (!ctx.paused) updateChop(dt);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
@@ -140,6 +149,8 @@ function loop(now) {
   /* ── 모닥불: 빛의 기본 세기는 부드럽게 따라가고, 오디오의 "파칙"(W.firePop)이 그 위에 순간적으로 얹힌다.
      큰 파칙(W.fireBurst)에는 불티가 한 번에 솟는다 ── */
   W.fireK = (W.fireK || 0) + ((W.fireLit ? 1 : 0) - (W.fireK || 0)) * Math.min(1, dt * 2.5);
+  /* 불이 꺼져 있으면 모닥불 큐브 그림자맵(6면) 갱신을 건너뛴다. castShadow 는 그대로라 셰이더 재컴파일은 없다 */
+  if (W.fireLight) W.fireLight.shadow.autoUpdate = W.fireK > 0.01;
   W.firePop *= Math.exp(-dt * 10);
   if (W.flames) W.flames.forEach((f, i) => { f.material.uniforms.uK.value = W.fireK; f.visible = W.fireK > 0.02; f.scale.y = W.fireK * (0.85 + 0.2 * Math.sin(T * 8.5 + i * 1.3) + 0.1 * Math.sin(T * 21 + i) + 0.25 * W.firePop); f.scale.x = 0.9 + 0.1 * Math.sin(T * 6.7 + i * 2); });
   if (W.logGlow) W.logGlow.forEach((s, i) => { s.material.opacity = Math.min(1, W.fireK * (0.55 + 0.45 * Math.sin(T * 13 + i * 1.9) + 0.3 * W.firePop)); });
@@ -160,8 +171,8 @@ function loop(now) {
     } else W.fireBurst = false;
   }
 
-  /* ── 손에 든 것 ── */
-  if (W.item && ctx.running) {
+  /* ── 손에 든 것 (장작을 패는 동안에는 손을 숨기므로 건너뛴다 — 숨긴 컵에서 김이 나오지 않게) ── */
+  if (W.item && ctx.running && state.mode !== 'chop') {
     const type = state.item, ud = W.item.userData;
     if (type === 'sparkler') {
       if (ud.lit && !ctx.paused) { burnSparkler(W, ud, dt); if (ud.amount === 0) { ud.setLit(false); itemEmptied(); } }
@@ -176,10 +187,12 @@ function loop(now) {
         if (k > 0.85 && ud.amount > 0) {
           const rate = type === 'smoke' ? 0.07 : type === 'coffee' ? 0.22 : 0.28;
           ud.amount = Math.max(0, ud.amount - rate * dt); ud.setAmount(ud.amount);
-          if (type !== 'smoke' && T - anim.lastSipSfx > 0.75) { anim.lastSipSfx = T; sfx(type === 'coffee' ? 'sip' : 'gulp'); }
+          /* 한 모금마다 입에 닿고 잠시 뒤 꿀꺽 (audio.js drink). 위스키는 더 천천히 */
+          if (type !== 'smoke' && T - anim.lastSipSfx > (type === 'coffee' ? 1.3 : 1.7)) { anim.lastSipSfx = T; sfx('sip', type); }
           if (ud.amount === 0) { if (type === 'smoke') startExhale(anim.holdT); itemEmptied(); }
         }
-        if (W.item && anim.sipT >= 1) { anim.sipT = null; anim.holding = false; if (type === 'smoke') startExhale(anim.holdT); else sfx('gulp'); resetHand(); }
+        /* 잔을 내려놓을 때: 위스키는 얼음이 살짝 부딪힌다 */
+        if (W.item && anim.sipT >= 1) { anim.sipT = null; anim.holding = false; if (type === 'smoke') startExhale(anim.holdT); else if (type === 'whisky') sfx('clink', 0.4); resetHand(); }
       }
       if (W.item) {
         ud.emitter.getWorldPosition(tmpV);
@@ -193,7 +206,7 @@ function loop(now) {
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);
   }
 
-  /* ── 땅에 꽂힌 스틱: 계속 타다가, 다 타면 20초 뒤 2초에 걸쳐 사라진다. 치익 소리는 가장 가까운 타는 스틱 기준.
+  /* ── 땅에 꽂힌 스파클라: 계속 타다가, 다 타면 20초 뒤 2초에 걸쳐 사라진다. 치익 소리는 가장 가까운 것 기준.
      발밑 데칼은 개수와 무관하게 전부 켜서 "빛나 보이게" 한다 ── */
   let sparkLv = W.item && W.item.userData.lit ? 1 : 0;
   for (const s of W.planted) {
@@ -212,7 +225,9 @@ function loop(now) {
   }
   if (W.planted.length) W.planted = W.planted.filter(s => !s.gone);
   if (W.sparkLights) assignSparkLights(W);
-  setSparkler(sparkLv > 0); if (sparkLv > 0) sparklerLevel(sparkLv);
+  /* 스파클라 소리는 게임 중에만 (메뉴 프리뷰에서는 나지 않게) */
+  const sparkOn = ctx.running && sparkLv > 0;
+  setSparkler(sparkOn); if (sparkOn) sparklerLevel(sparkLv);
 
   if (W.prints) W.prints.update(dt);
   W.sparks.update(dt);
@@ -223,9 +238,10 @@ function loop(now) {
   ctx.post.render();
 }
 
+/* 루프는 바로 돌린다 — 씬이 준비되기 전이나 컴파일 중에는 아무것도 그리지 않는다.
+   첫 빌드도 buildWithLoading 을 거쳐서, 로딩 중에 장소를 바꿔도 마지막 요청만 반영된다.
+   로딩 중에 첫 입력이 들어오면 boot() 의 menuAmbience 는 씬이 없어 그냥 넘어가므로, 빌드가 끝난 뒤 여기서 시작한다
+   (오디오가 아직 켜지지 않았으면 menuAmbience 가 알아서 아무것도 하지 않는다) */
 bindInput();
-$('#loading').classList.add('on');
-setTimeout(() => {
-  buildScene(state.bg);
-  precompileScene().then(() => { $('#loading').classList.remove('on'); requestAnimationFrame(loop); });
-}, 50);
+requestAnimationFrame(loop);
+buildWithLoading(() => { if (!ctx.running) menuAmbience(state.bg); });

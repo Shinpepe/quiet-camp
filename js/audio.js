@@ -4,10 +4,16 @@ import { BG } from './data.js';
 import { rnd } from './util.js';
 
 /* ── 방향: 힐링 캠핑. 모든 소리는 멀리·부드럽게·드물게. 날카로운 고역 없음, 긴 어택, 밤엔 더 뜸하게.
-   버스: world(환경·위치음, 실내 필터) / sfx(손·몸 근처) / ui(메뉴·셔터, 컴프레서 우회)
+   버스: world(환경·위치음, 실내 필터) / sfx(손·몸 근처) / dry(입 근처, 잔향 없음) / ui(메뉴·셔터, 컴프레서 우회)
    공간 잔향: world 와 sfx 가 같은 절차적 임펄스 응답을 공유한다 (텐트·차·숲·해변·설원) ── */
 
-let AC = null, master, comp, worldLP, worldGain, sfxBus, uiBus, verb = null;
+/* ── 녹음 샘플로 바꾸고 싶을 때: 파일 경로를 넣으면 합성 버퍼 대신 이 파일들을 돌아가며 쓴다.
+   예) sand: ['sounds/sand_1.ogg', 'sounds/sand_2.ogg', ...]
+   녹음본은 크기가 제각각이라 FOLEY_GAIN 으로 맞춘다 ── */
+export const FOLEY_FILES = { sand: [], dirt: [], gulp: [], chopHit: [], chopSplit: [], chopKnot: [], logPlace: [], woodLand: [] };
+const FOLEY_GAIN = { sand: 0.12, dirt: 0.13, gulp: 0.11, chopHit: 0.32, chopSplit: 0.4, chopKnot: 0.3, logPlace: 0.2, woodLand: 0.17 };
+
+let AC = null, master, comp, worldLP, worldGain, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
 let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false;
 let fire = null, water = null, lamps = null, spark = null, engine = null, engineDone = false;
@@ -21,15 +27,18 @@ const killT = list => { list.forEach(clearTimeout); list.length = 0; };
 export function initAudio() {
   if (AC) return;
   AC = new (window.AudioContext || window.webkitAudioContext)();
-  for (const k in bufs) delete bufs[k]; for (const k in irCache) delete irCache[k];
+  for (const k in bufs) delete bufs[k]; for (const k in irCache) delete irCache[k]; for (const k in bank) delete bank[k];
   master = gainN(settings.vol); master.connect(AC.destination);
   comp = AC.createDynamicsCompressor(); comp.threshold.value = -16; comp.knee.value = 14; comp.ratio.value = 2.5; comp.attack.value = 0.015; comp.release.value = 0.3; comp.connect(master);
   worldLP = filt('lowpass', 20000); worldGain = gainN(1); worldLP.connect(worldGain); worldGain.connect(comp);
   sfxBus = gainN(1); sfxBus.connect(comp);
+  dryBus = gainN(1); dryBus.connect(comp);   // 입 근처 소리(마시기): 공간 잔향을 타지 않는다
   uiBus = gainN(0.8); uiBus.connect(master);
   /* 잔향 입력: world 전부 + sfx 는 조금 덜 (손 근처 소리는 직접음이 더 커야 한다) */
   const vin = gainN(1), sfxSend = gainN(0.7); worldGain.connect(vin); sfxBus.connect(sfxSend); sfxSend.connect(vin);
   verb = { in: vin, slot: null, key: null };
+  /* 폴리 뱅크는 첫 걸음에서 멈칫하지 않도록 미리 굽고, 녹음 파일이 지정돼 있으면 불러와 덮어쓴다 */
+  setTimeout(() => { Object.keys(GEN).forEach(getBank); loadFoley(); }, 0);
 }
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.setTargetAtTime(v, AC.currentTime, 0.03); }
@@ -121,6 +130,149 @@ function burst(dest, kind, type, f0, q, a, peak, d, t, f1, sweepT) {
   env(g, t, a, peak, d); chain(s, f, g, dest); s.start(t, off()); s.stop(t + a + d + 0.05); return s;
 }
 function tone(dest, f0, f1, a, peak, d, t, type) { const o = osc(type || 'sine', f0), g = gainN(0); if (f1) { o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + a + d); } env(g, t, a, peak, d); o.connect(g); g.connect(dest); o.start(t); o.stop(t + a + d + 0.05); return o; }
+/* 진행 중인 램프를 그 자리에서 멈춘다. cancelAndHoldAtTime 이 없는 브라우저(Firefox)는 현재 값을 다시 박아 넣는다
+   — cancelScheduledValues 만 쓰면 램프 도중 값이 이전 이벤트로 튀어 '틱' 소리가 난다 */
+function holdParam(p, t) {
+  if (p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(t);
+  else { const v = p.value; p.cancelScheduledValues(t); p.setValueAtTime(v, t); }
+}
+
+/* ══ 절차적 폴리 뱅크 ══
+   게임 발소리처럼 "녹음본 여러 개를 돌려 쓰는" 구조를 합성으로 흉내 낸다.
+   소리를 샘플 단위로 직접 그려 AudioBuffer 로 구워 두고(종류마다 변형 4~8개), 재생할 때 변형을 고르고 피치·크기를 흔든다.
+   층별로 먼저 정규화한 뒤 섞기 때문에 amp 값이 곧 층 사이의 비율이다 */
+const bank = {}, lastIdx = {};
+function lowpass(d, sr, fc) { const k = Math.exp(-2 * Math.PI * fc / sr); let y = 0; for (let i = 0; i < d.length; i++) { y = d[i] * (1 - k) + y * k; d[i] = y; } }
+function highpass(d, sr, fc) { const k = Math.exp(-2 * Math.PI * fc / sr); let y = 0, px = 0; for (let i = 0; i < d.length; i++) { const x = d[i]; y = k * (y + x - px); px = x; d[i] = y; } }
+function mixIn(d, L, amp) { let pk = 0; for (let i = 0; i < L.length; i++) pk = Math.max(pk, Math.abs(L[i])); if (pk < 1e-9) return; const g = amp / pk; for (let i = 0; i < d.length; i++) d[i] += L[i] * g; }
+function makeBuf(dur, fill) {
+  const sr = AC.sampleRate, n = Math.floor(sr * dur), b = AC.createBuffer(1, n, sr), d = b.getChannelData(0);
+  fill(d, sr);
+  let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(d[i]));
+  const g = pk > 0 ? 0.9 / pk : 1, fo = Math.floor(0.008 * sr);
+  for (let i = 0; i < n; i++) d[i] *= g * (i > n - fo ? (n - i) / fo : 1);
+  return b;
+}
+/* 충격: 저역 노이즈를 짧게 — 음정이 없어 "뿡" 하지 않고 "툭/퍽" 하게 들린다 */
+function thud(d, sr, t0, fc, tau, amp, atk) {
+  const L = new Float32Array(d.length), i0 = Math.floor(t0 * sr), a = Math.max(1, (atk || 0.002) * sr), T = tau * sr;
+  for (let i = i0; i < L.length; i++) { const t = i - i0; const e = t < a ? t / a : Math.exp(-(t - a) / T); if (t > a && e < 1e-4) break; L[i] = (Math.random() * 2 - 1) * e; }
+  lowpass(L, sr, fc); lowpass(L, sr, fc * 1.4); mixIn(d, L, amp);
+}
+/* 알갱이: 0.2~4ms 짜리 아주 짧은 노이즈 조각을 수십~수백 개. skew 가 클수록 앞쪽에 몰린다 → 모래 '사각', 흙·잔돌 '바삭' */
+function grainLayer(d, sr, t0, span, n, len0, len1, skew, amp, lo, hi) {
+  const L = new Float32Array(d.length);
+  for (let g = 0; g < n; g++) {
+    const u = Math.pow(Math.random(), skew), s = Math.floor((t0 + u * span) * sr), len = Math.max(2, Math.floor(rnd(len0, len1) * sr)), a = (0.3 + 0.7 * Math.random()) * Math.pow(1 - u, 1.2);
+    for (let i = 0; i < len && s + i < L.length; i++) L[s + i] += (Math.random() * 2 - 1) * a * Math.exp(-4 * i / len);
+  }
+  highpass(L, sr, lo); lowpass(L, sr, hi); lowpass(L, sr, hi * 1.3); mixIn(d, L, amp);
+}
+/* 스침: 대역 제한 노이즈를 부드럽게 — 모래가 밀리거나 풀이 쓸리는 '쉭' */
+function hissLayer(d, sr, t0, atk, tau, amp, lo, hi) {
+  const L = new Float32Array(d.length), i0 = Math.floor(t0 * sr), a = Math.max(1, atk * sr), T = tau * sr;
+  for (let i = i0; i < L.length; i++) { const t = i - i0; const e = t < a ? t / a : Math.exp(-(t - a) / T); if (t > a && e < 1e-4) break; L[i] = (Math.random() * 2 - 1) * e; }
+  highpass(L, sr, lo); highpass(L, sr, lo); lowpass(L, sr, hi); mixIn(d, L, amp);
+}
+/* 모래: 부드러운 뒤꿈치 → 촘촘한 '사각사각' + 밀리는 '쉭' → 앞꿈치에서 한 번 더 */
+function sandStep() {
+  return makeBuf(0.42, (d, sr) => {
+    const v = rnd(0.85, 1.15);
+    thud(d, sr, 0, 220 * v, 0.035, 0.55, 0.006);
+    grainLayer(d, sr, 0.004, 0.16, Math.round(rnd(260, 360)), 0.0002, 0.0009, 1.8, 0.8, 1400, 6500);
+    hissLayer(d, sr, 0, 0.012, 0.06, 0.25, 900, 3500);
+    const t1 = rnd(0.085, 0.12);
+    thud(d, sr, t1, 260 * v, 0.025, 0.3, 0.004);
+    grainLayer(d, sr, t1, 0.14, Math.round(rnd(150, 220)), 0.0002, 0.0008, 1.5, 0.45, 1800, 7000);
+  });
+}
+/* 흙·숲 바닥: 단단한 '툭' + 흙·잔돌 '바삭' (+ 낙엽 '바스락') → 앞꿈치 */
+function dirtStep(leaves) {
+  return makeBuf(0.36, (d, sr) => {
+    const v = rnd(0.85, 1.15);
+    thud(d, sr, 0, 300 * v, 0.022, 0.75, 0.002);
+    grainLayer(d, sr, 0.002, 0.07, Math.round(rnd(60, 100)), 0.0005, 0.0025, 2.2, 0.55, 900, 5000);
+    if (leaves) grainLayer(d, sr, 0.005, 0.14, Math.round(rnd(80, 130)), 0.0008, 0.004, 1.4, 0.35, 1800, 7000);
+    hissLayer(d, sr, 0, 0.01, 0.05, 0.12, 1500, 5000);
+    const t1 = rnd(0.07, 0.1);
+    thud(d, sr, t1, 360 * v, 0.016, 0.35, 0.002);
+    grainLayer(d, sr, t1, 0.06, Math.round(rnd(30, 50)), 0.0005, 0.002, 2, 0.3, 1000, 5000);
+  });
+}
+/* 꿀꺽: 목젖 클릭 → 아래로 떨어지는 짧은 '꿀' 공명(120ms 안에 사라져 음정으로 들리지 않는다) → 목을 타고 내려가는 먹먹함 → 가끔 작은 물방울 */
+function gulpBuf() {
+  return makeBuf(0.26, (d, sr) => {
+    hissLayer(d, sr, 0, 0.0008, 0.004, 0.25, 1200, 3000);
+    const f0 = rnd(330, 420), f1 = f0 * rnd(0.55, 0.65), L = new Float32Array(d.length), s0 = Math.floor(0.012 * sr); let ph = 0;
+    for (let i = s0; i < L.length; i++) {
+      const t = (i - s0) / sr; if (t > 0.12) break;
+      const f = f1 + (f0 - f1) * Math.exp(-t / 0.025); ph += 2 * Math.PI * f / sr;
+      const e = t < 0.006 ? t / 0.006 : Math.exp(-(t - 0.006) / 0.028);
+      L[i] = Math.sin(ph) * e * (0.8 + 0.4 * Math.random());
+    }
+    lowpass(L, sr, 900); mixIn(d, L, 0.7);
+    thud(d, sr, 0.015, 260, 0.04, 0.6, 0.008);
+    if (Math.random() < 0.6) {
+      const B = new Float32Array(d.length), sb = Math.floor(rnd(0.05, 0.09) * sr), fb = rnd(700, 1000); let p = 0;
+      for (let i = sb; i < B.length; i++) { const t = (i - sb) / sr; if (t > 0.03) break; p += 2 * Math.PI * fb * (1 + t * 25) / sr; B[i] = Math.sin(p) * Math.exp(-t / 0.008); }
+      mixIn(d, B, 0.2);
+    }
+  });
+}
+/* 나무가 울리는 짧은 공명: 40~70ms 안에 사라져 음정보다 '통·탁' 하는 몸통 소리로 들린다. 노이즈를 곱해 매끈한 사인 느낌을 없앤다 */
+function resonance(d, sr, t0, f, tau, amp, glide) {
+  const L = new Float32Array(d.length), i0 = Math.floor(t0 * sr); let ph = 0;
+  for (let i = i0; i < L.length; i++) {
+    const t = (i - i0) / sr; if (t > tau * 7) break;
+    ph += 2 * Math.PI * f * (1 + (glide || 0) * Math.exp(-t / 0.012)) / sr;
+    L[i] = Math.sin(ph) * Math.exp(-t / tau) * Math.min(1, t / 0.0015) * (0.75 + 0.5 * Math.random());
+  }
+  lowpass(L, sr, f * 3); mixIn(d, L, amp);
+}
+/* 도끼질: 박힘 '퍽 통' / 쪼개짐 '퍽 쩍 쿵'(두 쪽이 따로 울린다) / 옹이 '탁'(단단해서 튕긴다) */
+function chopBuf(kind) {
+  return makeBuf(kind === 'split' ? 0.6 : 0.4, (d, sr) => {
+    const v = rnd(0.9, 1.1);
+    if (kind === 'knot') { thud(d, sr, 0, 750 * v, 0.012, 0.7, 0.001); resonance(d, sr, 0, rnd(420, 520), 0.045, 0.6, 0.15); grainLayer(d, sr, 0, 0.02, 20, 0.0003, 0.001, 2, 0.25, 1500, 6000); return; }
+    thud(d, sr, 0, 520 * v, 0.03, 0.85, 0.001);
+    resonance(d, sr, 0, rnd(170, 240), 0.06, 0.5, 0.2);
+    grainLayer(d, sr, 0.001, 0.05, 50, 0.0003, 0.0015, 2.5, 0.35, 1200, 6000);
+    if (kind === 'split') {
+      grainLayer(d, sr, 0.008, 0.09, 160, 0.0002, 0.0012, 1.6, 0.7, 1500, 7500);
+      resonance(d, sr, 0.012, rnd(300, 380), 0.07, 0.35, 0.1);
+      resonance(d, sr, 0.016, rnd(420, 520), 0.05, 0.22, 0.1);
+      thud(d, sr, 0.02, 260, 0.06, 0.45, 0.004);
+    }
+  });
+}
+/* 나무끼리, 나무와 땅이 부딪히는 짧은 '툭' */
+function knockBuf(fc, rf, tau, grains) {
+  return makeBuf(0.3, (d, sr) => { thud(d, sr, 0, fc * rnd(0.9, 1.1), tau, 0.8, 0.002); resonance(d, sr, 0, rf * rnd(0.85, 1.15), 0.04, 0.4, 0.1); if (grains) grainLayer(d, sr, 0.002, 0.05, grains, 0.0005, 0.002, 2, 0.25, 800, 4500); });
+}
+const GEN = {
+  sand: [sandStep, 8], dirt: [() => dirtStep(false), 8], dirtLeaf: [() => dirtStep(true), 8], gulp: [gulpBuf, 6],
+  chopHit: [() => chopBuf('hit'), 5], chopSplit: [() => chopBuf('split'), 5], chopKnot: [() => chopBuf('knot'), 4],
+  logPlace: [() => knockBuf(380, 150, 0.03, 25), 4], woodLand: [() => knockBuf(650, 300, 0.02, 40), 5],
+};
+function getBank(k) { return bank[k] || (bank[k] = Array.from({ length: GEN[k][1] }, GEN[k][0])); }
+function loadFoley() {
+  for (const k in FOLEY_FILES) {
+    const urls = FOLEY_FILES[k]; if (!urls.length) continue;
+    Promise.all(urls.map(u => fetch(u).then(r => r.arrayBuffer()).then(b => AC.decodeAudioData(b))))
+      .then(list => { bank[k] = list; if (k === 'dirt') bank.dirtLeaf = list; })
+      .catch(e => console.warn('foley load failed:', k, e));
+  }
+}
+/* 뱅크에서 하나를 골라 재생: 직전과 같은 변형은 피하고, 피치·크기·좌우를 살짝 흔든다 */
+function playBank(key, dest, gain, rate, t, pan) {
+  const list = getBank(key); let i = Math.floor(Math.random() * list.length);
+  if (list.length > 1 && i === lastIdx[key]) i = (i + 1) % list.length; lastIdx[key] = i;
+  const s = AC.createBufferSource(), g = gainN(gain); s.buffer = list[i]; s.playbackRate.value = rate;
+  const nodes = [s, g]; s.connect(g);
+  if (pan) { const p = AC.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(dest); nodes.push(p); } else g.connect(dest);
+  s.onended = () => nodes.forEach(n => { try { n.disconnect(); } catch (e) {} });
+  s.start(t);
+}
 
 /* ── 위치 음원 ── */
 function makeFireSrc() {
@@ -189,7 +341,7 @@ function killSpatial() {
   fire = water = lamps = null; sceneKey = null;
 }
 
-/* ── 불꽃놀이 스틱: 부드러운 치익 + 잔 크랙 ── */
+/* ── 스파클라: 부드러운 치익 + 잔 크랙 ── */
 export function setSparkler(on) {
   if (!AC) return;
   if (on && !spark) {
@@ -290,11 +442,12 @@ function gust(k, type) {
   f.frequency.setValueAtTime(250, t); f.frequency.linearRampToValueAtTime(900, t + 1.8); f.frequency.linearRampToValueAtTime(300, t + 4.0);
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16 * k, t + 1.7); g.gain.linearRampToValueAtTime(0, t + 4.2); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 4.4);
   if (type === 'forest') { const l = noise('pink'), lf = filt('bandpass', 3200, 0.7), lg = gainN(0); lg.gain.setValueAtTime(0, t + 0.4); lg.gain.linearRampToValueAtTime(0.012 * k, t + 2.0); lg.gain.linearRampToValueAtTime(0, t + 4.2); chain(l, lf, lg, pan); l.start(t, off()); l.stop(t + 4.4); }
-  if (type === 'wind') { /* 텐트 천 펄럭임 */ const p = panner(-1.6, 1.0, 1.2, 1.5, 20, 1.2), fl = noise('white'), ff = filt('lowpass', 700), fg = gainN(0), am = gainN(0); fg.gain.setValueAtTime(0, t + 0.6); fg.gain.linearRampToValueAtTime(0.04 * k, t + 1.8); fg.gain.linearRampToValueAtTime(0, t + 4.0); const [lo, lg2] = lfo(rnd(6, 9), 0.02 * k, fg.gain); chain(fl, ff, fg, p); fl.start(t, off()); fl.stop(t + 4.2); setTimeout(() => kill([lo, lg2, p, am]), 4500); }
+  if (type === 'wind') { /* 텐트 천 펄럭임 */ const p = panner(-1.6, 1.0, 1.2, 1.5, 20, 1.2), fl = noise('white'), ff = filt('lowpass', 700), fg = gainN(0); fg.gain.setValueAtTime(0, t + 0.6); fg.gain.linearRampToValueAtTime(0.04 * k, t + 1.8); fg.gain.linearRampToValueAtTime(0, t + 4.0); const [lo, lg2] = lfo(rnd(6, 9), 0.02 * k, fg.gain); chain(fl, ff, fg, p); fl.start(t, off()); fl.stop(t + 4.2); setTimeout(() => kill([lo, lg2, p]), 4500); }
+  setTimeout(() => kill([pan]), 4800);
 }
 function foghorn() { const t = AC.currentTime, p = panner(-160, 15, -70, 60, 800, 0.6), lp = filt('lowpass', 500); lp.connect(p); const o = osc('sine', 95), o2 = osc('sine', 190), g2 = gainN(0.25), g = gainN(0); o.connect(g); o2.connect(g2); g2.connect(g); g.connect(lp); env(g, t, 0.6, 0.06, 2.6); o.start(t); o2.start(t); o.stop(t + 3.4); o2.stop(t + 3.4); setTimeout(() => kill([lp, p]), 4000); }
 function snowSlide() { const t = AC.currentTime, out = farSrc(rnd(40, 120), 1.5, 20); burst(out, false, 'lowpass', 900, 1, 0.25, 0.14, 0.8, t, 300, 0.9); }
-function creak() { const t = AC.currentTime, pan = spanner(rnd(-0.4, 0.4)); burst(pan, false, 'lowpass', 350, 1, 0.08, 0.035, 0.3, t); tone(pan, 95, 70, 0.08, 0.02, 0.3, t); }
+function creak() { const t = AC.currentTime, pan = spanner(rnd(-0.4, 0.4)); burst(pan, false, 'lowpass', 350, 1, 0.08, 0.035, 0.3, t); tone(pan, 95, 70, 0.08, 0.02, 0.3, t); setTimeout(() => kill([pan]), 1000); }
 function ropeCreak() { const t = AC.currentTime, p = panner(5.2, 0.4, -18.6, 1, 12, 1.5); tone(p, rnd(150, 200), rnd(110, 140), 0.12, 0.025, 0.35, t); burst(p, 'brown', 'lowpass', 600, 1, 0.1, 0.03, 0.4, t); setTimeout(() => kill([p]), 1200); }
 
 /* ── 매 프레임: 리스너, 불·랜턴 게인, 물 위치, 바람, 새떼 ── */
@@ -339,30 +492,74 @@ export function updateAudio(dt) {
   }
 }
 
-/* ── 발소리 (위스키를 들었으면 두 걸음에 한 번 얼음이 부딪힌다) ── */
+/* ── 발소리 ──
+   모래·흙(숲) 바닥: 폴리 뱅크에서 변형을 골라 재생 (게임 발소리 방식)
+   눈·나무·젖은 바닥: 기존 합성 그대로
+   위스키를 들었으면 두 걸음에 한 번 얼음이 부딪힌다 */
 let stepIdx = 0;
 function footstep(surface) {
-  const t0 = AC.currentTime, side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.72, 0.98);
-  const pan = AC.createStereoPanner(); pan.pan.value = side; pan.connect(sfxBus);
-  const grains = (n, span, kind, type, f0, q, peak, d, t, f1) => { for (let i = 0; i < n; i++) { const k = rnd(0.45, 1); burst(pan, kind, type, f0 * rnd(0.8, 1.25), q, 0.002, peak * k * v, d * rnd(0.7, 1.3), t + Math.random() * span, f1 ? f1 * rnd(0.8, 1.2) : undefined, d); } };
-  if (surface === 'snow') {
-    tone(pan, 65, 45, 0.004, 0.11 * v, 0.08, t0); burst(pan, true, 'lowpass', 220, 1, 0.005, 0.06 * v, 0.15, t0);
-    grains(14, 0.12, false, 'highpass', 2400, 1, 0.04, 0.02, t0); burst(pan, false, 'bandpass', 3000, 8, 0.02, 0.02 * v, 0.13, t0 + 0.02, 2200); grains(8, 0.08, false, 'highpass', 2800, 1, 0.025, 0.018, t0 + 0.11);
-  } else if (surface === 'wood') {
-    tone(pan, 110, 75, 0.004, 0.16 * v, 0.16, t0); burst(pan, false, 'bandpass', 240, 6, 0.003, 0.08 * v, 0.12, t0); tone(pan, 330, 300, 0.004, 0.03 * v, 0.1, t0);
-    burst(pan, false, 'lowpass', 1200, 1, 0.002, 0.05 * v, 0.03, t0); tone(pan, 95, 70, 0.004, 0.06 * v, 0.1, t0 + 0.09);
-    if (Math.random() < 0.25) { const o = tone(pan, 190, 150, 0.05, 0.02 * v, 0.25, t0 + 0.04); const w = osc('sine', 11), wg = gainN(9); w.connect(wg); wg.connect(o.frequency); w.start(t0); w.stop(t0 + 0.4); }
-  } else if (surface === 'wet') {
-    burst(pan, false, 'bandpass', 2800, 0.8, 0.008, 0.07 * v, 0.14, t0, 1400, 0.14); burst(pan, true, 'lowpass', 350, 1, 0.006, 0.06 * v, 0.1, t0);
-    grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05); burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
-  } else if (surface === 'sand') {
-    tone(pan, 60, 42, 0.008, 0.06 * v, 0.1, t0); burst(pan, true, 'lowpass', 420, 1, 0.012, 0.09 * v, 0.24, t0, 220, 0.24);
-    grains(16, 0.2, false, 'bandpass', 2600, 1.2, 0.028, 0.035, t0); grains(6, 0.1, false, 'bandpass', 3400, 1.5, 0.018, 0.03, t0 + 0.14);
+  const t0 = AC.currentTime + rnd(0, 0.012), side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.72, 0.98);
+  if (surface === 'sand' || surface === 'grass') {
+    const leaves = surface === 'grass' && ctx.W.cfg && ctx.W.cfg.leafs;
+    const key = surface === 'sand' ? 'sand' : leaves ? 'dirtLeaf' : 'dirt', gk = surface === 'sand' ? 'sand' : 'dirt';
+    playBank(key, sfxBus, FOLEY_GAIN[gk] * rnd(0.82, 1), rnd(0.93, 1.07), t0, side * 0.8);
+    /* 숲 바닥: 가끔 잔가지가 '딱' */
+    if (surface === 'grass' && Math.random() < 0.05) { const tc = t0 + rnd(0.02, 0.08); burst(sfxBus, 'white', 'bandpass', rnd(2000, 3200), 3, 0.001, 0.035 * v, 0.02, tc); burst(sfxBus, 'white', 'bandpass', rnd(1200, 1800), 4, 0.001, 0.02 * v, 0.03, tc + rnd(0.015, 0.03)); }
   } else {
-    tone(pan, 75, 50, 0.004, 0.08 * v, 0.07, t0); burst(pan, true, 'lowpass', 600, 1, 0.005, 0.06 * v, 0.09, t0); burst(pan, false, 'bandpass', 900, 1.0, 0.006, 0.05 * v, 0.07, t0);
-    grains(10, 0.14, false, 'bandpass', 3600, 1.2, 0.03, 0.03, t0); burst(pan, true, 'lowpass', 700, 1, 0.005, 0.04 * v, 0.07, t0 + 0.1); grains(4, 0.06, false, 'bandpass', 3000, 1.2, 0.02, 0.025, t0 + 0.11);
+    const pan = AC.createStereoPanner(); pan.pan.value = side; pan.connect(sfxBus); setTimeout(() => { try { pan.disconnect(); } catch (e) {} }, 1500);
+    const grains = (n, span, kind, type, f0, q, peak, d, t, f1) => { for (let i = 0; i < n; i++) { const k = rnd(0.45, 1); burst(pan, kind, type, f0 * rnd(0.8, 1.25), q, 0.002, peak * k * v, d * rnd(0.7, 1.3), t + Math.random() * span, f1 ? f1 * rnd(0.8, 1.2) : undefined, d); } };
+    if (surface === 'snow') {
+      tone(pan, 65, 45, 0.004, 0.11 * v, 0.08, t0); burst(pan, true, 'lowpass', 220, 1, 0.005, 0.06 * v, 0.15, t0);
+      grains(14, 0.12, false, 'highpass', 2400, 1, 0.04, 0.02, t0); burst(pan, false, 'bandpass', 3000, 8, 0.02, 0.02 * v, 0.13, t0 + 0.02, 2200); grains(8, 0.08, false, 'highpass', 2800, 1, 0.025, 0.018, t0 + 0.11);
+    } else if (surface === 'wood') {
+      tone(pan, 110, 75, 0.004, 0.16 * v, 0.16, t0); burst(pan, false, 'bandpass', 240, 6, 0.003, 0.08 * v, 0.12, t0); tone(pan, 330, 300, 0.004, 0.03 * v, 0.1, t0);
+      burst(pan, false, 'lowpass', 1200, 1, 0.002, 0.05 * v, 0.03, t0); tone(pan, 95, 70, 0.004, 0.06 * v, 0.1, t0 + 0.09);
+      if (Math.random() < 0.25) { const o = tone(pan, 190, 150, 0.05, 0.02 * v, 0.25, t0 + 0.04); const w = osc('sine', 11), wg = gainN(9); w.connect(wg); wg.connect(o.frequency); w.start(t0); w.stop(t0 + 0.4); }
+    } else {
+      burst(pan, false, 'bandpass', 2800, 0.8, 0.008, 0.07 * v, 0.14, t0, 1400, 0.14); burst(pan, true, 'lowpass', 350, 1, 0.006, 0.06 * v, 0.1, t0);
+      grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05); burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
+    }
   }
   if (state.item === 'whisky' && Math.random() < 0.5) ice(0.45, t0 + rnd(0.05, 0.15));
+}
+
+/* ── 마시기: 한 모금 = (커피만) 입술이 닿는 아주 작은 소리 → 0.3초쯤 뒤 꿀꺽.
+   위스키는 가끔 '하', 커피는 가끔 '후' 하고 짧게 숨을 내쉰다 ── */
+function drink(kind, t) {
+  const coffee = kind === 'coffee';
+  if (coffee) burst(dryBus, 'pink', 'bandpass', rnd(1100, 1500), 1.2, 0.02, 0.012, 0.09, t, 1900, 0.09);
+  const tg = t + rnd(0.28, 0.4);
+  playBank('gulp', dryBus, FOLEY_GAIN.gulp * rnd(0.85, 1), rnd(0.92, 1.08), tg, 0);
+  if (!coffee && Math.random() < 0.6) burst(dryBus, 'pink', 'bandpass', 900, 0.6, 0.08, 0.012, 0.45, tg + 0.35, 600, 0.45);
+  else if (coffee && Math.random() < 0.3) burst(dryBus, 'pink', 'bandpass', 700, 0.6, 0.06, 0.01, 0.35, tg + 0.4, 450, 0.35);
+}
+
+/* ── 장작 패기 숨소리: 힘을 모을 때 들숨(0.65초), 내려칠 때 날숨.
+   들숨이 끝나기 전에 내려치면 날숨과 겹치므로, 들숨 핸들을 잡아 두었다가 날숨이 나가는 순간 15ms 안에 끊는다 ── */
+let breath = null;
+function stopBreath(t) {
+  if (!breath) return; const p = breath.g.gain; breath = null;
+  holdParam(p, t); p.setTargetAtTime(0.0001, t, 0.015);
+}
+function chopBreath(t) {
+  stopBreath(t);
+  const s = noise('pink'), f = filt('bandpass', 1300, 0.7), g = gainN(0.0001); chain(s, f, g, dryBus);
+  f.frequency.setValueAtTime(1300, t); f.frequency.exponentialRampToValueAtTime(1700, t + 0.6);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.01, t + 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.65);
+  s.start(t, off()); s.stop(t + 0.7);
+  const me = { g }; breath = me;
+  s.onended = () => { if (breath === me) breath = null; try { f.disconnect(); g.disconnect(); } catch (e) {} };
+}
+/* 휘두르는 소리: 도끼는 내려칠수록 빨라지므로(각도가 k² 로 진행) 쉭 소리도 충돌 직전에 가장 크고 높다.
+   d = 충돌까지 남은 시간. 꼬리(50ms)는 타격음이 덮는다. 예전 호출(숫자 하나 = 힘)도 받는다 */
+function chopWhoosh(arg, t) {
+  const o = typeof arg === 'number' ? { p: arg } : (arg || {}), p = o.p || 0, d = Math.max(0.05, o.d || 0.12), pk = 0.05 + 0.06 * p;
+  const s = noise('pink'), f = filt('bandpass', 300, 1.1), g = gainN(0.0001); chain(s, f, g, sfxBus);
+  f.frequency.setValueAtTime(300, t); f.frequency.exponentialRampToValueAtTime(1400 + 700 * p, t + d);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(pk * 0.08, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(pk, t + d * 0.95); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.05);
+  s.start(t, off()); s.stop(t + d + 0.08);
+  s.onended = () => { try { f.disconnect(); g.disconnect(); } catch (e) {} };
 }
 
 /* ── 손·몸 효과음 ── */
@@ -400,12 +597,27 @@ export function sfx(type, arg) {
     case 'doorClose': tone(B, 70 * pv, 45, 0.004, 0.28, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.2, 0.15, t); burst(B, false, 'highpass', 3000 * pv, 1, 0.002, 0.06, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.05, 0.35, t); return;
     /* 아이템 */
     case 'pick': if (arg === 'coffee') pour(); else if (arg === 'whisky') { ice(1, t); ice(0.7, t + 0.13); } else if (arg === 'sparkler') { for (let i = 0; i < 3; i++) burst(B, false, 'bandpass', 2000 * rnd(0.9, 1.1), 0.8, 0.01, 0.03, 0.08, t + i * 0.09); } else sfx('lighter'); return;
-    case 'sip': burst(B, false, 'bandpass', 700 * pv, 1.2, 0.06, 0.045, 0.25, t, 1900 * pv, 0.25); return;
-    case 'gulp': tone(B, 110 * pv, 70, 0.01, 0.07, 0.14, t); burst(B, false, 'lowpass', 500, 1, 0.01, 0.025, 0.1, t); return;
-    case 'clink': ice(1, t); return;
+    case 'sip': drink(arg === 'whisky' ? 'whisky' : 'coffee', t); return;
+    case 'gulp': playBank('gulp', dryBus, FOLEY_GAIN.gulp, rnd(0.92, 1.08), t, 0); return;
+    case 'clink': ice(typeof arg === 'number' ? arg : 1, t); return;
     case 'inhale': burst(B, false, 'highpass', 1200 * pv, 1, 0.35, 0.035, 0.25, t, 2500, 0.6); return;
     case 'exhale': burst(B, false, 'bandpass', 900 * pv, 0.6, 0.06, 0.035, 0.7, t, 450, 0.7); return;
     case 'lighter': burst(B, false, 'highpass', 3000 * pv, 1, 0.003, 0.1, 0.14, t); return;
+    /* 장작 패기 */
+    case 'chop': { const o = arg || {}, key = o.knot ? 'chopKnot' : o.fin ? 'chopSplit' : 'chopHit', p = o.power || 0;
+      playBank(key, sfxBus, FOLEY_GAIN[key] * (0.8 + 0.35 * p) * rnd(0.9, 1), rnd(0.95, 1.04) * (o.perfect ? 0.92 : 1), t, 0); return; }
+    case 'chopWhoosh': chopWhoosh(arg, t); return;
+    case 'chopRaise': burst(B, 'pink', 'lowpass', 600, 1, 0.08, 0.016, 0.22, t); burst(B, 'pink', 'bandpass', 2200, 1, 0.05, 0.006, 0.15, t + 0.05); return;
+    case 'chopBreath': chopBreath(t); return;
+    case 'chopExhale': stopBreath(t); burst(dryBus, 'pink', 'bandpass', 850, 0.6, 0.015, 0.012 + 0.012 * (arg || 0), 0.22, t + 0.05, 500, 0.22); return;
+    case 'chopReady': burst(B, 'pink', 'bandpass', rnd(760, 880), 7, 0.01, 0.025, 0.09, t, 640, 0.09); return;
+    case 'chopPull': burst(B, 'pink', 'bandpass', 650, 2.2, 0.03, 0.06, 0.14, t, 480, 0.14); burst(B, 'brown', 'lowpass', 320, 1, 0.01, 0.05, 0.08, t + 0.1); return;
+    case 'chopPick': burst(B, 'pink', 'bandpass', 620, 2, 0.03, 0.05, 0.14, t, 460, 0.14); burst(B, 'brown', 'lowpass', 300, 1, 0.01, 0.04, 0.08, t + 0.1); fabric(B, t + 0.15, 0.03, 0.25); return;
+    case 'chopPut': playBank('logPlace', sfxBus, 0.16, rnd(1.15, 1.3), t, 0); fabric(B, t + 0.05, 0.03, 0.25); return;
+    case 'stumpBite': playBank('logPlace', sfxBus, 0.12, rnd(1.2, 1.35), t, 0); return;
+    case 'logLift': playBank('woodLand', sfxBus, 0.05, rnd(0.8, 0.9), t, -0.3); burst(B, 'pink', 'bandpass', 1800, 0.8, 0.02, 0.01, 0.12, t); return;
+    case 'logPlace': playBank('logPlace', sfxBus, FOLEY_GAIN.logPlace * rnd(0.85, 1), rnd(0.95, 1.05), t, 0); return;
+    case 'woodLand': { const o = arg || {}; playBank('woodLand', sfxBus, FOLEY_GAIN.woodLand * (o.k || 1) * rnd(0.8, 1), rnd(0.9, 1.1), t + rnd(0, 0.02), o.pan || 0); return; }
     /* 불·랜턴 */
     case 'fireOn': sfx('lighter'); burst(B, true, 'lowpass', 300, 1, 0.06, 0.16, 0.7, t + 0.25, 140, 0.7); return;
     case 'fireOff': burst(B, true, 'lowpass', 700, 1, 0.02, 0.1, 0.25, t); burst(B, false, 'bandpass', 3000, 0.8, 0.1, 0.045, 1.4, t + 0.1, 1500, 1.4); for (let i = 0; i < 3; i++) burst(B, false, 'highpass', 2500 * rnd(0.9, 1.2), 1, 0.002, 0.02, 0.03, t + 0.3 + Math.random() * 0.6); return;

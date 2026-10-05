@@ -23,4 +23,8 @@ export function sunDirAt(t, v) {
   const th = ((t - 0.25) / 0.5) * Math.PI;
   return (v || new THREE.Vector3()).set(-Math.cos(th) * 0.45, Math.sin(th), -0.85 + 0.3 * Math.abs(Math.sin(th))).normalize();
 }
-export function clockLabel(t) { const h = Math.floor(t * 24), m = Math.floor((t * 24 - h) * 60); return `${h}:${m < 10 ? '0' : ''}${m}`; }
+/* 분 단위로 먼저 바꾼 뒤 나눈다 — 7/24 같은 값의 부동소수 오차 때문에 7:00 이 6:59 로 찍히던 문제 방지 */
+export function clockLabel(t) {
+  const total = Math.floor((((t % 1) + 1) % 1) * 1440 + 1e-6) % 1440, h = Math.floor(total / 60), m = total % 60;
+  return `${h}:${m < 10 ? '0' : ''}${m}`;
+}

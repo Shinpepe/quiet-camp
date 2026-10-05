@@ -12,6 +12,7 @@ export const ICON = {
   whisky:   svg('<path d="M6 4h12l-1 16H7z"/><path d="M6.8 12h10.4"/><path d="M9.5 14.5h3v3h-3z"/>'),
   smoke:    svg('<path d="M3 18l13-6 1.5 3.2-13 6z"/><path d="M13.6 13.8l1.5 3.2"/><path d="M17.5 8c-1 1 1 2 0 3M20 6c-1 1 1 2 0 3"/>'),
   sparkler: svg('<path d="M6 21l7-9"/><path d="M13 12l-4-2M13 12l4-2M13 12l-2-5M13 12l2-5M13 12l5 1M13 12l-5 1M13 12l1 6M13 12l4 4"/>'),
+  axe:      svg('<path d="M5 20L14.5 10.5"/><path d="M12.5 8.5c1.2-2.8 4.3-4.6 7.5-4.5-.1 3.2-1.7 6.3-4.5 7.5z"/>'),
 };
 
 export const BG = {
@@ -34,14 +35,16 @@ export const TIME = {
   night: { key: 'night', name: '별이 빛나는 밤', ic: ICON.night, clock: 0.0, top: 0x030614, bottom: 0x18243b, sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogFar: 720, fogH: 70, insc: 0.3, exposure: 1.12, waterMul: 0.3, cloudCover: 0.35, cloudLit: 0x2a3550, cloudShade: 0x05070f,
     grade: { tint: [0.96, 0.98, 1.05], sat: 0.97, con: 1.02, bloom: 0.5 } },
 };
-export const KEYS = [[0.0, 'night'], [0.27, 'dawn'], [0.58, 'afternoon'], [0.735, 'sunset'], [0.86, 'night'], [1.0, 'night']];
+/* 자정부터 4시 30분(0.19)까지는 밤을 유지하고, 그 뒤 해 뜨기 직전에 새벽으로 넘어간다.
+   예전엔 0.0 → 0.27 을 바로 보간해서 새벽 3시에 이미 하늘이 절반쯤 밝았다 */
+export const KEYS = [[0.0, 'night'], [0.19, 'night'], [0.27, 'dawn'], [0.58, 'afternoon'], [0.735, 'sunset'], [0.86, 'night'], [1.0, 'night']];
 
 /* 트렁크 아이템. hold: 길게 누르면 계속 (마시는 것) / 아니면 클릭 한 번 */
 export const ITEMS = {
   coffee:   { name: '커피', ic: ICON.coffee, act: '한 모금', hold: true, ds: '따뜻한 김이 천천히 올라온다' },
   whisky:   { name: '위스키', ic: ICON.whisky, act: '한 잔', hold: true, ds: '얼음이 잔에 부딪히는 소리' },
   smoke:    { name: '담배', ic: ICON.smoke, act: '한 모금', hold: true, ds: '연기가 바람에 흩어진다' },
-  sparkler: { name: '불꽃놀이 스틱', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
+  sparkler: { name: '스파클라', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
 };
 export const SEAT = {
   car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },
@@ -57,3 +60,7 @@ export const BLOCKS = [
   { x: [-0.45, 1.05], z: [-2.15, -0.7] }, { x: [2.1, 3.2], z: [0.05, 0.85] }, { x: [1.4, 2.3], z: [-2.95, -2.15] }, { x: [2.35, 2.75], z: [-2.15, -1.75] },
 ];
 export const EYE = 1.6, PR = 0.35;
+/* 텐트에서 자고 일어나는 시각 (아침 7시) */
+export const WAKE = 7 / 24;
+/* 장작 패기: 그루터기, 서는 자리(그루터기 앞 1.2m), 다음 장작을 집어 오는 장작더미, 기본 시선과 허용 범위(좌우·상하 rad) */
+export const CHOP = { stump: [2.55, -1.95], stand: [2.55, -0.75], pile: [1.85, -2.55], yaw: 0, pitch: -0.64, look: [0.32, 0.22] };

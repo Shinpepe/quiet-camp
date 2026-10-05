@@ -34,6 +34,19 @@ export function instanced(geo, mat, list, cast) {
   list.forEach((t, i) => { d.position.set(t.x, t.y, t.z); d.rotation.set(t.rx || 0, t.rot || 0, t.rz || 0); d.scale.set(t.s, t.s * (t.sy || 1), t.s); d.updateMatrix(); im.setMatrixAt(i, d.matrix); im.setColorAt(i, c.setRGB(t.tint[0], t.tint[1], t.tint[2])); });
   im.castShadow = !!cast; im.receiveShadow = true; im.frustumCulled = false; return im;
 }
+/* ── 넓게 흩어진 인스턴스를 구역별로 나눈다 ──
+   하나의 InstancedMesh 가 360°를 덮으면 바운딩 구가 전부를 감싸 컬링이 아무 효과가 없다.
+   방위각 nA 조각 × (rSplit 안쪽 / 바깥쪽) 으로 나누면 메인·반사·태양 그림자·모닥불 큐브 그림자 패스에서 화면 밖 구역이 빠진다 */
+function sectorize(list, nA, rSplit) {
+  const groups = new Map();
+  list.forEach(t => {
+    const a = Math.floor((Math.atan2(t.z, t.x) + Math.PI) / (Math.PI * 2) * nA) % nA, ring = Math.hypot(t.x, t.z) < rSplit ? 0 : 1, k = ring * nA + a;
+    if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t);
+  });
+  return [...groups.values()];
+}
+/* 인스턴스 기준 바운딩 구를 만들고 컬링을 켠다. pad 는 바람 흔들림 여유 */
+function culled(im, pad) { im.frustumCulled = true; im.computeBoundingSphere(); im.boundingSphere.radius += pad; return im; }
 function mergeGeos(list) {
   const pos = [], col = [], uv = [], c = new THREE.Color();
   list.forEach(p => {
@@ -170,12 +183,27 @@ export function makeVegetation(cfg) {
   for (let i = 0; i < nLeafs * 4 && leafs.length < nLeafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.35, 0.72, 0.36);
   for (let i = 0; i < nBushes * 4 && bushes.length < nBushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin);
   const treeColor = cfg.key === 'snow' ? 0x2f4f46 : 0x2b5a2b, fol = () => tex('foliage', 1, 1, 0.3);
-  if (pines.length) scene.add(instanced(pineGeo(treeColor, cfg.snow), swayMat(fol(), 0.012, 1.5), pines, true));
+  /* 소나무: 방위 8조각 × 60m 안팎 = 최대 16개 메시. 지오메트리·재질은 공유하므로 셰이더는 그대로 하나 */
+  if (pines.length) {
+    const pg = pineGeo(treeColor, cfg.snow), pm = swayMat(fol(), 0.012, 1.5);
+    sectorize(pines, 8, 60).forEach(list => scene.add(culled(instanced(pg, pm, list, true), 0.6)));
+  }
+  /* 활엽수: 모양 3종 × 방위 8조각 × 45m 안팎. 화면·태양 그림자·모닥불 큐브 그림자·반사 패스에서 보이지 않는 구역은 빠진다.
+     흔들림 여유 1.0m (줄기 위 최대 흔들림 약 0.4m 에 여유를 둠) */
   if (leafs.length) {
     const groups = [[], [], []]; leafs.forEach((t, i) => groups[i % 3].push(t));
-    groups.forEach(list => { if (list.length) scene.add(instanced(treeGeo(0x4c8a3a), swayMat(fol(), 0.02, 2.0), list, true)); });
+    groups.forEach(list => {
+      if (!list.length) return;
+      const g = treeGeo(0x4c8a3a), m = swayMat(fol(), 0.02, 2.0);
+      sectorize(list, 8, 45).forEach(sub => scene.add(culled(instanced(g, m, sub, true), 1.0)));
+    });
   }
-  if (bushes.length) scene.add(instanced(bushGeo(cfg.key === 'beach' ? 0x7a8a4e : 0x3f7a35), swayMat(fol(), 0.03, 0.2), bushes.map(b => Object.assign(b, { s: b.s * 0.6, y: b.y + 0.1 })), true));
+  /* 덤불: 방위 8조각 × 35m 안팎 */
+  if (bushes.length) {
+    const g = bushGeo(cfg.key === 'beach' ? 0x7a8a4e : 0x3f7a35), m = swayMat(fol(), 0.03, 0.2);
+    const list = bushes.map(b => Object.assign(b, { s: b.s * 0.6, y: b.y + 0.1 }));
+    sectorize(list, 8, 35).forEach(sub => scene.add(culled(instanced(g, m, sub, true), 0.4)));
+  }
   for (let i = 0; i < cfg.palms; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(5, 42), z = rnd(-2, 34); if (reserved(x, z)) continue; const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); }
   for (let i = 0; i < (cfg.rocks || 0); i++) { const a = rnd(0, 6.3), r = rnd(9, 70), x = Math.cos(a) * r, z = Math.sin(a) * r; if (reserved(x, z)) continue; const h = terrainH(x, z, cfg); if (h < 0.05) continue; const s = rnd(0.35, 1.4), rk = makeRock(s, cfg.snow ? 0xa8b3c0 : 0x6f7276); rk.position.set(x, h + s * 0.15, z); scene.add(rk); W.trees.push([x, z, s * 0.9]); }
 

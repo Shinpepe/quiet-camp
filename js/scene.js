@@ -4,7 +4,8 @@ import { BG, ITEMS } from './data.js';
 import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
-import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints, birdMat } from './props.js';
+import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints } from './props.js';
+import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
@@ -17,6 +18,9 @@ const streakTex = canvasTex(128, 16, (g, w, h) => {
 });
 const _fc = new THREE.Color(), _ag = new THREE.Color(0x2fae70);
 
+/* 카메라 아래(손, 손에 든 아이템)는 씬이 바뀌어도 살아남는다 — 조상 중에 카메라가 있으면 건너뛴다 */
+const underCamera = o => { for (let p = o; p; p = p.parent) if (p === ctx.camera) return true; return false; };
+
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
   if (W.envRT) { W.envRT.dispose(); W.envRT = null; }
@@ -24,10 +28,13 @@ function disposeScene() {
   if (W.heightTex) { W.heightTex.dispose(); W.heightTex = null; }
   if (W.shoreTex) { W.shoreTex.dispose(); W.shoreTex = null; }
   scene.traverse(o => {
-    if (o === ctx.camera || o.parent === ctx.camera || (o.parent && o.parent.parent === ctx.camera)) return;
-    if (o.geometry) o.geometry.dispose();
-    if (o.material && o.material !== birdMat) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-      if (!m) return;
+    if (underCamera(o)) return;
+    /* 라이트의 그림자맵(태양 2048², 모닥불 큐브맵)과 InstancedMesh 의 인스턴스 버퍼는 dispose 를 불러야 GPU 에서 풀린다 */
+    if ((o.isLight || o.isInstancedMesh) && o.dispose) o.dispose();
+    /* userData.shared: 여러 씬에 걸쳐 재사용하는 자원(새 지오메트리·재질)은 정리하지 않는다 */
+    if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+      if (!m || m.userData.shared) return;
       ['map', 'normalMap', 'roughnessMap'].forEach(k => { if (m[k]) m[k].dispose(); });
       if (m.uniforms && m.uniforms.uRipple && m.uniforms.uRipple.value) m.uniforms.uRipple.value.dispose();
       if (m.dispose) m.dispose();
@@ -49,13 +56,16 @@ export function rebakeEnv() {
 }
 
 /* ── 사전 컴파일: 로딩 화면 뒤에서 셰이더를 미리 만든다 ──
-   - 숨겨진 것(불꽃·유성·오로라·스파클러 데칼 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다
+   - 숨겨진 것(불꽃·유성·오로라·스파클라 데칼·장작 패기 도구 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다
    - 손에 드는 아이템은 임시로 한 벌 만들어 같은 프로그램을 캐시에 올린다.
      재질을 dispose 하면 프로그램도 해제되므로 임시 아이템은 지오메트리만 정리한다
    - 물 반사는 클리핑 평면이 켜진 셰이더 변형이 따로 있어서, 반사 타깃에 한 번 실제로 그려서 만든다
-   - ctx.compiling 동안 메인 루프는 그리지 않는다 */
+   - ctx.compiling 동안 메인 루프는 그리지 않는다
+   - 컴파일이 겹치면(빌드를 연달아 요청) 가장 마지막 컴파일이 끝날 때만 ctx.compiling 을 푼다 */
+let compileGen = 0;
 export function precompileScene() {
   const scene = ctx.scene, r = ctx.renderer, W = ctx.W; if (!scene) return Promise.resolve();
+  const gen = ++compileGen;
   ctx.compiling = true;
   const temp = new THREE.Group();
   Object.keys(ITEMS).forEach(k => { const it = makeItem(k); if (it.userData.setLit) it.userData.setLit(true); temp.add(it); });
@@ -73,7 +83,7 @@ export function precompileScene() {
   return run().catch(e => console.warn('precompile skipped', e)).finally(() => {
     shown.forEach(o => { o.visible = false; });
     scene.remove(temp); temp.traverse(o => { if (o.geometry) o.geometry.dispose(); });
-    ctx.compiling = false;
+    if (gen === compileGen) ctx.compiling = false;
   });
 }
 
@@ -283,10 +293,14 @@ export function buildScene(bgKey) {
   const table = makeTable(); table.position.set(0.6, 0, 0.5); scene.add(table);
   W.lantern = new THREE.PointLight(0xffc07a, W.lanternLit ? cur.lantern : 0, 12, 2); W.lantern.position.set(0.65, 0.75, 0.5); scene.add(W.lantern);
   const fire = makeFire(); fire.position.set(0.3, 0, -1.4); scene.add(fire);
-  /* 모닥불 그림자는 켜고 끄면 셰이더 재컴파일이 나므로 고정. 낮엔 강도가 0이라 그림자도 안 보인다 */
+  /* 모닥불 그림자는 켜고 끄면 셰이더 재컴파일이 나므로 castShadow 는 고정.
+     대신 불이 꺼져 있으면 main.js 가 shadow.autoUpdate 를 꺼서 큐브맵 갱신 비용을 없앤다 */
   W.fireLight.castShadow = settings.shadow && FINE;
+  W.fireLight.shadow.autoUpdate = W.fireLit;
   const car = makeCar(); car.position.set(0, 0, 8); scene.add(car);
   makeProps();
+  /* 장작 패기 도구(도끼·장작·반쪽·조각)는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
+  buildChop();
   if (cfg.snow) makeSnowCaps();
   contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(2.95, 0.3, 0.7, 0.7, 0.5);
 
@@ -296,7 +310,7 @@ export function buildScene(bgKey) {
   W.fireCore = new Particles(90, { color: 0xfff2b0, size: 0.11, opacity: 0.75, blending: THREE.AdditiveBlending }); scene.add(W.fireCore.mesh);
   W.embers = new Particles(80, { color: 0xffa040, size: 0.035, opacity: 0.95, blending: THREE.AdditiveBlending }); scene.add(W.embers.mesh);
   W.sparks = new Sparks(260); scene.add(W.sparks.mesh);
-  /* 스파클러 라이트 풀: 개수가 고정이라 스틱을 아무리 꽂아도 재컴파일이 없다. 배정은 main.js assignSparkLights */
+  /* 스파클라 라이트 풀: 개수가 고정이라 아무리 꽂아도 재컴파일이 없다. 배정은 main.js assignSparkLights */
   { const n = FINE ? 6 : 3;
     for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffd8a0, 0, 3.5, 2); scene.add(l); W.sparkLights.push(l); } }
   W.prints = cfg.snow ? new Footprints(140, [0.66, 0.7, 0.8], 45) : cfg.key === 'beach' ? new Footprints(140, [0.72, 0.65, 0.55], 90) : null;
@@ -322,6 +336,7 @@ export function buildScene(bgKey) {
     { id: 'tent',     pos: [-1.6, 0.7, 0.0],    r: 2.3, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기' },
     { id: 'car',      pos: [-1.35, 1.0, 8.1],   r: 2.0, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기' },
     { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.4, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
+    { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 2.3, hit: 0.32, from: ['walk'],          label: () => '장작 패기' },
     { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
     { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기' },
     { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기' },

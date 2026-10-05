@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
-import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
@@ -13,7 +12,8 @@ const FINE = matchMedia('(pointer:fine)').matches;
 /* AgX 는 ACES 보다 채도·대비가 낮게 나온다. 시간대별 grade 값은 그대로 두고 여기서 한꺼번에 보정 */
 const AGX_SAT = 0.1, AGX_CON = 0.04;
 
-/* RenderPass → GTAO → Bokeh(사진) → Bloom → OutputPass → SMAA → Grade
+/* RenderPass → GTAO → Bloom → OutputPass → SMAA → Grade
+   사진은 화면에 보이는 그대로 찍는다 (예전의 보케 패스는 제거)
    SMAA: MSAA 가 못 잡는 표면 하이라이트 앨리어싱(얇은 크롬·clearcoat 반짝임)을 화면 공간에서 부드럽게. LDR 인 OutputPass 뒤에 둔다
    Grade: 채도·대비·틴트 + 스플릿 토닝(그림자는 하늘 색, 하이라이트는 햇빛 색) + 완만한 필름 커브 + 비네트 + 그레인(밝은 곳에서는 약하게) */
 const GradeShader = {
@@ -29,7 +29,7 @@ const GradeShader = {
       col+=(hashg(vUv*vec2(1920.0,1080.0)+fract(uTime)*7.0)-0.5)*grain*(1.0-0.55*l);
       gl_FragColor=vec4(clamp(col,0.0,1.0),1.0);}`,
 };
-const _s = new THREE.Color(), _h = new THREE.Color();
+const _s = new THREE.Color();
 const lum = c => 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
 function hueTint(out, c, k) { _s.copy(c); const L = Math.max(lum(_s), 1e-3); _s.multiplyScalar(1 / L); _s.r = Math.min(_s.r, 1.8); _s.g = Math.min(_s.g, 1.8); _s.b = Math.min(_s.b, 1.8); out.set(1 + (_s.r - 1) * k, 1 + (_s.g - 1) * k, 1 + (_s.b - 1) * k); }
 
@@ -47,17 +47,15 @@ export function createPost(renderer, camera) {
   gtao.blendIntensity = 0.6; gtao.enabled = settings.ao;
   if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
   if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
-  /* BokehShader 의 focus 는 뷰 공간 거리(m). aperture 는 초점에서 1m 벗어날 때마다 uv 0.004 만큼 흐려지고 0.012 에서 포화 */
-  const bokeh = new BokehPass(dummy, camera, { focus: 8, aperture: 0.004, maxblur: 0.012 }); bokeh.enabled = false;
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.4, 1.25);
   const output = new OutputPass();
   const pr = renderer.getPixelRatio();
   const smaa = new SMAAPass(innerWidth * pr, innerHeight * pr); smaa.enabled = FINE;
   const grade = new ShaderPass(GradeShader);
-  composer.addPass(renderPass); composer.addPass(gtao); composer.addPass(bokeh); composer.addPass(bloom); composer.addPass(output); composer.addPass(smaa); composer.addPass(grade);
+  composer.addPass(renderPass); composer.addPass(gtao); composer.addPass(bloom); composer.addPass(output); composer.addPass(smaa); composer.addPass(grade);
   return {
-    composer, bloom, gtao, bokeh, smaa,
-    setScene(scene) { renderPass.scene = scene; gtao.scene = scene; bokeh.scene = scene; },
+    composer, bloom, gtao, smaa,
+    setScene(scene) { renderPass.scene = scene; gtao.scene = scene; },
     setTime(tm) {
       const g = tm.grade, mul = ctx.W.cfg ? (ctx.W.cfg.bloomMul || 1) : 1;
       grade.uniforms.tint.value.set(...g.tint); grade.uniforms.sat.value = g.sat + AGX_SAT; grade.uniforms.con.value = g.con + AGX_CON; bloom.strength = g.bloom * mul;
@@ -67,6 +65,5 @@ export function createPost(renderer, camera) {
     resize(w, h) { composer.setSize(w, h); },
     update(T) { grade.uniforms.uTime.value = T; },
     render() { composer.render(); },
-    renderPhoto(focusDist) { bokeh.uniforms.focus.value = Math.max(camera.near, focusDist); bokeh.enabled = true; composer.render(); bokeh.enabled = false; },
   };
 }

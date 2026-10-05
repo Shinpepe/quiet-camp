@@ -283,7 +283,8 @@ export function makeProps() {
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.019, 10, 8), hickory); knob.position.set(0.4, -0.022, 0); knob.scale.set(1.3, 1, 1); G.add(knob);
     const wrap = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.24, 0.0, 0), new THREE.Vector3(0.33, -0.012, 0)]), 6, 0.017, 10, false), leather); G.add(wrap);
     G.position.set(-0.03, 0.382, 0.02); G.rotation.set(0, 0.3, 0.6);
-    stump.add(G);
+    /* 장작을 패는 동안에는 chop.js 가 이 도끼를 숨기고 작업용 도끼를 보여 준다 */
+    stump.add(G); ctx.W.stumpAxe = G;
     const slot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.004, 0.02), std(0x1a1410)); slot.position.set(0.03, 0.322, 0.01); slot.rotation.y = 0.3; stump.add(slot);
   }
   stump.position.set(2.55, 0, -1.95); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(2.55, -1.95, 0.55, 0.55, 0.6);
@@ -495,7 +496,9 @@ export class Footprints {
         void main(){vUv=uv;vK=aK;vec4 wp=modelMatrix*instanceMatrix*vec4(position,1.0);vW=wp.xyz;gl_Position=projectionMatrix*viewMatrix*wp;}`,
       fragmentShader: `uniform sampler2D uMap;uniform vec3 uCol;varying vec2 vUv;varying float vK;varying vec3 vW;
         void main(){float t=texture2D(uMap,vUv).r;float d=1.0-smoothstep(30.0,70.0,length(vW-cameraPosition));float k=(1.0-t)*vK*d;gl_FragColor=vec4(mix(vec3(1.0),uCol,k),1.0);}`,
-      blending: THREE.MultiplyBlending, depthWrite: false, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      /* MultiplyBlending 은 premultipliedAlpha 가 true 여야 three 가 블렌드 함수를 설정한다 (아니면 콘솔 에러 + 이전 블렌딩을 물려받음).
+         출력 알파가 1 이라 프리멀티플라이 여부와 무관하게 결과 색은 같다 */
+      blending: THREE.MultiplyBlending, premultipliedAlpha: true, depthWrite: false, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     }), n);
     const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < n; i++) this.mesh.setMatrixAt(i, zero);
     this.mesh.frustumCulled = false; this.mesh.userData.noAO = true; this.mesh.castShadow = this.mesh.receiveShadow = false; this.mesh.renderOrder = 1;
@@ -551,23 +554,36 @@ export class Sparks {
   }
 }
 
-/* ── 새 ── */
+/* ── 새: 지오메트리와 재질은 한 벌만 만들어 모든 새가 공유한다.
+   예전엔 무리마다 새로 만들고 버릴 때 dispose 하지 않아 GPU 버퍼가 계속 쌓였다.
+   userData.shared 표시가 있으면 scene.js 의 disposeScene 도 건너뛴다 ── */
 export const birdMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.9, side: THREE.DoubleSide });
+birdMat.userData.shared = true;
 function wingPart(len, c0, c1) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -c0 * 0.35, len, 0, -c1 * 0.3 - len * 0.12, len, 0, c1 * 0.7 - len * 0.12, 0, 0, -c0 * 0.35, len, 0, c1 * 0.7 - len * 0.12, 0, 0, c0 * 0.65], 3));
   g.computeVertexNormals(); return g;
 }
+let BIRD_GEO = null;
+function birdGeo() {
+  if (BIRD_GEO) return BIRD_GEO;
+  BIRD_GEO = {
+    body: new THREE.SphereGeometry(0.06, 10, 8), head: new THREE.SphereGeometry(0.038, 8, 6), beak: new THREE.ConeGeometry(0.012, 0.05, 5),
+    tail: wingPart(0.14, 0.05, 0.1), inner: wingPart(0.24, 0.16, 0.12), outer: wingPart(0.3, 0.12, 0.03),
+  };
+  Object.values(BIRD_GEO).forEach(g => { g.userData.shared = true; });
+  return BIRD_GEO;
+}
 function makeBird() {
-  const b = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), birdMat); body.scale.set(0.75, 0.7, 2.4); b.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.038, 8, 6), birdMat); head.position.set(0, 0.025, -0.16); b.add(head);
-  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.05, 5), birdMat); beak.rotation.x = -Math.PI / 2; beak.position.set(0, 0.02, -0.21); b.add(beak);
-  const tail = new THREE.Mesh(wingPart(0.14, 0.05, 0.1), birdMat); tail.rotation.y = -Math.PI / 2; tail.position.set(0, 0.01, 0.12); b.add(tail);
+  const b = new THREE.Group(), G = birdGeo();
+  const body = new THREE.Mesh(G.body, birdMat); body.scale.set(0.75, 0.7, 2.4); b.add(body);
+  const head = new THREE.Mesh(G.head, birdMat); head.position.set(0, 0.025, -0.16); b.add(head);
+  const beak = new THREE.Mesh(G.beak, birdMat); beak.rotation.x = -Math.PI / 2; beak.position.set(0, 0.02, -0.21); b.add(beak);
+  const tail = new THREE.Mesh(G.tail, birdMat); tail.rotation.y = -Math.PI / 2; tail.position.set(0, 0.01, 0.12); b.add(tail);
   const wings = [];
   [1, -1].forEach(sx => {
-    const inner = new THREE.Mesh(wingPart(0.24, 0.16, 0.12), birdMat); inner.position.set(sx * 0.03, 0.02, -0.02);
-    const outer = new THREE.Mesh(wingPart(0.3, 0.12, 0.03), birdMat); outer.position.x = 0.24; inner.add(outer);
+    const inner = new THREE.Mesh(G.inner, birdMat); inner.position.set(sx * 0.03, 0.02, -0.02);
+    const outer = new THREE.Mesh(G.outer, birdMat); outer.position.x = 0.24; inner.add(outer);
     inner.scale.x = sx; b.add(inner); wings.push({ inner, outer, sx });
   });
   b.userData = { ph: rnd(0, 6), glide: rnd(0, 6), wings, body }; return b;
@@ -589,6 +605,7 @@ export function updateFlocks(dt, T) {
       u.wings.forEach(w => { w.inner.rotation.z = w.sx * a; w.outer.rotation.z = w.sx * a2; });
       u.body.position.y = Math.sin(T * 8 + u.ph) * 0.012 * amp;
     });
+    /* 지오메트리·재질이 공유라서 씬에서 떼어 내기만 하면 된다 (정리할 GPU 자원이 없다) */
     if (Math.abs(g.position.x) > 200) { ctx.scene.remove(g); return false; } return true;
   });
 }
@@ -611,5 +628,6 @@ export function makeSnowCaps() {
   let seed = 1;
   const cap = (w, d, h, x, y, z, ry, slope) => { const m = new THREE.Mesh(snowCapGeo(w, d, h, slope, seed += 2.3), snow); m.position.set(x, y, z); m.rotation.y = ry || 0; m.castShadow = false; m.receiveShadow = true; scene.add(m); };
   cap(1.7, 2.8, 0.1, 0, 1.9, 8.875);
-  cap(1.75, 1.05, 0.07, 0, 1.07, 6.325);
+  /* 보닛 상판 윗면은 y 1.14 (1.02 + 0.24/2). 그 위 5mm 에서 시작해야 보인다 — 예전 1.07 은 보닛 안에 묻혀 있었다 */
+  cap(1.75, 1.05, 0.07, 0, 1.145, 6.325);
 }

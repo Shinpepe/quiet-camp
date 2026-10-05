@@ -9,6 +9,8 @@ export const isTouch = 'ontouchstart' in window && !matchMedia('(pointer:fine)')
 export const SEED = Math.random() * 100;
 /* 큰 TypedArray 를 spread 로 push 하면 호출 스택 한계에 걸릴 수 있어 루프로 복사한다 */
 export function pushAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); }
+/* 받침 유무로 조사를 고른다: josa('스틱', '을', '를') → '스틱을', josa('커피', '을', '를') → '커피를' */
+export const josa = (w, a, b) => { const c = w.charCodeAt(w.length - 1) - 0xAC00; return w + (c >= 0 && c <= 11171 && c % 28 ? a : b); };
 
 export function hash(x, y) { const n = Math.sin(x * 127.1 + y * 311.7 + SEED) * 43758.5453; return n - Math.floor(n); }
 export function vnoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf); const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
@@ -39,6 +41,9 @@ export const FOG_GLSL = `
 float fogAmount(vec3 wpos,vec4 f1){vec3 d=wpos-cameraPosition;float dist=length(d);float y0=clamp(cameraPosition.y-f1.z,-20.0,600.0),y1=clamp(wpos.y-f1.z,-20.0,600.0);float dy=y1-y0;float hi=abs(dy)>0.05?(exp(-f1.y*y0)-exp(-f1.y*y1))/(f1.y*dy):exp(-f1.y*y0);return clamp(1.0-exp(-f1.x*dist*hi),0.0,1.0);}
 vec3 fogTint(vec3 wpos,vec3 fc,vec4 f0,vec4 f2){vec3 dir=normalize(wpos-cameraPosition);float s=max(dot(dir,f0.xyz),0.0);return mix(fc,f2.rgb,pow(s,8.0)*f0.w);}`;
 THREE.UniformsLib.fog.uFog = { value: FOG };
+/* ShaderLib 은 three 가 로드될 때 UniformsLib 을 이미 복제해 두었으므로, 위 한 줄만으로는 MeshStandardMaterial 등에 uFog 가 들어가지 않는다.
+   각 재질 템플릿에 직접 넣는다. cloneUniforms 는 Float32Array 를 복사하지 않고 참조로 넘기므로 FOG 하나를 갱신하면 모든 재질에 반영된다 */
+for (const k in THREE.ShaderLib) { const u = THREE.ShaderLib[k].uniforms; if (u && u.fogColor) u.uFog = { value: FOG }; }
 THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\nvarying vec3 vFogW;\n#endif';
 THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\nvFogW=cameraPosition+transpose(mat3(viewMatrix))*mvPosition.xyz;\n#endif';
 THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\nuniform vec3 fogColor;varying vec3 vFogW;uniform vec4 uFog[3];\n#ifdef FOG_EXP2\nuniform float fogDensity;\n#else\nuniform float fogNear;uniform float fogFar;\n#endif\n' + FOG_GLSL + '\n#endif';
