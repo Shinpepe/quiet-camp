@@ -7,13 +7,14 @@ import { makeItem } from './props.js';
 import { buildScene, precompileScene, rebakeEnv } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
-import { startChop, chopEye, chopPress, chopRelease, requestChopStop, resetChop, chopHooks } from './chop.js';
+import { startChop, chopEye, chopYaw, chopPress, chopRelease, requestChopStop, resetChop, chopHooks } from './chop.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기 ── */
 
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
-export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, lastSipSfx: 0, lastTargetId: null };
+/* 마시기: mouth = 이번 모금에서 잔이 입에 닿았는지(들이마시는 소리를 냈는지), swallows = 넘긴 횟수, nextSwallow = 다음 목 넘김 시각 */
+export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, swallows: 0, nextSwallow: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
@@ -114,11 +115,12 @@ export function bindInput() {
   bindToggle('reflect', 'reflect', on => { if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on && !isTouch ? 1 : 0; });
   renderMenu();
 }
-/* 시선. 장작을 패는 동안에는 그루터기 주변으로 제한한다 */
+/* 시선. 장작을 패는 동안에는 그루터기 주변으로 제한한다 (기준 방향은 장작 패기를 시작한 쪽) */
 function look(dx, dy, s) {
   player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3);
   if (state.mode === 'chop' && cam.t >= 1) {
-    player.yaw = CHOP.yaw + clamp(wrapPI(player.yaw - CHOP.yaw), -CHOP.look[0], CHOP.look[0]);
+    const cy = chopYaw();
+    player.yaw = cy + clamp(wrapPI(player.yaw - cy), -CHOP.look[0], CHOP.look[0]);
     player.pitch = clamp(player.pitch, CHOP.pitch - CHOP.look[1], CHOP.pitch + CHOP.look[1]);
   }
 }
@@ -175,14 +177,16 @@ function act(id) {
   }
 }
 
-/* ── 장작 패기 시작·끝: 그루터기 앞으로 걸어가 시선을 내린다. 손에 든 것은 잠시 숨긴다 ── */
+/* ── 장작 패기 시작·끝: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ──
+   서는 자리가 장작더미 등에 막히면 chop.js 가 가까운 빈 각도를 찾는다 */
 let chopTold = false;
 function beginChop() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
-  if (!startChop()) return;
-  anim.sipT = null; anim.holding = false; if (state.item) resetHand(); ctx.hand.visible = false;
-  state.mode = 'chop'; state.seat = null; player.x = CHOP.stand[0]; player.z = CHOP.stand[1];
-  startMove(chopEye().clone(), CHOP.yaw, CHOP.pitch); updateHUD();
+  if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('장작을 팰 자리가 없다'); return; }
+  anim.sipT = null; anim.holding = false; anim.mouth = false; if (state.item) resetHand(); ctx.hand.visible = false;
+  const eye = chopEye();
+  state.mode = 'chop'; state.seat = null; player.x = eye.x; player.z = eye.z;
+  startMove(eye.clone(), chopYaw(), CHOP.pitch); updateHUD();
   if (!chopTold) { chopTold = true; setTimeout(() => { if (state.mode === 'chop') showToast(isTouch ? '버튼을 길게 누르면 힘을 모을 수 있다' : '길게 누르면 힘을 모을 수 있다'); }, 1500); }
 }
 function endChop() {
@@ -201,7 +205,7 @@ function renderTrunk() {
 const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/></svg>';
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); sfx('pick', type); showToast(josa(ITEMS[type].name, '을', '를') + ' 챙겼다'); }
 /* 손에 든 것을 내려놓는다. 떼어 내기 전에 GPU 자원을 해제한다 (예전엔 바꿀 때마다 지오메트리·재질이 쌓였다) */
-export function putBack() { state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; }
+export function putBack() { state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; anim.mouth = false; }
 /* 땅에 꽂힌 스파클라를 모두 치운다 (메뉴로 나갈 때, 잠들어 시간이 건너뛸 때, 같은 씬으로 다시 시작할 때) */
 function clearPlanted() {
   const W = ctx.W; if (!W.planted) return;
@@ -224,7 +228,7 @@ function useItem() {
   if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
   if (anim.sipT !== null) return;
   if (ctx.W.item.userData.amount <= 0) { showToast(state.item === 'smoke' ? '다 피웠다' : '잔이 비었다'); return; }
-  anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.lastSipSfx = -9;
+  anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.mouth = false; anim.swallows = 0;
   if (state.item === 'whisky') sfx('clink', 0.6); else if (state.item === 'smoke') sfx('inhale');
 }
 function endSip() { anim.holding = false; chopRelease(); }
@@ -262,7 +266,7 @@ export function itemEmptied() {
 /* ── 잠자기: 언제 잠들든 다음 아침 7시(WAKE)에 깬다 ── */
 const sleep = { on: false, phase: '', t: 0, from: 0, to: 0 };
 function startSleep() {
-  sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null;
+  sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
   $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('bag');
 }

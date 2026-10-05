@@ -48,6 +48,49 @@ export function makeLantern(lit) {
   g.userData.setLit(!!lit);
   return g;
 }
+
+/* ── 도끼: 그루터기에 꽂힌 것과 장작 패기 때 드는 것이 같은 모델 ──
+   원점 = 뒤쪽 손이 쥐는 자리. 자루는 -z 쪽으로 약 0.8m, 머리는 z -0.7, 날은 -y 를 향한다.
+   chop.js 는 AXE_EDGE(날 가운데의 원점 기준 위치)로 날이 장작 윗면 중앙에 닿는 피벗을 역산한다 */
+export const AXE_EDGE = { y: -0.161, z: -0.701 };
+export function makeAxe() {
+  const g = new THREE.Group(), V3 = THREE.Vector3;
+  const hickory = smoothM(0xb08a5a, Object.assign({ roughness: 0.6 }, tex('wood', 1, 4, 0.2)));
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8e949b, metalness: 0.85, roughness: 0.4 });
+  const edgeM = new THREE.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 0.9, roughness: 0.22 });
+  const leather = smoothM(0x4a3324, { roughness: 0.9 });
+  /* 자루: 살짝 S자로 휜 곡선. 굵기는 끝(손잡이 혹 쪽)이 굵고, 가운데가 가늘고, 머리 쪽으로 다시 굵어진다 */
+  const path = new THREE.CatmullRomCurve3([[-0.014, 0.07], [-0.004, 0], [0.006, -0.2], [0.008, -0.45], [0.002, -0.66], [0, -0.745]].map(([y, z]) => new V3(0, y, z)));
+  const SEG = 40, RAD = 10, hg = new THREE.TubeGeometry(path, SEG, 1, RAD, false), pa = hg.attributes.position, uv = hg.attributes.uv, P = new V3();
+  for (let i = 0; i <= SEG; i++) {
+    const t = i / SEG, r = 0.0148 + 0.0045 * Math.exp(-t * 30) + 0.0028 * smooth(0.55, 0.92, t);
+    path.getPointAt(t, P);
+    for (let j = 0; j <= RAD; j++) { const k = i * (RAD + 1) + j; pa.setXYZ(k, P.x + (pa.getX(k) - P.x) * r, P.y + (pa.getY(k) - P.y) * r, P.z + (pa.getZ(k) - P.z) * r); }
+  }
+  /* 튜브 uv 는 u 가 길이 방향이라 나뭇결이 고리처럼 감긴다 → u·v 를 바꿔 결이 길이를 따라 흐르게 */
+  for (let k = 0; k < uv.count; k++) { const u = uv.getX(k); uv.setXY(k, uv.getY(k), u); }
+  hg.computeVertexNormals(); g.add(new THREE.Mesh(hg, hickory));
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.021, 12, 10), hickory); knob.position.copy(path.getPointAt(0)); knob.scale.set(1, 1, 0.8); g.add(knob);
+  const wp = []; for (let i = 0; i <= 6; i++) wp.push(path.getPointAt(0.05 + 0.17 * i / 6));
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(wp), 12, 0.0172, RAD, false), leather));
+  /* 머리: 옆에서 본 윤곽(뒤통수 → 눈 → 오목한 뺨 → 넓게 벌어진 날)을 두께 방향으로 뽑은 뒤, 날 쪽으로 갈수록 얇게 깎는다 */
+  const s = new THREE.Shape();
+  s.moveTo(-0.042, 0.045); s.lineTo(0.042, 0.045); s.lineTo(0.045, -0.03);
+  s.quadraticCurveTo(0.028, -0.07, 0.085, -0.145);
+  s.quadraticCurveTo(0, -0.175, -0.08, -0.14);
+  s.quadraticCurveTo(-0.03, -0.07, -0.045, -0.03); s.closePath();
+  const TH = 0.026, headG = new THREE.ExtrudeGeometry(s, { depth: TH, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2, curveSegments: 10 });
+  headG.translate(0, 0, -TH / 2);
+  const hp = headG.attributes.position;
+  for (let i = 0; i < hp.count; i++) hp.setZ(i, hp.getZ(i) * (1 - 0.85 * smooth(-0.03, -0.15, hp.getY(i))));
+  headG.computeVertexNormals(); headG.rotateY(Math.PI / 2); headG.translate(0, 0, -0.7);
+  g.add(new THREE.Mesh(headG, steel));
+  /* 날 끝의 밝은 연마 띠: 휘어진 날을 그대로 따라간다 */
+  const edgeC = new THREE.QuadraticBezierCurve3(new V3(0, -0.145, -0.785), new V3(0, -0.175, -0.7), new V3(0, -0.14, -0.62));
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(edgeC, 16, 0.0028, 6, false), edgeM));
+  return g;
+}
+
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
   const clothM = cloth(0xe0783a, 8), flyM = cloth(0xc4602a, 8), backM = cloth(0xb8562a, 4), liningM = cloth(0xc9673a, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
@@ -271,21 +314,15 @@ export function makeProps() {
   const stump = new THREE.Group();
   const st = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.32, 12), [bark, cut, cut]); st.position.y = 0.16; stump.add(st);
   {
-    const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.4 }), hickory = wood(0xb08a5a, 1, 1), leather = smoothM(0x4a3324, { roughness: 0.9 });
-    const G = new THREE.Group();
-    const s = new THREE.Shape();
-    s.moveTo(-0.055, -0.03); s.lineTo(-0.055, 0.03); s.lineTo(0.0, 0.034);
-    s.quadraticCurveTo(0.05, 0.04, 0.085, 0.075); s.quadraticCurveTo(0.108, 0.0, 0.085, -0.075); s.quadraticCurveTo(0.05, -0.04, 0.0, -0.034); s.closePath();
-    const headG = new THREE.ExtrudeGeometry(s, { depth: 0.022, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 2 }); headG.translate(0, 0, -0.011);
-    const head = new THREE.Mesh(headG, steel); head.rotation.z = -Math.PI / 2; G.add(head);
-    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-0.02, 0, 0), new THREE.Vector3(0.13, 0.006, 0), new THREE.Vector3(0.27, -0.002, 0), new THREE.Vector3(0.4, -0.022, 0)]);
-    const handle = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.015, 10, false), hickory); G.add(handle);
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.019, 10, 8), hickory); knob.position.set(0.4, -0.022, 0); knob.scale.set(1.3, 1, 1); G.add(knob);
-    const wrap = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.24, 0.0, 0), new THREE.Vector3(0.33, -0.012, 0)]), 6, 0.017, 10, false), leather); G.add(wrap);
-    G.position.set(-0.03, 0.382, 0.02); G.rotation.set(0, 0.3, 0.6);
-    /* 장작을 패는 동안에는 chop.js 가 이 도끼를 숨기고 작업용 도끼를 보여 준다 */
-    stump.add(G); ctx.W.stumpAxe = G;
-    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.004, 0.02), std(0x1a1410)); slot.position.set(0.03, 0.322, 0.01); slot.rotation.y = 0.3; stump.add(slot);
+    /* 그루터기에 박힌 도끼: 장작 패기 때 드는 것과 같은 모델(makeAxe).
+       날 가운데가 윗면(y 0.32)에서 3cm 박히고, 자루는 31° 위로 비스듬히 월드 +x 쪽(캠프 반대편)으로 뻗는다.
+       장작을 패는 동안에는 chop.js 가 이 도끼(holder)를 숨기고 같은 모양의 작업용 도끼를 보여 준다 */
+    const holder = new THREE.Group(), axe = makeAxe(), tilt = -0.55, c = Math.cos(tilt), s = Math.sin(tilt);
+    axe.rotation.x = tilt;
+    axe.position.set(0, 0.32 - 0.03 - (AXE_EDGE.y * c - AXE_EDGE.z * s), -(AXE_EDGE.y * s + AXE_EDGE.z * c));
+    holder.add(axe); holder.rotation.y = Math.PI / 2 - 0.5; stump.add(holder); ctx.W.stumpAxe = holder;
+    /* 칼자국은 도끼를 들어도 남도록 그루터기에 붙인다 */
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.004, 0.17), std(0x1a1410)); slot.position.set(0, 0.322, 0); slot.rotation.y = holder.rotation.y; stump.add(slot);
   }
   stump.position.set(2.55, 0, -1.95); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(2.55, -1.95, 0.55, 0.55, 0.6);
 

@@ -187,12 +187,21 @@ function loop(now) {
         if (k > 0.85 && ud.amount > 0) {
           const rate = type === 'smoke' ? 0.07 : type === 'coffee' ? 0.22 : 0.28;
           ud.amount = Math.max(0, ud.amount - rate * dt); ud.setAmount(ud.amount);
-          /* 한 모금마다 입에 닿고 잠시 뒤 꿀꺽 (audio.js drink). 위스키는 더 천천히 */
-          if (type !== 'smoke' && T - anim.lastSipSfx > (type === 'coffee' ? 1.3 : 1.7)) { anim.lastSipSfx = T; sfx('sip', type); }
+          /* 마시는 소리 (audio.js): 잔이 입에 닿는 순간 들이마심(커피 '후루룩', 위스키 '쓰읍')
+             → 들고 있는 동안 불규칙한 목 넘김 → 잔을 뗄 때 숨('하~' / '크~') */
+          if (type !== 'smoke') {
+            if (!anim.mouth) { anim.mouth = true; anim.swallows = 0; anim.nextSwallow = T + rnd(0.45, 0.6); sfx('sipStart', type); }
+            else if (T >= anim.nextSwallow) { anim.swallows++; anim.nextSwallow = T + rnd(0.8, 1.15) * (type === 'whisky' ? 1.3 : 1); sfx('swallow'); }
+          }
           if (ud.amount === 0) { if (type === 'smoke') startExhale(anim.holdT); itemEmptied(); }
         }
-        /* 잔을 내려놓을 때: 위스키는 얼음이 살짝 부딪힌다 */
-        if (W.item && anim.sipT >= 1) { anim.sipT = null; anim.holding = false; if (type === 'smoke') startExhale(anim.holdT); else if (type === 'whisky') sfx('clink', 0.4); resetHand(); }
+        /* 잔을 내려놓을 때: 마신 뒤의 숨, 위스키는 얼음이 살짝 부딪힌다 */
+        if (W.item && anim.sipT >= 1) {
+          anim.sipT = null; anim.holding = false;
+          if (type === 'smoke') startExhale(anim.holdT);
+          else { if (anim.mouth) sfx('sipEnd', { type, held: anim.holdT, swallowed: anim.swallows > 0 }); if (type === 'whisky') sfx('clink', 0.4); }
+          anim.mouth = false; resetHand();
+        }
       }
       if (W.item) {
         ud.emitter.getWorldPosition(tmpV);

@@ -9,9 +9,19 @@ import { rnd } from './util.js';
 
 /* ── 녹음 샘플로 바꾸고 싶을 때: 파일 경로를 넣으면 합성 버퍼 대신 이 파일들을 돌아가며 쓴다.
    예) sand: ['sounds/sand_1.ogg', 'sounds/sand_2.ogg', ...]
-   녹음본은 크기가 제각각이라 FOLEY_GAIN 으로 맞춘다 ── */
-export const FOLEY_FILES = { sand: [], dirt: [], gulp: [], chopHit: [], chopSplit: [], chopKnot: [], logPlace: [], woodLand: [] };
-const FOLEY_GAIN = { sand: 0.12, dirt: 0.13, gulp: 0.11, chopHit: 0.32, chopSplit: 0.4, chopKnot: 0.3, logPlace: 0.2, woodLand: 0.17 };
+   녹음본은 크기가 제각각이라 FOLEY_GAIN 으로 맞춘다.
+   swallow: 목 넘김 / slurp: 뜨거운 음료 들이마심 / sipCold: 찬 술 한 모금 / ahh: 마신 뒤 '하~' / kha: 독한 술 뒤 '크~'
+   crackle: 장작 타닥 / firePop: 큰 탁 / cricketChirp: 끊어 우는 귀뚜라미 / cricketTrill: 길게 떠는 귀뚜라미 (먼 합창도 이 샘플로 다시 구워진다) ── */
+export const FOLEY_FILES = {
+  sand: [], dirt: [], swallow: [], slurp: [], sipCold: [], ahh: [], kha: [],
+  crackle: [], firePop: [], cricketChirp: [], cricketTrill: [],
+  chopHit: [], chopSplit: [], chopKnot: [], logPlace: [], woodLand: [],
+};
+const FOLEY_GAIN = {
+  sand: 0.12, dirt: 0.13, swallow: 0.09, slurp: 0.08, sipCold: 0.06, ahh: 0.05, kha: 0.06,
+  crackle: 0.09, firePop: 0.17, cricketChirp: 0.022, cricketTrill: 0.016,
+  chopHit: 0.32, chopSplit: 0.4, chopKnot: 0.3, logPlace: 0.2, woodLand: 0.17,
+};
 
 let AC = null, master, comp, worldLP, worldGain, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
@@ -37,8 +47,11 @@ export function initAudio() {
   /* 잔향 입력: world 전부 + sfx 는 조금 덜 (손 근처 소리는 직접음이 더 커야 한다) */
   const vin = gainN(1), sfxSend = gainN(0.7); worldGain.connect(vin); sfxBus.connect(sfxSend); sfxSend.connect(vin);
   verb = { in: vin, slot: null, key: null };
-  /* 폴리 뱅크는 첫 걸음에서 멈칫하지 않도록 미리 굽고, 녹음 파일이 지정돼 있으면 불러와 덮어쓴다 */
-  setTimeout(() => { Object.keys(GEN).forEach(getBank); loadFoley(); }, 0);
+  /* 폴리 뱅크는 첫 사용에서 멈칫하지 않도록 미리 굽는다. 종류마다 한 틱씩 나눠 한 번에 오래 멈추지 않게.
+     다 구운 뒤 벌레 합창을 굽고, 녹음 파일이 지정돼 있으면 불러와 덮어쓴다 */
+  const keys = Object.keys(GEN);
+  keys.forEach((k, i) => setTimeout(() => getBank(k), i * 25));
+  setTimeout(() => { getChorus(); loadFoley(); }, keys.length * 25 + 25);
 }
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.setTargetAtTime(v, AC.currentTime, 0.03); }
@@ -139,11 +152,22 @@ function holdParam(p, t) {
 
 /* ══ 절차적 폴리 뱅크 ══
    게임 발소리처럼 "녹음본 여러 개를 돌려 쓰는" 구조를 합성으로 흉내 낸다.
-   소리를 샘플 단위로 직접 그려 AudioBuffer 로 구워 두고(종류마다 변형 4~8개), 재생할 때 변형을 고르고 피치·크기를 흔든다.
+   소리를 샘플 단위로 직접 그려 AudioBuffer 로 구워 두고(종류마다 변형 여러 개), 재생할 때 변형을 고르고 피치·크기를 흔든다.
    층별로 먼저 정규화한 뒤 섞기 때문에 amp 값이 곧 층 사이의 비율이다 */
 const bank = {}, lastIdx = {};
 function lowpass(d, sr, fc) { const k = Math.exp(-2 * Math.PI * fc / sr); let y = 0; for (let i = 0; i < d.length; i++) { y = d[i] * (1 - k) + y * k; d[i] = y; } }
 function highpass(d, sr, fc) { const k = Math.exp(-2 * Math.PI * fc / sr); let y = 0, px = 0; for (let i = 0; i < d.length; i++) { const x = d[i]; y = k * (y + x - px); px = x; d[i] = y; } }
+/* 2차 필터(RBJ): 'bp' 대역통과(정점 0dB) / 'lp' 저역 / 'hp' 고역 — 숨소리의 포먼트, 벌레 소리의 공명처럼 좁은 대역이 필요할 때 */
+function bq(d, sr, type, f, q) {
+  const w = 2 * Math.PI * f / sr, cs = Math.cos(w), al = Math.sin(w) / (2 * q);
+  let b0, b1, b2;
+  if (type === 'bp') { b0 = al; b1 = 0; b2 = -al; }
+  else if (type === 'lp') { b0 = (1 - cs) / 2; b1 = 1 - cs; b2 = (1 - cs) / 2; }
+  else { b0 = (1 + cs) / 2; b1 = -(1 + cs); b2 = (1 + cs) / 2; }
+  const a0 = 1 + al, a1 = -2 * cs / a0, a2 = (1 - al) / a0; b0 /= a0; b1 /= a0; b2 /= a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < d.length; i++) { const x = d[i], y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = x; y2 = y1; y1 = y; d[i] = y; }
+}
 function mixIn(d, L, amp) { let pk = 0; for (let i = 0; i < L.length; i++) pk = Math.max(pk, Math.abs(L[i])); if (pk < 1e-9) return; const g = amp / pk; for (let i = 0; i < d.length; i++) d[i] += L[i] * g; }
 function makeBuf(dur, fill) {
   const sr = AC.sampleRate, n = Math.floor(sr * dur), b = AC.createBuffer(1, n, sr), d = b.getChannelData(0);
@@ -174,6 +198,15 @@ function hissLayer(d, sr, t0, atk, tau, amp, lo, hi) {
   for (let i = i0; i < L.length; i++) { const t = i - i0; const e = t < a ? t / a : Math.exp(-(t - a) / T); if (t > a && e < 1e-4) break; L[i] = (Math.random() * 2 - 1) * e; }
   highpass(L, sr, lo); highpass(L, sr, lo); lowpass(L, sr, hi); mixIn(d, L, amp);
 }
+/* 작은 물방울: 위로 살짝 올라가는 짧은 사인(기포 공명). 3~7ms 안에 사라져 음정으로 들리지 않고 '액체'의 질감만 남는다 */
+function bubbles(d, sr, t0, span, n, f0, f1, amp) {
+  const L = new Float32Array(d.length);
+  for (let k = 0; k < n; k++) {
+    const s = Math.floor((t0 + Math.random() * span) * sr), f = rnd(f0, f1), tau = rnd(0.003, 0.007), a = rnd(0.4, 1), end = tau * 6; let ph = 0;
+    for (let i = 0; s + i < L.length; i++) { const t = i / sr; if (t > end) break; ph += 2 * Math.PI * f * (1 + 0.2 * t / end) / sr; L[s + i] += Math.sin(ph) * Math.exp(-t / tau) * Math.min(1, t / 0.0004) * a; }
+  }
+  mixIn(d, L, amp);
+}
 /* 모래: 부드러운 뒤꿈치 → 촘촘한 '사각사각' + 밀리는 '쉭' → 앞꿈치에서 한 번 더 */
 function sandStep() {
   return makeBuf(0.42, (d, sr) => {
@@ -199,26 +232,108 @@ function dirtStep(leaves) {
     grainLayer(d, sr, t1, 0.06, Math.round(rnd(30, 50)), 0.0005, 0.002, 2, 0.3, 1000, 5000);
   });
 }
-/* 꿀꺽: 목젖 클릭 → 아래로 떨어지는 짧은 '꿀' 공명(120ms 안에 사라져 음정으로 들리지 않는다) → 목을 타고 내려가는 먹먹함 → 가끔 작은 물방울 */
-function gulpBuf() {
+
+/* ── 마시기 ──
+   목 넘김: 음정 없는 둔한 저역 충격 두 번 + 젖은 클릭 + 아주 작은 졸졸 (예전의 미끄러지는 사인 '뽕' 대신) */
+function swallowBuf() {
   return makeBuf(0.26, (d, sr) => {
-    hissLayer(d, sr, 0, 0.0008, 0.004, 0.25, 1200, 3000);
-    const f0 = rnd(330, 420), f1 = f0 * rnd(0.55, 0.65), L = new Float32Array(d.length), s0 = Math.floor(0.012 * sr); let ph = 0;
-    for (let i = s0; i < L.length; i++) {
-      const t = (i - s0) / sr; if (t > 0.12) break;
-      const f = f1 + (f0 - f1) * Math.exp(-t / 0.025); ph += 2 * Math.PI * f / sr;
-      const e = t < 0.006 ? t / 0.006 : Math.exp(-(t - 0.006) / 0.028);
-      L[i] = Math.sin(ph) * e * (0.8 + 0.4 * Math.random());
-    }
-    lowpass(L, sr, 900); mixIn(d, L, 0.7);
-    thud(d, sr, 0.015, 260, 0.04, 0.6, 0.008);
-    if (Math.random() < 0.6) {
-      const B = new Float32Array(d.length), sb = Math.floor(rnd(0.05, 0.09) * sr), fb = rnd(700, 1000); let p = 0;
-      for (let i = sb; i < B.length; i++) { const t = (i - sb) / sr; if (t > 0.03) break; p += 2 * Math.PI * fb * (1 + t * 25) / sr; B[i] = Math.sin(p) * Math.exp(-t / 0.008); }
-      mixIn(d, B, 0.2);
-    }
+    hissLayer(d, sr, 0, 0.0006, 0.004, 0.2, 1400, 4000);
+    thud(d, sr, 0.006, rnd(280, 360), 0.03, 0.9, 0.006);
+    thud(d, sr, rnd(0.045, 0.06), rnd(160, 200), 0.045, 0.55, 0.01);
+    grainLayer(d, sr, 0.03, 0.08, 20, 0.0005, 0.002, 1.5, 0.1, 600, 2500);
   });
 }
+/* 들이마심: 입술 사이로 공기가 빨려 드는 난류(빠르게 출렁이는 대역 노이즈) + 작은 물방울들.
+   뜨거운 커피는 공기가 많은 '후루룩', 찬 위스키는 짧고 공기가 적은 '쓰읍' */
+function slurpBuf(cold) {
+  return makeBuf(cold ? 0.32 : 0.5, (d, sr) => {
+    const dur = d.length / sr, L = new Float32Array(d.length), rate = cold ? rnd(18, 26) : rnd(28, 42);
+    const atk = cold ? 0.03 : 0.05, rel = cold ? 0.12 : 0.18, hold = dur - rel - 0.01;
+    let a0 = Math.random(), a1 = Math.random(), seg = 0;
+    for (let i = 0; i < L.length; i++) {
+      const t = i / sr, ph = t * rate, k = Math.floor(ph);
+      if (k !== seg) { seg = k; a0 = a1; a1 = Math.random(); }
+      const f = ph - k, am = 0.35 + 0.65 * (a0 + (a1 - a0) * f * f * (3 - 2 * f));
+      const e = t < atk ? t / atk : t < hold ? 1 : Math.max(0, 1 - (t - hold) / rel);
+      L[i] = (Math.random() * 2 - 1) * am * e;
+    }
+    bq(L, sr, 'hp', cold ? 900 : 1500, 0.7); bq(L, sr, 'lp', cold ? 3800 : 6000, 0.7);
+    mixIn(d, L, cold ? 0.45 : 0.8);
+    bubbles(d, sr, 0.04, dur * 0.7, cold ? Math.round(rnd(3, 5)) : Math.round(rnd(7, 12)), cold ? 900 : 1100, cold ? 1800 : 2600, cold ? 0.35 : 0.3);
+    thud(d, sr, 0, 420, 0.008, 0.18, 0.002);
+  });
+}
+/* 마신 뒤 '하~': 숨 노이즈를 두 포먼트(700·1250Hz 부근)로 걸러 목소리 없이 만족스러운 한숨 */
+function ahhBuf() {
+  return makeBuf(0.8, (d, sr) => {
+    const L = new Float32Array(d.length);
+    for (let i = 0; i < L.length; i++) { const t = i / sr, e = t < 0.06 ? t / 0.06 : Math.exp(-(t - 0.06) / 0.22); L[i] = (Math.random() * 2 - 1) * e; }
+    const M = L.slice();
+    bq(L, sr, 'bp', rnd(650, 800), 1.1); bq(M, sr, 'bp', rnd(1150, 1350), 1.4);
+    mixIn(d, L, 0.7); mixIn(d, M, 0.45);
+  });
+}
+/* 독한 술 뒤 '크~': 짧은 'ㅋ' 파열 + 목이 긁히는 거친 숨(80Hz 안팎으로 떨리는 노이즈) */
+function khaBuf() {
+  return makeBuf(0.5, (d, sr) => {
+    hissLayer(d, sr, 0, 0.0008, 0.008, 0.5, 2000, 6000);
+    const L = new Float32Array(d.length), fr = rnd(65, 90);
+    for (let i = 0; i < L.length; i++) {
+      const t = i / sr - 0.012; if (t < 0) continue;
+      const e = t < 0.02 ? t / 0.02 : Math.exp(-(t - 0.02) / 0.11), rasp = 0.55 + 0.45 * Math.max(0, Math.sin(2 * Math.PI * fr * t));
+      L[i] = (Math.random() * 2 - 1) * e * rasp;
+    }
+    const M = L.slice(); bq(L, sr, 'bp', rnd(1100, 1400), 1.2); bq(M, sr, 'bp', rnd(2300, 2800), 1.6);
+    mixIn(d, L, 0.8); mixIn(d, M, 0.4);
+  });
+}
+
+/* ── 모닥불: 나무 속 수분이 터지는 아주 짧은 딸깍(0.3~2.5ms)이 30~70ms 안에 2~6개 뭉친 '타닥'.
+   big: 딸깍 8~14개 + 몸통 '탁' + 짧은 쉭 → 불티가 솟는 큰 '탁!' ── */
+function crackleBuf(big) {
+  return makeBuf(big ? 0.25 : 0.12, (d, sr) => {
+    const n = big ? Math.round(rnd(8, 14)) : Math.round(rnd(2, 6)), span = big ? rnd(0.06, 0.12) : rnd(0.02, 0.07), L = new Float32Array(d.length);
+    for (let k = 0; k < n; k++) {
+      const s = Math.floor((k === 0 ? 0 : Math.pow(Math.random(), 1.3) * span) * sr), len = Math.max(2, Math.floor(rnd(0.0003, k === 0 ? 0.0025 : 0.0015) * sr)), a = k === 0 ? 1 : rnd(0.25, 0.9);
+      for (let i = 0; i < len && s + i < L.length; i++) L[s + i] += (Math.random() * 2 - 1) * a * Math.exp(-5 * i / len);
+    }
+    highpass(L, sr, big ? 900 : 1500); lowpass(L, sr, 9000); mixIn(d, L, 0.9);
+    thud(d, sr, 0, big ? rnd(500, 800) : rnd(900, 1400), big ? 0.012 : 0.004, big ? 0.55 : 0.25, 0.0005);
+    if (big) hissLayer(d, sr, 0.01, 0.005, 0.08, 0.12, 1500, 5000);
+  });
+}
+
+/* ── 귀뚜라미: 날개 톱니가 부딪히는 펄스열이 3~5kHz 공명을 두드린다 → 음정은 있지만 결이 거칠고, 음절 안에서 음정이 살짝 내려간다 ── */
+function cricketSyll(L, sr, s0, f, dur, amp, tooth) {
+  const n = Math.floor(dur * sr), dk = Math.exp(-1 / (sr * 0.0012)); let ph = 0, pk = 0, next = 0;
+  for (let i = 0; i < n && s0 + i < L.length; i++) {
+    const t = i / sr;
+    if (t >= next) { pk = rnd(0.6, 1); next = t + rnd(0.85, 1.15) / tooth; }   // 톱니 하나
+    pk *= dk;
+    ph += 2 * Math.PI * f * (1 - 0.03 * t / dur) / sr;
+    const e = Math.min(1, t / 0.0015) * Math.min(1, (dur - t) / 0.004);
+    L[s0 + i] += ((Math.sin(ph) + 0.12 * Math.sin(2 * ph + 0.7)) * (0.45 + 0.55 * pk) + (Math.random() * 2 - 1) * 0.35 * pk) * e * amp;
+  }
+}
+/* trill=false: '귀뚤' 끊어 우는 종(3~5음절) / trill=true: '르르르' 1.4~2.6초 떨며 우는 종 */
+function cricketBuf(trill) {
+  const f = trill ? rnd(3300, 3900) : rnd(4000, 4700), tooth = rnd(180, 320);
+  if (!trill) {
+    const nS = 3 + Math.floor(Math.random() * 3), per = rnd(0.038, 0.05), sd = rnd(0.014, 0.02);
+    return makeBuf(nS * per + 0.03, (d, sr) => {
+      const L = new Float32Array(d.length);
+      for (let k = 0; k < nS; k++) cricketSyll(L, sr, Math.floor((0.004 + k * per + rnd(0, 0.003)) * sr), f * rnd(0.992, 1.008), sd * rnd(0.9, 1.1), rnd(0.75, 1) * (k === nS - 1 ? 0.8 : 1), tooth);
+      bq(L, sr, 'bp', f, 2.2); mixIn(d, L, 1);
+    });
+  }
+  const T = rnd(1.4, 2.6), per = rnd(0.02, 0.026), sd = per * 0.55;
+  return makeBuf(T, (d, sr) => {
+    const L = new Float32Array(d.length);
+    for (let t = 0.01; t < T - 0.03; t += per * rnd(0.95, 1.05)) { const u = t / T, sw = Math.min(1, u / 0.15) * Math.min(1, (1 - u) / 0.2); cricketSyll(L, sr, Math.floor(t * sr), f, sd, sw * rnd(0.8, 1), tooth); }
+    bq(L, sr, 'bp', f, 2.2); mixIn(d, L, 1);
+  });
+}
+
 /* 나무가 울리는 짧은 공명: 40~70ms 안에 사라져 음정보다 '통·탁' 하는 몸통 소리로 들린다. 노이즈를 곱해 매끈한 사인 느낌을 없앤다 */
 function resonance(d, sr, t0, f, tau, amp, glide) {
   const L = new Float32Array(d.length), i0 = Math.floor(t0 * sr); let ph = 0;
@@ -250,7 +365,10 @@ function knockBuf(fc, rf, tau, grains) {
   return makeBuf(0.3, (d, sr) => { thud(d, sr, 0, fc * rnd(0.9, 1.1), tau, 0.8, 0.002); resonance(d, sr, 0, rf * rnd(0.85, 1.15), 0.04, 0.4, 0.1); if (grains) grainLayer(d, sr, 0.002, 0.05, grains, 0.0005, 0.002, 2, 0.25, 800, 4500); });
 }
 const GEN = {
-  sand: [sandStep, 8], dirt: [() => dirtStep(false), 8], dirtLeaf: [() => dirtStep(true), 8], gulp: [gulpBuf, 6],
+  sand: [sandStep, 8], dirt: [() => dirtStep(false), 8], dirtLeaf: [() => dirtStep(true), 8],
+  swallow: [swallowBuf, 6], slurp: [() => slurpBuf(false), 5], sipCold: [() => slurpBuf(true), 5], ahh: [ahhBuf, 4], kha: [khaBuf, 4],
+  crackle: [() => crackleBuf(false), 12], firePop: [() => crackleBuf(true), 5],
+  cricketChirp: [() => cricketBuf(false), 6], cricketTrill: [() => cricketBuf(true), 3],
   chopHit: [() => chopBuf('hit'), 5], chopSplit: [() => chopBuf('split'), 5], chopKnot: [() => chopBuf('knot'), 4],
   logPlace: [() => knockBuf(380, 150, 0.03, 25), 4], woodLand: [() => knockBuf(650, 300, 0.02, 40), 5],
 };
@@ -263,33 +381,63 @@ function loadFoley() {
       .catch(e => console.warn('foley load failed:', k, e));
   }
 }
-/* 뱅크에서 하나를 골라 재생: 직전과 같은 변형은 피하고, 피치·크기·좌우를 살짝 흔든다 */
-function playBank(key, dest, gain, rate, t, pan) {
-  const list = getBank(key); let i = Math.floor(Math.random() * list.length);
-  if (list.length > 1 && i === lastIdx[key]) i = (i + 1) % list.length; lastIdx[key] = i;
-  const s = AC.createBufferSource(), g = gainN(gain); s.buffer = list[i]; s.playbackRate.value = rate;
+/* 버퍼 하나를 재생하고 끝나면 노드를 정리한다 */
+function playBuf(buf, dest, gain, rate, t, pan) {
+  const s = AC.createBufferSource(), g = gainN(gain); s.buffer = buf; s.playbackRate.value = rate;
   const nodes = [s, g]; s.connect(g);
   if (pan) { const p = AC.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(dest); nodes.push(p); } else g.connect(dest);
   s.onended = () => nodes.forEach(n => { try { n.disconnect(); } catch (e) {} });
   s.start(t);
 }
+/* 뱅크에서 하나를 골라 재생: 직전과 같은 변형은 피하고, 피치·크기·좌우를 살짝 흔든다 */
+function playBank(key, dest, gain, rate, t, pan) {
+  const list = getBank(key); let i = Math.floor(Math.random() * list.length);
+  if (list.length > 1 && i === lastIdx[key]) i = (i + 1) % list.length; lastIdx[key] = i;
+  playBuf(list[i], dest, gain, rate, t, pan);
+}
+/* 먼 귀뚜라미 합창: 개체 14마리(4마리 중 1마리는 떨며 우는 종)가 저마다 일정한 음색·주기로 우는 8초 스테레오 루프.
+   멀수록 작고 고역이 깎인다. 귀뚜라미 뱅크가 녹음본으로 바뀌면 다음 밤에 그 샘플로 다시 굽는다 */
+let chorus = null, chorusKey = null;
+function getChorus() {
+  const cb = getBank('cricketChirp'), tb = getBank('cricketTrill');
+  if (chorus && chorusKey === cb[0]) return chorus;
+  const sr = AC.sampleRate, len = sr * 8, out = AC.createBuffer(2, len, sr), Lc = out.getChannelData(0), Rc = out.getChannelData(1);
+  const add = (buf, at, rate, gl, gr, k) => {
+    const src = buf.getChannelData(0), n = Math.floor((src.length - 1) / rate); let y = 0;
+    for (let i = 0; i < n; i++) { const p = i * rate, i0 = p | 0, x = src[i0] + (src[i0 + 1] - src[i0]) * (p - i0); y = x * (1 - k) + y * k; const j = (at + i) % len; Lc[j] += y * gl; Rc[j] += y * gr; }
+  };
+  for (let v = 0; v < 14; v++) {
+    const trill = v % 4 === 3, list = trill ? tb : cb, buf = list[Math.floor(Math.random() * list.length)];
+    const dist = rnd(0.2, 1), g = (0.3 + 0.7 * (1 - dist)) * rnd(0.6, 1), pan = rnd(-0.95, 0.95);
+    const gl = g * Math.cos((pan + 1) * Math.PI / 4), gr = g * Math.sin((pan + 1) * Math.PI / 4);
+    const k = Math.exp(-2 * Math.PI * (2200 + 3800 * (1 - dist)) / sr), rate = rnd(0.94, 1.06), per = trill ? rnd(3, 6) : rnd(0.7, 1.4);
+    for (let t = rnd(0, per); t < 8; t += per * rnd(0.9, 1.1)) if (Math.random() > 0.08) add(buf, Math.floor(t * sr), rate, gl, gr, k);
+  }
+  let pk = 0; for (let i = 0; i < len; i++) pk = Math.max(pk, Math.abs(Lc[i]), Math.abs(Rc[i]));
+  const s = pk > 0 ? 0.9 / pk : 1; for (let i = 0; i < len; i++) { Lc[i] *= s; Rc[i] *= s; }
+  chorusKey = cb[0]; return chorus = out;
+}
 
 /* ── 위치 음원 ── */
+/* 모닥불: 연속층은 아주 작게(파도·바람과 헷갈리지 않게 — 낮은 웅웅거림은 예전의 1/5, 1.4kHz 쉭은 제거),
+   대신 '타닥'이 불의 크기를 따라 촘촘해진다. 4번에 1번은 바로 뒤에 한 번 더 겹친다 */
 function makeFireSrc() {
   const pan = panner(0.3, 0.6, -1.4, 1.6, 45, 1.1), g = gainN(0), t = []; g.connect(pan);
-  const rum = noise('brown', true), rl = filt('lowpass', 160), rg = gainN(0.2); chain(rum, rl, rg, g); rum.start(0, off());
-  const fl = noise('pink', true), ff = filt('bandpass', 420, 0.9), fg = gainN(0.012); chain(fl, ff, fg, g); fl.start(0, off());   // 불꽃 펄럭임
-  const hs = noise('pink', true), hf = filt('bandpass', 1400, 0.6), hg = gainN(0.013); chain(hs, hf, hg, g); hs.start(0, off());  // 잔잔한 쉭
-  const src = { pan, gain: g, t, nodes: [rum, rl, rg, fl, ff, fg, hs, hf, hg, ...lfo(4.3, 0.007, fg.gain), ...lfo(0.37, 0.004, fg.gain), ...lfo(0.6, 0.005, hg.gain), g, pan] };
+  const rum = noise('brown', true), rl = filt('lowpass', 120), rg = gainN(0.04); chain(rum, rl, rg, g); rum.start(0, off());
+  const fl = noise('pink', true), ff = filt('bandpass', 380, 0.8), fg = gainN(0.005); chain(fl, ff, fg, g); fl.start(0, off());   // 불꽃이 빠르게 펄럭이는 숨결
+  const src = { pan, gain: g, t, nodes: [rum, rl, rg, fl, ff, fg, ...lfo(6.1, 0.003, fg.gain), ...lfo(3.7, 0.002, fg.gain), g, pan] };
   fire = src;
-  /* 파칙: 소리를 내는 순간 화면에도 알린다 → main.js 가 불빛을 번쩍이고, 큰 파칙이면 불티를 솟게 한다 */
+  /* 타닥: 소리를 내는 순간 화면에도 알린다 → main.js 가 불빛을 번쩍이고, 큰 탁이면 불티를 솟게 한다 */
   const pop = big => {
     const now = AC.currentTime, W = ctx.W;
     W.firePop = Math.max(W.firePop || 0, big ? 1 : rnd(0.12, 0.3)); if (big) W.fireBurst = true;
-    if (big) { burst(g, false, 'lowpass', rnd(320, 600), 1, 0.004, rnd(0.12, 0.2), 0.14, now); for (let i = 0; i < 2; i++) burst(g, false, 'highpass', rnd(2200, 3800), 1, 0.002, rnd(0.02, 0.04), 0.03, now + 0.04 + Math.random() * 0.12); }
-    else burst(g, false, 'bandpass', rnd(1300, 3200), 1.6, 0.003, rnd(0.04, 0.09), 0.05, now);
+    if (big) playBank('firePop', g, FOLEY_GAIN.firePop * rnd(0.8, 1), rnd(0.85, 1.1), now);
+    else {
+      playBank('crackle', g, FOLEY_GAIN.crackle * rnd(0.35, 1), rnd(0.8, 1.3), now);
+      if (Math.random() < 0.25) playBank('crackle', g, FOLEY_GAIN.crackle * rnd(0.25, 0.7), rnd(0.8, 1.3), now + rnd(0.03, 0.12));
+    }
   };
-  const loop = () => { if (fire !== src) return; if (ctx.W.fireLit) pop(Math.random() < 0.08); sched(t, loop, rnd(90, 520)); }; loop();
+  const loop = () => { if (fire !== src) return; const k = ctx.W.fireK || 0; if (ctx.W.fireLit) pop(Math.random() < 0.06); sched(t, loop, rnd(70, 420) / (0.5 + 0.5 * k)); }; loop();
 }
 /* 파도: 밀려오고(저역 상승) → 부서지고 → 빠지는(hiss 감쇠) 이벤트 두 줄이 엇갈려 반복. 호수: 잔잔한 찰랑임 */
 function makeWaterSrc(type, z) {
@@ -358,14 +506,21 @@ export function setSparkler(on) {
 export function sparklerLevel(v) { if (spark) spark.gain.gain.setTargetAtTime(v, AC.currentTime, 0.1); }
 
 /* ── 배경 베드 ── */
-function cricketVoice(out, nodes, timers) {
-  const f = rnd(3700, 4500), o = osc('sine', f), o2 = osc('sine', f * 2), g2 = gainN(0.2), gate = gainN(0), lp = filt('lowpass', 6500), p = AC.createStereoPanner(); p.pan.value = rnd(-0.9, 0.9);
-  o.connect(gate); o2.connect(g2); g2.connect(gate); chain(gate, lp, p, out); o.start(); o2.start(); nodes.push(o, o2, g2, gate, lp, p);
-  const vol = rnd(0.004, 0.008), per = rnd(0.55, 1.1), pulses = 3 + Math.floor(Math.random() * 3);
-  const chirp = () => { const now = AC.currentTime; gate.gain.cancelScheduledValues(now); gate.gain.setValueAtTime(0, now);
-    for (let i = 0; i < pulses; i++) { const tp = now + 0.02 + i * 0.045; gate.gain.setTargetAtTime(vol, tp, 0.005); gate.gain.setTargetAtTime(0, tp + 0.022, 0.008); }
-    sched(timers, chirp, (Math.random() < 0.12 ? rnd(3, 8) : per * rnd(0.9, 1.1)) * 1000); };
-  sched(timers, chirp, rnd(0, 1500));
+/* 가까운 귀뚜라미 한 마리: 캠프 주변 풀숲(4~9m)에 자리를 잡고, 자기 음색·주기로 운다.
+   플레이어가 3m 안으로 다가오면 6~12초 동안 울음을 멈춘다 */
+function cricketNear(nodes, timers) {
+  const a = rnd(0, 6.283), r = rnd(4, 9), x = Math.cos(a) * r, z = 0.3 + Math.sin(a) * r;
+  const p = panner(x, 0.15, z, 1.5, 40, 1.0), lp = filt('lowpass', 7500); lp.connect(p); nodes.push(lp, p);
+  const trill = Math.random() < 0.3, key = trill ? 'cricketTrill' : 'cricketChirp', voice = Math.floor(Math.random() * 8);
+  const rate = rnd(0.94, 1.06), per = trill ? rnd(3, 6) : rnd(0.75, 1.3), gain = FOLEY_GAIN[key] * rnd(0.8, 1.1);
+  let hush = 0;
+  const sing = () => {
+    const now = AC.currentTime, cam = ctx.camera.position;
+    if (Math.hypot(cam.x - x, cam.z - z) < 3) hush = now + rnd(6, 12);
+    if (now >= hush) { const list = getBank(key); playBuf(list[voice % list.length], lp, gain, rate, now); }
+    sched(timers, sing, (Math.random() < 0.1 ? rnd(3, 8) : per * rnd(0.92, 1.08)) * 1000);
+  };
+  sched(timers, sing, rnd(300, 3000));
 }
 /* 바람 베드의 크기·음색과 잎 스침은 updateAudio 가 W.wind 를 따라 움직인다 (예전의 고정 LFO 대신) */
 function makeBed(type, timeKey) {
@@ -377,7 +532,11 @@ function makeBed(type, timeKey) {
   else {
     bed.wind = wind(340, 0.045, 90);
     const lv = noise('pink', true), lf = filt('bandpass', 3000, 0.7), lg = gainN(0.006); chain(lv, lf, lg, out); lv.start(0, off()); nodes.push(lv, lf, lg); bed.leaves = lg.gain;
-    if (timeKey === 'night') for (let i = 0; i < 5; i++) cricketVoice(out, nodes, timers);
+    if (timeKey === 'night') {
+      /* 귀뚜라미: 먼 합창 루프 + 가까운 개체 3마리 (예전의 계속 도는 사인파 오실레이터 10개 대신) */
+      const cs = AC.createBufferSource(), cg = gainN(0.012); cs.buffer = getChorus(); cs.loop = true; chain(cs, cg, out); cs.start(0, rnd(0, 7.9)); nodes.push(cs, cg);
+      for (let i = 0; i < 3; i++) cricketNear(nodes, timers);
+    }
     else { const s = noise('brown', true), f = filt('lowpass', 900), g = gainN(0.015); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.008, g.gain)); }
   }
   return bed;
@@ -458,7 +617,7 @@ export function updateAudio(dt) {
   if (L.positionX) { L.positionX.value = cam.position.x; L.positionY.value = cam.position.y; L.positionZ.value = cam.position.z; L.forwardX.value = _f.x; L.forwardY.value = _f.y; L.forwardZ.value = _f.z; L.upX.value = _u.x; L.upY.value = _u.y; L.upZ.value = _u.z; }
   else { L.setPosition(cam.position.x, cam.position.y, cam.position.z); L.setOrientation(_f.x, _f.y, _f.z, _u.x, _u.y, _u.z); }
   /* 불소리는 화면의 불꽃 크기(fireK)를 그대로 따라 커지고 작아진다 */
-  if (fire) fire.gain.gain.setTargetAtTime(W.fireK || 0, t, 0.1);
+  if (fire) fire.gain.gain.setTargetAtTime((W.fireK || 0) * 0.85, t, 0.1);
   if (water) setPos(water.pan, cam.position.x, 0, water.z);
   if (lamps) { lamps.lantern.gain.gain.setTargetAtTime(W.lanternLit ? 1 : 0, t, 0.4); lamps.tentLamp.gain.gain.setTargetAtTime(W.tentLampLit ? 1 : 0, t, 0.4); }
   /* 바람: 0.1초마다 베드를 갱신하고, 바람이 0.7 을 위로 넘는 순간 돌풍 소리를 낸다 (최소 8초 간격) */
@@ -521,17 +680,6 @@ function footstep(surface) {
     }
   }
   if (state.item === 'whisky' && Math.random() < 0.5) ice(0.45, t0 + rnd(0.05, 0.15));
-}
-
-/* ── 마시기: 한 모금 = (커피만) 입술이 닿는 아주 작은 소리 → 0.3초쯤 뒤 꿀꺽.
-   위스키는 가끔 '하', 커피는 가끔 '후' 하고 짧게 숨을 내쉰다 ── */
-function drink(kind, t) {
-  const coffee = kind === 'coffee';
-  if (coffee) burst(dryBus, 'pink', 'bandpass', rnd(1100, 1500), 1.2, 0.02, 0.012, 0.09, t, 1900, 0.09);
-  const tg = t + rnd(0.28, 0.4);
-  playBank('gulp', dryBus, FOLEY_GAIN.gulp * rnd(0.85, 1), rnd(0.92, 1.08), tg, 0);
-  if (!coffee && Math.random() < 0.6) burst(dryBus, 'pink', 'bandpass', 900, 0.6, 0.08, 0.012, 0.45, tg + 0.35, 600, 0.45);
-  else if (coffee && Math.random() < 0.3) burst(dryBus, 'pink', 'bandpass', 700, 0.6, 0.06, 0.01, 0.35, tg + 0.4, 450, 0.35);
 }
 
 /* ── 장작 패기 숨소리: 힘을 모을 때 들숨(0.65초), 내려칠 때 날숨.
@@ -597,8 +745,17 @@ export function sfx(type, arg) {
     case 'doorClose': tone(B, 70 * pv, 45, 0.004, 0.28, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.2, 0.15, t); burst(B, false, 'highpass', 3000 * pv, 1, 0.002, 0.06, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.05, 0.35, t); return;
     /* 아이템 */
     case 'pick': if (arg === 'coffee') pour(); else if (arg === 'whisky') { ice(1, t); ice(0.7, t + 0.13); } else if (arg === 'sparkler') { for (let i = 0; i < 3; i++) burst(B, false, 'bandpass', 2000 * rnd(0.9, 1.1), 0.8, 0.01, 0.03, 0.08, t + i * 0.09); } else sfx('lighter'); return;
-    case 'sip': drink(arg === 'whisky' ? 'whisky' : 'coffee', t); return;
-    case 'gulp': playBank('gulp', dryBus, FOLEY_GAIN.gulp, rnd(0.92, 1.08), t, 0); return;
+    /* 마시기: 입에 닿을 때(sipStart) → 들고 있는 동안(swallow) → 잔을 뗄 때(sipEnd). 'sip'·'gulp' 는 예전 이름 호환 */
+    case 'sipStart': case 'sip': { const key = arg === 'whisky' ? 'sipCold' : 'slurp'; playBank(key, dryBus, FOLEY_GAIN[key] * rnd(0.85, 1), rnd(0.94, 1.06), t); return; }
+    case 'swallow': case 'gulp': playBank('swallow', dryBus, FOLEY_GAIN.swallow * rnd(0.8, 1), rnd(0.92, 1.08), t); return;
+    case 'sipEnd': {
+      /* 한 번도 넘기지 않고 잔을 뗐다면 먼저 한 번 넘긴다. 오래 마실수록 마지막 숨이 나올 확률이 높다 (위스키가 더 자주) */
+      const o = arg || {}, w = o.type === 'whisky', held = Math.min(o.held || 0, 2); let tt = t;
+      if (!o.swallowed) { playBank('swallow', dryBus, FOLEY_GAIN.swallow * rnd(0.8, 1), rnd(0.92, 1.08), tt + 0.05); tt += 0.3; }
+      const p = w ? 0.45 + 0.25 * held : 0.25 + 0.3 * held, key = w ? 'kha' : 'ahh';
+      if (Math.random() < p) playBank(key, dryBus, FOLEY_GAIN[key] * rnd(0.8, 1), rnd(0.95, 1.05), tt + rnd(0.12, 0.28));
+      return;
+    }
     case 'clink': ice(typeof arg === 'number' ? arg : 1, t); return;
     case 'inhale': burst(B, false, 'highpass', 1200 * pv, 1, 0.35, 0.035, 0.25, t, 2500, 0.6); return;
     case 'exhale': burst(B, false, 'bandpass', 900 * pv, 0.6, 0.06, 0.035, 0.7, t, 450, 0.7); return;

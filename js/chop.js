@@ -1,28 +1,32 @@
 import * as THREE from 'three';
 import { ctx, state } from './state.js';
 import { CHOP, EYE } from './data.js';
-import { rnd, smooth, smoothM, shadowed } from './util.js';
+import { rnd, smooth, smoothM, shadowed, wrapPI } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 import { sfx } from './audio.js';
+import { makeAxe, AXE_EDGE } from './props.js';
 
 /* ══ 장작 패기 ══
    짧게 누르면 기본 내려치기, 길게 누르면 힘을 모은다. 꽉 찬 직후(T_SWEET 안)에 놓으면 '제대로 들어간 한 방'.
    실패나 벌점은 없고, 리듬과 손맛(히트 스톱·흔들림·시선 반동·시야 펀치·나무 조각·소리)에 집중한다.
-   모든 메시는 그루터기에 붙은 rig 좌표계 안에 있다: 원점 = 그루터기 바닥 중심, +z = 플레이어가 서는 쪽 */
+   모든 메시는 그루터기에 붙은 rig 좌표계 안에 있다: 원점 = 그루터기 바닥 중심, +z = 플레이어가 서는 쪽.
+   rig 는 시작할 때마다 플레이어가 다가온 방향으로 돈다 → 장작이 갈라지는 방향·조각이 튀는 방향이 함께 따라온다 */
 
 const V = THREE.Vector3;
 const lerp = (a, b, t) => a + (b - a) * t;
 const eio = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 const eout = t => 1 - (1 - t) * (1 - t);
+const _UP = new V(0, 1, 0);
 
 /* 치수 (props.js 의 그루터기와 맞춘다) */
 const STUMP_TOP = 0.32, STUMP_R = 0.19, LOG_H = 0.36, LOG_TOP = STUMP_TOP + LOG_H, LOG_CY = STUMP_TOP + LOG_H / 2;
 
 /* 도끼 각도(rad): 손(피벗)을 축으로 x 회전. 클수록 머리가 위로 */
 const A_REST = 0.35, A_UP = 1.75, A_UP_MAX = 2.05, A_HIT = -0.25, A_EMB = A_HIT - 0.045;
-/* 날 끝의 피벗 기준 위치. 내려친 각도(A_HIT)에서 날이 장작 윗면 중앙에 정확히 닿도록 피벗을 역산한다 */
-const EDGE_Y = -0.125, EDGE_Z = -0.9;
+/* 날 끝의 피벗 기준 위치는 도끼 모델(props.js makeAxe)이 알려 준다.
+   내려친 각도(A_HIT)에서 날이 장작 윗면 중앙에 정확히 닿도록 피벗을 역산한다 */
+const EDGE_Y = AXE_EDGE.y, EDGE_Z = AXE_EDGE.z;
 const edgeAt = a => ({ y: EDGE_Y * Math.cos(a) - EDGE_Z * Math.sin(a), z: EDGE_Y * Math.sin(a) + EDGE_Z * Math.cos(a) });
 const E0 = edgeAt(A_HIT);
 const PIVOT = new V(0, LOG_TOP - E0.y, -E0.z);
@@ -46,6 +50,8 @@ const C = {
   log: null, nextLogT: 0, eye: new V(), fwd: new V(), right: new V(), clock: 0, knotTold: false,
   trauma: 0, kick: 0, kickV: 0, fov: 0,
 };
+/* 이번 장작 패기의 서는 자리와 바라보는 방향(카메라 yaw). yaw 는 rig.rotation.y 와 같다 */
+const P = { x: 0, z: 0, yaw: 0 };
 let R = null, ring = null;
 const _w = new V(), _d = new THREE.Object3D();
 
@@ -55,14 +61,16 @@ function dust(x, y, z, n, op) {
   const W = ctx.W; if (!W.smoke) return;
   for (let i = 0; i < n; i++) { R.rig.localToWorld(_w.set(x + rnd(-0.06, 0.06), y, z + rnd(-0.06, 0.06))); W.smoke.spawn(_w, { x: rnd(-0.15, 0.15), y: rnd(0.1, 0.3), z: rnd(-0.15, 0.15) }, 0.05, rnd(1, 1.6), 0.1, 0.04, 0.3, op); }
 }
+/* 장작더미의 rig 기준 위치 (장작이 날아오는 출발점). rig 가 돌면 다시 계산한다 */
+function setPile() { R.pile.set(CHOP.pile[0] - CHOP.stump[0], 0, CHOP.pile[1] - CHOP.stump[1]).applyAxisAngle(_UP, -R.rig.rotation.y); }
 
 /* ── 씬마다 한 번: 도끼·장작·반쪽·조각을 만들어 숨겨 둔다 (사전 컴파일에 함께 들어간다) ── */
 export function buildChop() {
   const W = ctx.W, scene = ctx.scene; W.splitCount = 0;
   Object.assign(C, { on: false, st: 'off', a: A_REST, pk: 0, ck: 0, stop: 0, hold: false, queued: false, wantStop: false, log: null, trauma: 0, kick: 0, kickV: 0, fov: 0, knotTold: false });
+  P.yaw = 0;
 
-  const rig = new THREE.Group(); rig.position.set(CHOP.stump[0], 0, CHOP.stump[1]);
-  rig.rotation.y = Math.atan2(CHOP.stand[0] - CHOP.stump[0], CHOP.stand[1] - CHOP.stump[1]); scene.add(rig);
+  const rig = new THREE.Group(); rig.position.set(CHOP.stump[0], 0, CHOP.stump[1]); scene.add(rig);
   const work = new THREE.Group(); work.visible = false; rig.add(work);
 
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5)));
@@ -70,24 +78,8 @@ export function buildChop() {
   const faceM = smoothM(0xd6b68a, Object.assign({ roughness: 0.8, side: THREE.DoubleSide }, tex('wood', 1, 2, 0.35)));
   const darkM = smoothM(0x1a120b, { roughness: 1 }), knotM = smoothM(0x3a2616, { roughness: 0.9 });
 
-  /* 도끼 + 장갑 낀 두 손 */
-  const axe = new THREE.Group(); axe.position.copy(PIVOT); axe.rotation.x = A_REST; work.add(axe);
-  {
-    const hickory = smoothM(0xb08a5a, Object.assign({ roughness: 0.6 }, tex('wood', 1, 4, 0.2)));
-    const steel = new THREE.MeshStandardMaterial({ color: 0x8e949b, metalness: 0.85, roughness: 0.38 });
-    const edgeM = new THREE.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 0.9, roughness: 0.2 });
-    const leather = smoothM(0x4a3324, { roughness: 0.9 }), glove = smoothM(0x6b5440, Object.assign({ roughness: 0.95 }, tex('fabric', 2, 2, 0.4)));
-    const hg = new THREE.CylinderGeometry(0.016, 0.02, 1.04, 10); hg.rotateX(Math.PI / 2); hg.translate(0, 0, -0.44); axe.add(new THREE.Mesh(hg, hickory));
-    const wg = new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10); wg.rotateX(Math.PI / 2); wg.translate(0, 0, 0.02); axe.add(new THREE.Mesh(wg, leather));
-    const s = new THREE.Shape();
-    s.moveTo(-0.045, 0.035); s.lineTo(0.045, 0.035); s.lineTo(0.04, -0.03); s.quadraticCurveTo(0.085, -0.07, 0.08, -0.125); s.lineTo(-0.075, -0.125); s.quadraticCurveTo(-0.08, -0.07, -0.04, -0.03); s.closePath();
-    const headG = new THREE.ExtrudeGeometry(s, { depth: 0.026, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 1 });
-    headG.translate(0, 0, -0.013); headG.rotateY(Math.PI / 2); headG.translate(0, 0, -0.9);
-    axe.add(new THREE.Mesh(headG, steel));
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.012, 0.158), edgeM); edge.position.set(0, -0.121, -0.9); axe.add(edge);
-    const gg = new THREE.CapsuleGeometry(0.034, 0.05, 4, 10); gg.rotateX(Math.PI / 2);
-    [0.03, -0.17].forEach(z => { const h = new THREE.Mesh(gg, glove); h.position.set(0, 0.004, z); h.scale.set(1.15, 1, 1); axe.add(h); });
-  }
+  /* 도끼: 그루터기에 꽂혀 있던 것과 같은 모델. 커피·담배처럼 손은 그리지 않는다 */
+  const axe = makeAxe(); axe.position.copy(PIVOT); axe.rotation.x = A_REST; work.add(axe);
 
   /* 장작: 단위 원기둥 하나를 굵기만 바꿔 계속 재사용. 금(crack)과 옹이(knot)는 자식 */
   const logG = new THREE.Group(); logG.visible = false; work.add(logG);
@@ -111,19 +103,41 @@ export function buildChop() {
   const chips = Array.from({ length: NCH }, () => ({ p: new V(), v: new V(), r: new THREE.Euler(), w: new V(), s: new V(), l: 0, m: 0, rest: false, live: false }));
 
   shadowed(rig);
-  const pile = new V(CHOP.pile[0] - CHOP.stump[0], 0, CHOP.pile[1] - CHOP.stump[1]).applyAxisAngle(new V(0, 1, 0), -rig.rotation.y);
   rig.updateMatrixWorld(true);
-  R = { rig, work, axe, logG, logM, crack, knot, halves, chipMesh, chips, chipI: 0, chipLive: false, pile };
+  R = { rig, work, axe, logG, logM, crack, knot, halves, chipMesh, chips, chipI: 0, chipLive: false, pile: new V() };
+  setPile();
   ensureRing(); if (ring) ring.style.opacity = '0';
+}
+
+/* rig 를 돌리기 전에 바닥에 남은 반쪽·조각을 치운다 (같이 돌아가면 그 자리에서 휙 움직여 보인다) */
+function clearDebris() {
+  R.halves.forEach(h => { h.free = true; h.g.visible = false; });
+  for (let i = 0; i < R.chips.length; i++) { R.chips[i].live = false; _d.position.set(0, -5, 0); _d.scale.set(0, 0, 0); _d.updateMatrix(); R.chipMesh.setMatrixAt(i, _d.matrix); }
+  R.chipMesh.instanceMatrix.needsUpdate = true; R.chipLive = false;
+}
+/* 서는 자리 찾기: 그루터기에서 플레이어 쪽으로 CHOP.dist 떨어진 곳. 막혀 있으면 좌우로 0.2rad 씩 넓혀 가며 가장 가까운 빈 각도 */
+function placeFor(px, pz, free) {
+  const sx = CHOP.stump[0], sz = CHOP.stump[1], a0 = Math.atan2(px - sx, pz - sz);
+  for (let k = 0; k <= 32; k++) {
+    const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.2;
+    const x = sx + Math.sin(a) * CHOP.dist, z = sz + Math.cos(a) * CHOP.dist;
+    if (!free || free(x, z)) return { x, z, yaw: wrapPI(a) };
+  }
+  return null;
 }
 
 /* ── 시작·그만두기·입력 ── */
 export function chopEye() { return C.eye; }
-export function startChop() {
+export function chopYaw() { return P.yaw; }
+/* px, pz: 지금 플레이어 위치. free(x, z): 그 자리에 설 수 있는지 (game.js 의 걷기 충돌 검사) */
+export function startChop(px, pz, free) {
   if (!R || C.on) return false;
-  const W = ctx.W, sx = CHOP.stand[0], sz = CHOP.stand[1];
-  C.eye.set(sx, terrainH(sx, sz, W.cfg) + EYE, sz);
-  C.fwd.set(CHOP.stump[0] - sx, 0, CHOP.stump[1] - sz).normalize(); C.right.set(-C.fwd.z, 0, C.fwd.x);
+  const p = placeFor(px, pz, free); if (!p) return false;
+  const W = ctx.W;
+  if (Math.abs(wrapPI(p.yaw - R.rig.rotation.y)) > 0.01) { clearDebris(); R.rig.rotation.y = p.yaw; R.rig.updateMatrixWorld(true); setPile(); }
+  P.x = p.x; P.z = p.z; P.yaw = p.yaw;
+  C.eye.set(p.x, terrainH(p.x, p.z, W.cfg) + EYE, p.z);
+  C.fwd.set(CHOP.stump[0] - p.x, 0, CHOP.stump[1] - p.z).normalize(); C.right.set(-C.fwd.z, 0, C.fwd.x);
   Object.assign(C, { on: true, st: 'idle', a: A_REST, pk: 0, ck: 0, hold: false, queued: false, wantStop: false, nextLogT: 1.0, log: null });
   R.work.visible = true; R.logG.visible = false; R.crack.visible = false;
   if (W.stumpAxe) W.stumpAxe.visible = false;
@@ -280,7 +294,7 @@ function updLog(dt) {
   if (L.landed) g.rotation.z = Math.sin(C.clock * 36) * 0.025 * L.wob;
 }
 
-/* ── 쪼개진 반쪽: 좌우로 기울며 떨어져 한 번 튕기고 눕는다. 7초 뒤 가라앉으며 사라진다 ── */
+/* ── 쪼개진 반쪽: 좌우(rig 의 ±x = 플레이어 기준 좌우)로 기울며 떨어져 한 번 튕기고 눕는다. 7초 뒤 가라앉으며 사라진다 ── */
 function takeHalf() { return R.halves.find(o => o.free) || R.halves.reduce((a, b) => (b.age > a.age ? b : a)); }
 function split(L) {
   R.logG.visible = false; R.crack.visible = false; C.log = null; C.nextLogT = 0.75;
