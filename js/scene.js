@@ -306,7 +306,7 @@ export function buildScene(bgKey) {
   /* 장작 패기 도구(도끼·장작·반쪽·조각)는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
   buildChop();
   if (cfg.snow) makeSnowCaps();
-  contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(2.95, 0.3, 0.7, 0.7, 0.5);
+  contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(3.05, 0.15, 0.7, 0.7, 0.5);
 
   W.steam = new Particles(160, { color: 0xffffff, size: 0.05, opacity: 0.32 }); scene.add(W.steam.mesh);
   W.smoke = new Smoke(220, { color: 0xb9bdc5, warm: 0.6 }); scene.add(W.smoke.mesh);

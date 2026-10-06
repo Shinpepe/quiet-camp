@@ -307,18 +307,99 @@ export function makeCar() {
   shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); applyGear(); return g;
 }
 
+/* ── 배낭 ──
+   원점 = 바닥 가운데, 앞(주머니 쪽) = +z, 등판(어깨끈 쪽) = −z, 머그 쪽 = −x, 물병 쪽 = +x.
+   M: 재질 묶음 (body·dark·pocket·strap·web·buckle·metal·mesh·bottle·pad·padIn·mug·rim) */
+function makeBackpack(M) {
+  const g = new THREE.Group(), V = THREE.Vector3;
+  const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
+  const f = (v, s) => Math.sign(v) * Math.pow(Math.abs(v), s);
+  /* 둥근 상자: 구를 초타원체로 펴서 모서리만 둥글게 (sq 가 작을수록 각진다). 원점 = 바닥 가운데. warp 로 모양을 더 다듬는다 */
+  const pillow = (w, h, d, sq, warp) => {
+    const geo = new THREE.SphereGeometry(1, 28, 20), p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      let x = f(p.getX(i), sq) * w / 2, y = (f(p.getY(i), sq) + 1) * h / 2, z = f(p.getZ(i), sq) * d / 2;
+      if (warp) [x, y, z] = warp(x, y, z, y / h);
+      p.setXYZ(i, x, y, z);
+    }
+    geo.computeVertexNormals(); return geo;
+  };
+  /* 납작한 끈: 곡선을 따라가는 튜브의 단면을 한 축(wide: 0=x, 1=y)으로만 넓힌다 */
+  const strap = (pts, wide, a, b, mat) => {
+    const curve = new THREE.CatmullRomCurve3(pts.map(q => new V(q[0], q[1], q[2]))), SEG = 24, RAD = 8;
+    const geo = new THREE.TubeGeometry(curve, SEG, 1, RAD, false), p = geo.attributes.position, P = new V(), o = [0, 0, 0];
+    for (let i = 0; i <= SEG; i++) {
+      curve.getPointAt(i / SEG, P);
+      for (let j = 0; j <= RAD; j++) {
+        const k = i * (RAD + 1) + j; o[0] = p.getX(k) - P.x; o[1] = p.getY(k) - P.y; o[2] = p.getZ(k) - P.z;
+        for (let c = 0; c < 3; c++) o[c] *= c === wide ? a : b;
+        p.setXYZ(k, P.x + o[0], P.y + o[1], P.z + o[2]);
+      }
+    }
+    geo.computeVertexNormals(); const m = new THREE.Mesh(geo, mat || M.web); g.add(m); return m;
+  };
+
+  /* 몸통: 바닥에 바로 선다. 위로 갈수록 살짝 좁아지고, 앞(+z)은 짐이 차서 불룩, 등판(−z)은 평평하게 */
+  const BW = 0.34, BH = 0.46, BD = 0.2, BY = 0.02, LY = BY + BH - 0.06;
+  add(pillow(BW, BH, BD, 0.3, (x, y, z, t) => [x * (1 - 0.12 * t), y, z > 0 ? z + 0.03 * Math.sin(Math.PI * t) * (1 - Math.min(1, Math.abs(x) / (BW / 2))) : z * 0.92]), M.body, 0, BY, 0);
+  /* 상단 덮개: 몸통보다 살짝 크고, 앞쪽이 아래로 늘어진다 */
+  add(pillow(0.33, 0.1, 0.23, 0.38, (x, y, z) => [x, y - (z > 0 ? 0.025 * (z / 0.115) ** 2 : 0), z]), M.dark, 0, LY, 0.012);
+  /* 덮개 위에 묶은 돌돌 만 매트 + 고정 끈 두 줄 */
+  const RY = LY + 0.1 + 0.058;
+  add(new THREE.CylinderGeometry(0.065, 0.065, 0.42, 24), M.pad, 0, RY, -0.008, 0, 0, Math.PI / 2);
+  add(new THREE.CylinderGeometry(0.028, 0.028, 0.424, 12), M.padIn, 0, RY, -0.008, 0, 0, Math.PI / 2);
+  [-0.13, 0.13].forEach(x => add(new THREE.TorusGeometry(0.067, 0.005, 6, 24), M.web, x, RY, -0.008, 0, Math.PI / 2, 0));
+  /* 앞주머니 + 지퍼 */
+  add(pillow(0.24, 0.2, 0.06, 0.32, (x, y, z, t) => [x, y, z > 0 ? z + 0.01 * Math.sin(Math.PI * t) : z]), M.pocket, 0, 0.06, 0.128);
+  add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new V(-0.095, 0.222, 0.157), new V(0, 0.226, 0.167), new V(0.095, 0.222, 0.157)]), 12, 0.003, 5, false), M.metal, 0, 0, 0);
+  /* 덮개를 잡아 주는 앞 끈 두 줄 + 버클.
+     끈은 매트 밑(덮개 윗면)에서 나와 덮개 윗면 → 앞 모서리 → 덮개 앞면 → 몸통 앞면을 따라 내려간다.
+     각 점은 덮개·몸통의 실제 표면(초타원체 + 앞쪽 처짐)에서 끈 두께만큼만 바깥이다 (예전엔 시작점이 표면보다 2cm 떠 있었다) */
+  [-0.085, 0.085].forEach(x => {
+    strap([[x, 0.521, 0.03], [x, 0.516, 0.07], [x, 0.502, 0.1], [x, 0.487, 0.123], [x, 0.445, 0.129], [x, 0.405, 0.121], [x, 0.37, 0.112], [x, 0.31, 0.115]], 0, 0.014, 0.003);
+    add(new THREE.BoxGeometry(0.036, 0.024, 0.01), M.buckle, x, 0.37, 0.118);
+  });
+  /* 옆면 압축 끈: 왼쪽(−x) 두 줄, 오른쪽(+x) 위 한 줄 */
+  [[0.19, 0.162], [0.35, 0.156]].forEach(([y, hw]) => {
+    strap([[-hw + 0.004, y, 0.085], [-hw - 0.006, y, 0], [-hw + 0.004, y, -0.075]], 1, 0.012, 0.003);
+    add(new THREE.BoxGeometry(0.01, 0.026, 0.034), M.buckle, -hw - 0.004, y, 0.05);
+  });
+  strap([[0.152, 0.35, 0.085], [0.162, 0.35, 0], [0.152, 0.35, -0.075]], 1, 0.012, 0.003);
+  /* 오른쪽 그물 주머니 + 물병 */
+  add(new THREE.CylinderGeometry(0.047, 0.043, 0.12, 18, 1, true), M.mesh, 0.205, 0.1, 0.005);
+  add(new THREE.CylinderGeometry(0.036, 0.036, 0.2, 18), M.bottle, 0.205, 0.145, 0.005);
+  add(new THREE.CylinderGeometry(0.021, 0.024, 0.03, 14), M.buckle, 0.205, 0.26, 0.005);
+  add(new THREE.TorusGeometry(0.012, 0.003, 6, 12), M.buckle, 0.205, 0.283, 0.005);
+  /* 등판: 패드 어깨끈 두 줄 + 가슴끈, 아래엔 허리벨트, 덮개 뒤엔 손잡이 */
+  [-0.075, 0.075].forEach(x => strap([[x, 0.46, -0.075], [x, 0.4, -0.105], [x, 0.26, -0.115], [x, 0.12, -0.105], [x, 0.06, -0.08]], 0, 0.028, 0.011, M.strap));
+  add(new THREE.BoxGeometry(0.16, 0.014, 0.006), M.web, 0, 0.32, -0.124);
+  strap([[-0.165, 0.1, -0.06], [-0.15, 0.09, -0.095], [0, 0.085, -0.11], [0.15, 0.09, -0.095], [0.165, 0.1, -0.06]], 1, 0.026, 0.012, M.strap);
+  add(new THREE.TorusGeometry(0.03, 0.006, 6, 14, Math.PI), M.web, 0, 0.45, -0.115);
+  /* 왼쪽 끈에 카라비너로 매단 법랑 머그 */
+  add(new THREE.TorusGeometry(0.012, 0.0025, 6, 14), M.metal, -0.172, 0.17, 0.05, 0, Math.PI / 2, 0);
+  const mug = new THREE.Group(); mug.position.set(-0.215, 0.115, 0.05); mug.rotation.z = 0.35; g.add(mug);
+  mug.add(new THREE.Mesh(new THREE.LatheGeometry([[0, 0], [0.031, 0], [0.034, 0.004], [0.034, 0.062], [0.031, 0.062], [0.031, 0.006], [0, 0.006]].map(([x, y]) => new THREE.Vector2(x, y)), 24), M.mug));
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.0325, 0.0022, 6, 24), M.rim); rim.rotation.x = Math.PI / 2; rim.position.y = 0.062; mug.add(rim);
+  const hd = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.0035, 6, 12, Math.PI), M.mug); hd.position.set(0.034, 0.034, 0); hd.rotation.z = -Math.PI / 2; mug.add(hd);
+  return g;
+}
+
 /* ── 쿨러, 배낭, 장작더미, 도끼 박힌 그루터기, 잔가지 ── */
 export function makeProps() {
   const scene = ctx.scene, cooler = new THREE.Group();
   const cb = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.38, 0.38), smoothM(0x3d6f9e, { roughness: 0.6 })); cb.position.y = 0.19; cooler.add(cb);
   const cl = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.07, 0.4), smoothM(0xdde6ee, { roughness: 0.5 })); cl.position.y = 0.415; cooler.add(cl);
   cooler.add(bar([-0.2, 0.46, 0], [0.2, 0.46, 0], 0.012, METAL())); cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = 0.2; scene.add(shadowed(cooler));
-  const pack = new THREE.Group(), pm = cloth(0x4d6b3a, 3), pm2 = cloth(0x3e5730, 3);
-  const pb = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.26, 4, 12), pm); pb.scale.set(1.1, 1, 0.65); pb.position.y = 0.28; pack.add(pb);
-  const pl = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.14, 4, 12), pm2); pl.rotation.z = Math.PI / 2; pl.scale.set(1, 1, 0.7); pl.position.set(0, 0.5, 0.02); pack.add(pl);
-  const pp = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.12, 4, 10), pm2); pp.scale.set(1.2, 1, 0.5); pp.position.set(0, 0.2, 0.14); pack.add(pp);
-  [-0.1, 0.1].forEach(x => { const s = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), smoothM(0x2b2b2b)); s.position.set(x, 0.28, -0.12); pack.add(s); });
-  pack.position.set(2.95, 0, 0.3); pack.rotation.set(0, -0.6, 0.12); scene.add(shadowed(pack));
+  /* 배낭: 게임 질감(천 노멀)을 입힌 재질로 makeBackpack 을 만든다.
+     머그가 아이스박스와 붙어 보이지 않게 아이스박스 반대쪽으로 조금 떼어 놓는다 (data.js 의 BLOCKS·scene.js 의 접지 그림자도 이 위치) */
+  const pack = makeBackpack({
+    body: cloth(0x4d6b3a, 3), dark: cloth(0x3e5730, 3), pocket: cloth(0x46633a, 3),
+    strap: cloth(0x2c3029, 2), web: smoothM(0x25272a, { roughness: 0.8 }), buckle: smoothM(0x141414, { roughness: 0.4 }),
+    metal: METAL(), mesh: cloth(0x2a2f2a, 6, { side: THREE.DoubleSide }), bottle: smoothM(0x6a8fa8, { metalness: 0.5, roughness: 0.35 }),
+    pad: cloth(0xb8743a, 4), padIn: smoothM(0x6a4020, { roughness: 0.9 }),
+    mug: smoothM(0xece6d6, { roughness: 0.35, side: THREE.DoubleSide }), rim: smoothM(0x24405e, { roughness: 0.35 }),
+  });
+  pack.position.set(3.05, 0, 0.15); pack.rotation.y = -0.6; scene.add(shadowed(pack));
 
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5))), cut = smoothM(0xc9a97c, Object.assign({ roughness: 0.85 }, tex('wood', 1, 1, 0.3)));
   const pile = new THREE.Group();
