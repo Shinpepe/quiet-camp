@@ -6,7 +6,7 @@ import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks, updateLighthouse } from './props.js';
 import { WATER_Y } from './terrain.js';
-import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience } from './audio.js';
+import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience, setSipFocus } from './audio.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep, buildWithLoading } from './game.js';
 import { updateChop, chopCamera } from './chop.js';
 
@@ -68,6 +68,8 @@ let last = performance.now(), T = 0, lastSec = -1;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4), _sp = new THREE.Vector3();
 const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
 function startExhale(h) { const k = Math.min(h, 3) / 3; anim.exhale = 0.35 + k * 0.75; anim.exhaleStr = 0.6 + k * 0.8; sfx('exhale'); }
+/* 마시는 동안 다음 '꿀꺽'까지의 간격. 위스키는 천천히 머금으므로 더 길다 */
+const gulpGap = type => type === 'whisky' ? rnd(1.6, 2.2) : rnd(1.2, 1.7);
 /* 타는 스파클라 한 프레임: 끝에서부터 타 들어가고, 불티가 튀고, 글로우가 떨린다. 빛은 아래 라이트 풀이 담당 */
 function burnSparkler(W, ud, dt) {
   ud.amount = Math.max(0, ud.amount - dt / 40); ud.setAmount(ud.amount);
@@ -187,19 +189,24 @@ function loop(now) {
         if (k > 0.85 && ud.amount > 0) {
           const rate = type === 'smoke' ? 0.07 : type === 'coffee' ? 0.22 : 0.28;
           ud.amount = Math.max(0, ud.amount - rate * dt); ud.setAmount(ud.amount);
-          /* 마시는 소리 (audio.js): 잔이 입에 닿는 순간 들이마심(커피 '후루룩', 위스키 '쓰읍')
-             → 들고 있는 동안 불규칙한 목 넘김 → 잔을 뗄 때 숨('하~' / '크~') */
+          /* 마시는 소리 (audio.js): 넘기는 '꿀꺽' 하나만. 잔이 입에 닿아 있는 동안 배경이 살짝 물러난다.
+             길게 들고 있으면 불규칙한 간격으로 다시 넘긴다 */
           if (type !== 'smoke') {
-            if (!anim.mouth) { anim.mouth = true; anim.swallows = 0; anim.nextSwallow = T + rnd(0.45, 0.6); sfx('sipStart', type); }
-            else if (T >= anim.nextSwallow) { anim.swallows++; anim.nextSwallow = T + rnd(0.8, 1.15) * (type === 'whisky' ? 1.3 : 1); sfx('swallow'); }
+            if (!anim.mouth) { anim.mouth = true; anim.leftLips = false; anim.nextSwallow = T + gulpGap(type); setSipFocus(true); }
+            else if (anim.holding && T >= anim.nextSwallow) { anim.lastGulp = T; anim.nextSwallow = T + gulpGap(type); sfx('swallow', type); }
           }
           if (ud.amount === 0) { if (type === 'smoke') startExhale(anim.holdT); itemEmptied(); }
         }
-        /* 잔을 내려놓을 때: 마신 뒤의 숨, 위스키는 얼음이 살짝 부딪힌다 */
+        /* 잔이 입술에서 떨어질 때 입에 든 한 모금을 넘긴다. 방금 넘겼다면 겹치지 않게 건너뛴다 */
+        if (type !== 'smoke' && anim.mouth && !anim.leftLips && anim.sipT > 0.5 && k < 0.9) {
+          anim.leftLips = true; setSipFocus(false);
+          if (!ctx.paused && T - anim.lastGulp > 0.6) { anim.lastGulp = T; sfx('swallow', type); }
+        }
+        /* 잔을 다 내렸을 때: 담배는 연기를 내쉬고, 위스키는 얼음이 바닥으로 자리를 잡는다 */
         if (W.item && anim.sipT >= 1) {
           anim.sipT = null; anim.holding = false;
           if (type === 'smoke') startExhale(anim.holdT);
-          else { if (anim.mouth) sfx('sipEnd', { type, held: anim.holdT, swallowed: anim.swallows > 0 }); if (type === 'whisky') sfx('clink', 0.4); }
+          else if (type === 'whisky') sfx('clink', 0.3);
           anim.mouth = false; resetHand();
         }
       }
@@ -210,6 +217,9 @@ function loop(now) {
       }
     }
   }
+  /* 마시는 중이 아니면 포커스를 풀어 둔다 (잠들기·장작 패기·아이템 내려놓기 등으로 도중에 끊겨도 남지 않게).
+     같은 상태면 audio.js 가 아무 일도 하지 않는다 */
+  if (anim.sipT === null) setSipFocus(false);
   if (anim.exhale > 0 && ctx.running) {
     anim.exhale -= dt; camera.getWorldDirection(fwdV); tmpV.copy(camera.position).addScaledVector(fwdV, 0.22); tmpV.y -= 0.06;
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);

@@ -13,8 +13,9 @@ import { startChop, chopEye, chopYaw, chopPress, chopRelease, requestChopStop, r
 
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
-/* 마시기: mouth = 이번 모금에서 잔이 입에 닿았는지(들이마시는 소리를 냈는지), swallows = 넘긴 횟수, nextSwallow = 다음 목 넘김 시각 */
-export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, swallows: 0, nextSwallow: 0, lastTargetId: null };
+/* 마시기: mouth = 이번 모금에서 잔이 입에 닿았는지, leftLips = 잔이 입술에서 떨어졌는지,
+   lastGulp = 마지막 '꿀꺽' 시각(연달아 겹치지 않게), nextSwallow = 길게 마실 때 다음 '꿀꺽' 시각 */
+export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
@@ -221,15 +222,15 @@ export function resetHand() {
 
 /* ── 손에 든 것 사용: 마실 것·담배는 길게, 스파클라는 클릭으로 점화 → 다시 클릭으로 땅에 꽂기 ──
    장작을 패는 중이면 클릭이 도끼질이 된다.
-   마시는 소리는 누르는 순간이 아니라 컵이 입에 닿을 때 main.js 가 낸다. 위스키는 기울일 때 얼음만 살짝 */
+   마시는 소리는 누르는 순간이 아니라 잔이 입술에서 떨어질 때(길게 마시면 그 사이에도) main.js 가 '꿀꺽'으로 낸다 */
 function useItem() {
   if (state.mode === 'chop') { if (cam.t >= 1 && !ctx.paused) chopPress(); return; }
   if (!state.item || !ctx.W.item || state.mode === 'trunk' || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
   if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
   if (anim.sipT !== null) return;
   if (ctx.W.item.userData.amount <= 0) { showToast(state.item === 'smoke' ? '다 피웠다' : '잔이 비었다'); return; }
-  anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.mouth = false; anim.swallows = 0;
-  if (state.item === 'whisky') sfx('clink', 0.6); else if (state.item === 'smoke') sfx('inhale');
+  anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.mouth = false; anim.leftLips = false;
+  if (state.item === 'smoke') sfx('inhale');
 }
 function endSip() { anim.holding = false; chopRelease(); }
 function igniteSparkler() {

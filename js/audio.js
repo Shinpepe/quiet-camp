@@ -4,28 +4,31 @@ import { BG } from './data.js';
 import { rnd } from './util.js';
 
 /* ── 방향: 힐링 캠핑. 모든 소리는 멀리·부드럽게·드물게. 날카로운 고역 없음, 긴 어택, 밤엔 더 뜸하게.
-   버스: world(환경·위치음, 실내 필터) / sfx(손·몸 근처) / dry(입 근처, 잔향 없음) / ui(메뉴·셔터, 컴프레서 우회)
+   버스: world(환경·위치음, 실내 필터) / bed(world 안의 배경 베드 — 한 모금 하는 동안 살짝 물러난다)
+         sfx(손·몸 근처) / dry(입 근처, 잔향 없음) / ui(메뉴·셔터, 컴프레서 우회)
    공간 잔향: world 와 sfx 가 같은 절차적 임펄스 응답을 공유한다 (텐트·차·숲·해변·설원) ── */
 
 /* ── 녹음 샘플로 바꾸고 싶을 때: 파일 경로를 넣으면 합성 버퍼 대신 이 파일들을 돌아가며 쓴다.
    예) sand: ['sounds/sand_1.ogg', 'sounds/sand_2.ogg', ...]
    녹음본은 크기가 제각각이라 FOLEY_GAIN 으로 맞춘다.
-   swallow: 목 넘김 / slurp: 뜨거운 음료 들이마심 / sipCold: 찬 술 한 모금 / ahh: 마신 뒤 '하~' / kha: 독한 술 뒤 '크~'
+   gulpCoffee: 커피 한 모금 넘김 / gulpWhisky: 위스키 한 모금 넘김
    crackle: 장작 타닥 / firePop: 큰 탁 / cricketChirp: 끊어 우는 귀뚜라미 / cricketTrill: 길게 떠는 귀뚜라미 (먼 합창도 이 샘플로 다시 구워진다) ── */
 export const FOLEY_FILES = {
-  sand: [], dirt: [], swallow: [], slurp: [], sipCold: [], ahh: [], kha: [],
+  sand: [], dirt: [], gulpCoffee: [], gulpWhisky: [],
   crackle: [], firePop: [], cricketChirp: [], cricketTrill: [],
   chopHit: [], chopSplit: [], chopKnot: [], logPlace: [], woodLand: [],
 };
 const FOLEY_GAIN = {
-  sand: 0.12, dirt: 0.13, swallow: 0.09, slurp: 0.08, sipCold: 0.06, ahh: 0.05, kha: 0.06,
+  sand: 0.12, dirt: 0.13, gulpCoffee: 0.05, gulpWhisky: 0.06,
   crackle: 0.09, firePop: 0.17, cricketChirp: 0.022, cricketTrill: 0.016,
   chopHit: 0.32, chopSplit: 0.4, chopKnot: 0.3, logPlace: 0.2, woodLand: 0.17,
 };
+/* 한 모금 하는 동안 배경 베드가 물러나는 정도 (0 = 끔). 0.3 이면 베드 -3dB, 고역 6kHz 위가 부드럽게 깎인다 */
+const SIP_FOCUS = 0.3;
 
-let AC = null, master, comp, worldLP, worldGain, sfxBus, dryBus, uiBus, verb = null;
+let AC = null, master, comp, worldLP, worldGain, bedBus, bedLP, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
-let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false;
+let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false, focusOn = false;
 let fire = null, water = null, lamps = null, spark = null, engine = null, engineDone = false;
 let windAcc = 0, lastWind = 0, lastGust = -99;
 const flockAudio = new Map();
@@ -41,6 +44,7 @@ export function initAudio() {
   master = gainN(settings.vol); master.connect(AC.destination);
   comp = AC.createDynamicsCompressor(); comp.threshold.value = -16; comp.knee.value = 14; comp.ratio.value = 2.5; comp.attack.value = 0.015; comp.release.value = 0.3; comp.connect(master);
   worldLP = filt('lowpass', 20000); worldGain = gainN(1); worldLP.connect(worldGain); worldGain.connect(comp);
+  bedLP = filt('lowpass', 20000); bedBus = gainN(1); chain(bedBus, bedLP, worldLP);   // 배경 베드 전용 (한 모금 포커스)
   sfxBus = gainN(1); sfxBus.connect(comp);
   dryBus = gainN(1); dryBus.connect(comp);   // 입 근처 소리(마시기): 공간 잔향을 타지 않는다
   uiBus = gainN(0.8); uiBus.connect(master);
@@ -55,6 +59,14 @@ export function initAudio() {
 }
 export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.setTargetAtTime(v, AC.currentTime, 0.03); }
+/* 한 모금 포커스: 잔이 입에 닿으면 0.6초에 걸쳐 배경이 살짝 물러나고, 떨어지면 1.5초에 걸쳐 숨을 내쉬듯 돌아온다.
+   새 소리를 더하지 않고 믹스만 바꾼다. 같은 상태로 다시 불러도 아무 일도 하지 않으므로 매 프레임 불러도 된다 */
+export function setSipFocus(on) {
+  on = !!on; if (!AC || !bedBus || on === focusOn) return; focusOn = on;
+  const t = AC.currentTime, tc = on ? 0.6 : 1.5, k = on ? SIP_FOCUS : 0;
+  bedBus.gain.setTargetAtTime(1 - k, t, tc);
+  bedLP.frequency.setTargetAtTime(20000 * Math.pow(0.3, k / 0.3), t, tc);
+}
 
 /* ── 공간 잔향: 감쇠하는 저역통과 노이즈로 임펄스 응답을 만든다. 설원은 먼 산에서 되돌아오는 메아리 두 번 ──
    dur: 길이(초), decay: 감쇠 곡선 지수(클수록 빨리 죽음), lp: 잔향 음색(Hz), wet: 잔향 크기 */
@@ -157,7 +169,7 @@ function holdParam(p, t) {
 const bank = {}, lastIdx = {};
 function lowpass(d, sr, fc) { const k = Math.exp(-2 * Math.PI * fc / sr); let y = 0; for (let i = 0; i < d.length; i++) { y = d[i] * (1 - k) + y * k; d[i] = y; } }
 function highpass(d, sr, fc) { const k = Math.exp(-2 * Math.PI * fc / sr); let y = 0, px = 0; for (let i = 0; i < d.length; i++) { const x = d[i]; y = k * (y + x - px); px = x; d[i] = y; } }
-/* 2차 필터(RBJ): 'bp' 대역통과(정점 0dB) / 'lp' 저역 / 'hp' 고역 — 숨소리의 포먼트, 벌레 소리의 공명처럼 좁은 대역이 필요할 때 */
+/* 2차 필터(RBJ): 'bp' 대역통과(정점 0dB) / 'lp' 저역 / 'hp' 고역 — 벌레 소리의 공명처럼 좁은 대역이 필요할 때 */
 function bq(d, sr, type, f, q) {
   const w = 2 * Math.PI * f / sr, cs = Math.cos(w), al = Math.sin(w) / (2 * q);
   let b0, b1, b2;
@@ -198,15 +210,6 @@ function hissLayer(d, sr, t0, atk, tau, amp, lo, hi) {
   for (let i = i0; i < L.length; i++) { const t = i - i0; const e = t < a ? t / a : Math.exp(-(t - a) / T); if (t > a && e < 1e-4) break; L[i] = (Math.random() * 2 - 1) * e; }
   highpass(L, sr, lo); highpass(L, sr, lo); lowpass(L, sr, hi); mixIn(d, L, amp);
 }
-/* 작은 물방울: 위로 살짝 올라가는 짧은 사인(기포 공명). 3~7ms 안에 사라져 음정으로 들리지 않고 '액체'의 질감만 남는다 */
-function bubbles(d, sr, t0, span, n, f0, f1, amp) {
-  const L = new Float32Array(d.length);
-  for (let k = 0; k < n; k++) {
-    const s = Math.floor((t0 + Math.random() * span) * sr), f = rnd(f0, f1), tau = rnd(0.003, 0.007), a = rnd(0.4, 1), end = tau * 6; let ph = 0;
-    for (let i = 0; s + i < L.length; i++) { const t = i / sr; if (t > end) break; ph += 2 * Math.PI * f * (1 + 0.2 * t / end) / sr; L[s + i] += Math.sin(ph) * Math.exp(-t / tau) * Math.min(1, t / 0.0004) * a; }
-  }
-  mixIn(d, L, amp);
-}
 /* 모래: 부드러운 뒤꿈치 → 촘촘한 '사각사각' + 밀리는 '쉭' → 앞꿈치에서 한 번 더 */
 function sandStep() {
   return makeBuf(0.42, (d, sr) => {
@@ -233,58 +236,29 @@ function dirtStep(leaves) {
   });
 }
 
-/* ── 마시기 ──
-   목 넘김: 음정 없는 둔한 저역 충격 두 번 + 젖은 클릭 + 아주 작은 졸졸 (예전의 미끄러지는 사인 '뽕' 대신) */
-function swallowBuf() {
-  return makeBuf(0.26, (d, sr) => {
-    hissLayer(d, sr, 0, 0.0006, 0.004, 0.2, 1400, 4000);
-    thud(d, sr, 0.006, rnd(280, 360), 0.03, 0.9, 0.006);
-    thud(d, sr, rnd(0.045, 0.06), rnd(160, 200), 0.045, 0.55, 0.01);
-    grainLayer(d, sr, 0.03, 0.08, 20, 0.0005, 0.002, 1.5, 0.1, 600, 2500);
-  });
+/* ── 마시기: 한 모금을 넘기는 '꿀꺽' 하나만 쓴다 ──
+   음정 없는 저역 충격은 발소리처럼 들리고, 매끈한 사인은 '뽕' 하고 튄다.
+   그 중간 — 좁은 노이즈 공명이 아래로 미끄러지는 소리 — 가 목 안에서 나는 소리로 들린다.
+   커피: 조금 높고 짧고 가볍게 / 위스키: 조금 낮고 길고 묵직하게 (천천히 머금었다 넘기는 느낌) */
+function sweepRes(d, sr, t0, dur, f0, f1, q, amp, atk) {
+  const L = new Float32Array(d.length), i0 = Math.floor(t0 * sr), n = Math.floor(dur * sr); let y1 = 0, y2 = 0;
+  for (let i = 0; i < n && i0 + i < L.length; i++) {
+    const u = i / n, f = f0 * Math.pow(f1 / f0, u), w = 2 * Math.PI * f / sr, r = Math.exp(-Math.PI * f / (q * sr));
+    const e = Math.min(1, u / atk) * Math.pow(1 - u, 1.5);
+    const y = (Math.random() * 2 - 1) * e + 2 * r * Math.cos(w) * y1 - r * r * y2; y2 = y1; y1 = y; L[i0 + i] = y;
+  }
+  mixIn(d, L, amp);
 }
-/* 들이마심: 입술 사이로 공기가 빨려 드는 난류(빠르게 출렁이는 대역 노이즈) + 작은 물방울들.
-   뜨거운 커피는 공기가 많은 '후루룩', 찬 위스키는 짧고 공기가 적은 '쓰읍' */
-function slurpBuf(cold) {
-  return makeBuf(cold ? 0.32 : 0.5, (d, sr) => {
-    const dur = d.length / sr, L = new Float32Array(d.length), rate = cold ? rnd(18, 26) : rnd(28, 42);
-    const atk = cold ? 0.03 : 0.05, rel = cold ? 0.12 : 0.18, hold = dur - rel - 0.01;
-    let a0 = Math.random(), a1 = Math.random(), seg = 0;
-    for (let i = 0; i < L.length; i++) {
-      const t = i / sr, ph = t * rate, k = Math.floor(ph);
-      if (k !== seg) { seg = k; a0 = a1; a1 = Math.random(); }
-      const f = ph - k, am = 0.35 + 0.65 * (a0 + (a1 - a0) * f * f * (3 - 2 * f));
-      const e = t < atk ? t / atk : t < hold ? 1 : Math.max(0, 1 - (t - hold) / rel);
-      L[i] = (Math.random() * 2 - 1) * am * e;
-    }
-    bq(L, sr, 'hp', cold ? 900 : 1500, 0.7); bq(L, sr, 'lp', cold ? 3800 : 6000, 0.7);
-    mixIn(d, L, cold ? 0.45 : 0.8);
-    bubbles(d, sr, 0.04, dur * 0.7, cold ? Math.round(rnd(3, 5)) : Math.round(rnd(7, 12)), cold ? 900 : 1100, cold ? 1800 : 2600, cold ? 0.35 : 0.3);
-    thud(d, sr, 0, 420, 0.008, 0.18, 0.002);
-  });
-}
-/* 마신 뒤 '하~': 숨 노이즈를 두 포먼트(700·1250Hz 부근)로 걸러 목소리 없이 만족스러운 한숨 */
-function ahhBuf() {
-  return makeBuf(0.8, (d, sr) => {
-    const L = new Float32Array(d.length);
-    for (let i = 0; i < L.length; i++) { const t = i / sr, e = t < 0.06 ? t / 0.06 : Math.exp(-(t - 0.06) / 0.22); L[i] = (Math.random() * 2 - 1) * e; }
-    const M = L.slice();
-    bq(L, sr, 'bp', rnd(650, 800), 1.1); bq(M, sr, 'bp', rnd(1150, 1350), 1.4);
-    mixIn(d, L, 0.7); mixIn(d, M, 0.45);
-  });
-}
-/* 독한 술 뒤 '크~': 짧은 'ㅋ' 파열 + 목이 긁히는 거친 숨(80Hz 안팎으로 떨리는 노이즈) */
-function khaBuf() {
-  return makeBuf(0.5, (d, sr) => {
-    hissLayer(d, sr, 0, 0.0008, 0.008, 0.5, 2000, 6000);
-    const L = new Float32Array(d.length), fr = rnd(65, 90);
-    for (let i = 0; i < L.length; i++) {
-      const t = i / sr - 0.012; if (t < 0) continue;
-      const e = t < 0.02 ? t / 0.02 : Math.exp(-(t - 0.02) / 0.11), rasp = 0.55 + 0.45 * Math.max(0, Math.sin(2 * Math.PI * fr * t));
-      L[i] = (Math.random() * 2 - 1) * e * rasp;
-    }
-    const M = L.slice(); bq(L, sr, 'bp', rnd(1100, 1400), 1.2); bq(M, sr, 'bp', rnd(2300, 2800), 1.6);
-    mixIn(d, L, 0.8); mixIn(d, M, 0.4);
+function gulpBuf(heavy) {
+  return makeBuf(heavy ? 0.34 : 0.28, (d, sr) => {
+    grainLayer(d, sr, 0, 0.015, 4, 0.0006, 0.0018, 1.2, heavy ? 0.08 : 0.12, 1500, 3500);   // 혀가 떨어지는 젖은 딸깍 (아주 작게)
+    const t1 = rnd(0.02, 0.035);
+    /* '꿀': 좁은 공명이 아래로 미끄러진다 */
+    sweepRes(d, sr, t1, heavy ? rnd(0.065, 0.085) : rnd(0.045, 0.06), heavy ? rnd(380, 450) : rnd(470, 560), heavy ? rnd(200, 240) : rnd(260, 320), heavy ? 6 : 7.5, 0.8, 0.2);
+    /* '꺽': 목이 닫히는 짧은 두 번째 공명 + 몸 안쪽의 둔한 울림 */
+    const t2 = t1 + (heavy ? rnd(0.09, 0.12) : rnd(0.065, 0.085));
+    sweepRes(d, sr, t2, rnd(0.03, 0.045), heavy ? rnd(270, 320) : rnd(320, 380), heavy ? rnd(180, 210) : rnd(220, 260), 6, 0.4, 0.15);
+    thud(d, sr, t2, heavy ? 120 : 150, 0.03, heavy ? 0.22 : 0.12, 0.006);
   });
 }
 
@@ -366,7 +340,7 @@ function knockBuf(fc, rf, tau, grains) {
 }
 const GEN = {
   sand: [sandStep, 8], dirt: [() => dirtStep(false), 8], dirtLeaf: [() => dirtStep(true), 8],
-  swallow: [swallowBuf, 6], slurp: [() => slurpBuf(false), 5], sipCold: [() => slurpBuf(true), 5], ahh: [ahhBuf, 4], kha: [khaBuf, 4],
+  gulpCoffee: [() => gulpBuf(false), 6], gulpWhisky: [() => gulpBuf(true), 6],
   crackle: [() => crackleBuf(false), 12], firePop: [() => crackleBuf(true), 5],
   cricketChirp: [() => cricketBuf(false), 6], cricketTrill: [() => cricketBuf(true), 3],
   chopHit: [() => chopBuf('hit'), 5], chopSplit: [() => chopBuf('split'), 5], chopKnot: [() => chopBuf('knot'), 4],
@@ -522,9 +496,10 @@ function cricketNear(nodes, timers) {
   };
   sched(timers, sing, rnd(300, 3000));
 }
-/* 바람 베드의 크기·음색과 잎 스침은 updateAudio 가 W.wind 를 따라 움직인다 (예전의 고정 LFO 대신) */
+/* 바람 베드의 크기·음색과 잎 스침은 updateAudio 가 W.wind 를 따라 움직인다 (예전의 고정 LFO 대신).
+   베드는 bedBus 로 나간다 — 한 모금 하는 동안 이 버스만 살짝 물러난다 */
 function makeBed(type, timeKey) {
-  const out = gainN(0.0001), nodes = [out], timers = []; out.connect(worldLP);
+  const out = gainN(0.0001), nodes = [out], timers = []; out.connect(bedBus);
   const bed = { out, nodes, timers, type, timeKey, wind: null, leaves: null };
   const wind = (f, g0, l1) => { const s = noise('brown', true), f1 = filt('lowpass', f), g = gainN(g0); chain(s, f1, g, out); s.start(0, off()); const [a, ag] = lfo(0.045, l1, f1.frequency); nodes.push(s, f1, g, a, ag); return { g, f: f1, g0, f0: f }; };
   if (type === 'wind') bed.wind = wind(380, 0.16, 220);
@@ -553,7 +528,7 @@ function startAmb(type, timeKey) {
 export function startAmbience(type, timeKey) { if (!AC) return; menuMode = false; applyWorld(); startAmb(type, timeKey); startEngine(); }
 /* 메뉴 프리뷰용: 같은 베드를 작게 */
 export function menuAmbience(bgKey) { if (!AC || !ctx.W.cfg) return; menuMode = true; indoor = false; applyWorld(); startAmb(BG[bgKey].ambience, isNight(state.clock) ? 'night' : 'day'); }
-export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); }
+export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); setSipFocus(false); }
 
 /* ── 간헐 이벤트: 낮 9~26초, 밤 14~40초. 일부 확률은 일부러 비워 둔다(침묵도 소리).
    돌풍은 여기서 빠지고 바람 값(W.wind)이 솟을 때 updateAudio 가 낸다 ── */
@@ -654,7 +629,7 @@ export function updateAudio(dt) {
 /* ── 발소리 ──
    모래·흙(숲) 바닥: 폴리 뱅크에서 변형을 골라 재생 (게임 발소리 방식)
    눈·나무·젖은 바닥: 기존 합성 그대로
-   위스키를 들었으면 두 걸음에 한 번 얼음이 부딪힌다 */
+   위스키를 들었으면 가끔 얼음이 잔에 부딪힌다 */
 let stepIdx = 0;
 function footstep(surface) {
   const t0 = AC.currentTime + rnd(0, 0.012), side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.72, 0.98);
@@ -679,7 +654,7 @@ function footstep(surface) {
       grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05); burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
     }
   }
-  if (state.item === 'whisky' && Math.random() < 0.5) ice(0.45, t0 + rnd(0.05, 0.15));
+  if (state.item === 'whisky' && Math.random() < 0.15) ice(0.35, t0 + rnd(0.05, 0.15));
 }
 
 /* ── 장작 패기 숨소리: 힘을 모을 때 들숨(0.65초), 내려칠 때 날숨.
@@ -711,7 +686,16 @@ function chopWhoosh(arg, t) {
 }
 
 /* ── 손·몸 효과음 ── */
-function ice(k, t) { const B = sfxBus, pv = rnd(0.93, 1.07); [2400, 3150].forEach((fq, i) => tone(B, fq * pv, 0, 0.003, (0.06 - i * 0.02) * k, 0.3, t + i * 0.02)); burst(B, false, 'bandpass', 900, 1.5, 0.03, 0.02 * k, 0.2, t + 0.02); }
+/* 얼음: 유리잔에 부딪히는 짧은 비조화 배음. 50~100ms 안에 사라지고, 가끔 두세 번 연달아 부딪힌다
+   (예전의 0.3초 사인 두 개는 작은 종처럼 울렸다) */
+function ice(k, t) {
+  const n = 1 + (Math.random() < 0.55 ? 1 : 0) + (k > 0.8 && Math.random() < 0.5 ? 1 : 0);
+  for (let h = 0; h < n; h++) {
+    const th = t + h * rnd(0.025, 0.07), f = rnd(1900, 3200), a = 0.035 * k * (h ? rnd(0.35, 0.65) : 1);
+    [[1, 1, 0.08], [2.32, 0.45, 0.045], [4.25, 0.2, 0.025]].forEach(([m, g, dd]) => tone(sfxBus, f * m, 0, 0.001, a * g, dd * rnd(0.8, 1.2), th));
+    burst(sfxBus, false, 'bandpass', Math.min(f * 1.6, 9000), 1.2, 0.0005, a * 0.5, 0.012, th);
+  }
+}
 function zipper(open) {
   const t0 = AC.currentTime, B = sfxBus, dur = rnd(0.6, 0.85), n = Math.round(dur * 70), f0 = open ? 2200 : 3600, f1 = open ? 3600 : 2200;
   for (let i = 0; i < n; i++) { const p = i / n, t = t0 + dur * (p + 0.12 * Math.sin(p * 6.283)), k = 0.4 + 0.6 * Math.sin(Math.PI * p); burst(B, false, 'bandpass', (f0 + (f1 - f0) * p) * rnd(0.95, 1.05), 4, 0.001, 0.03 * k * rnd(0.6, 1), 0.012, t); }
@@ -745,15 +729,12 @@ export function sfx(type, arg) {
     case 'doorClose': tone(B, 70 * pv, 45, 0.004, 0.28, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.2, 0.15, t); burst(B, false, 'highpass', 3000 * pv, 1, 0.002, 0.06, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.05, 0.35, t); return;
     /* 아이템 */
     case 'pick': if (arg === 'coffee') pour(); else if (arg === 'whisky') { ice(1, t); ice(0.7, t + 0.13); } else if (arg === 'sparkler') { for (let i = 0; i < 3; i++) burst(B, false, 'bandpass', 2000 * rnd(0.9, 1.1), 0.8, 0.01, 0.03, 0.08, t + i * 0.09); } else sfx('lighter'); return;
-    /* 마시기: 입에 닿을 때(sipStart) → 들고 있는 동안(swallow) → 잔을 뗄 때(sipEnd). 'sip'·'gulp' 는 예전 이름 호환 */
-    case 'sipStart': case 'sip': { const key = arg === 'whisky' ? 'sipCold' : 'slurp'; playBank(key, dryBus, FOLEY_GAIN[key] * rnd(0.85, 1), rnd(0.94, 1.06), t); return; }
-    case 'swallow': case 'gulp': playBank('swallow', dryBus, FOLEY_GAIN.swallow * rnd(0.8, 1), rnd(0.92, 1.08), t); return;
-    case 'sipEnd': {
-      /* 한 번도 넘기지 않고 잔을 뗐다면 먼저 한 번 넘긴다. 오래 마실수록 마지막 숨이 나올 확률이 높다 (위스키가 더 자주) */
-      const o = arg || {}, w = o.type === 'whisky', held = Math.min(o.held || 0, 2); let tt = t;
-      if (!o.swallowed) { playBank('swallow', dryBus, FOLEY_GAIN.swallow * rnd(0.8, 1), rnd(0.92, 1.08), tt + 0.05); tt += 0.3; }
-      const p = w ? 0.45 + 0.25 * held : 0.25 + 0.3 * held, key = w ? 'kha' : 'ahh';
-      if (Math.random() < p) playBank(key, dryBus, FOLEY_GAIN[key] * rnd(0.8, 1), rnd(0.95, 1.05), tt + rnd(0.12, 0.28));
+    /* 마시기: 넘기는 '꿀꺽' 하나만. 커피는 높고 가볍게, 위스키는 낮고 묵직하게 (main.js 가 타이밍을 정한다).
+       'sipStart'·'sip'·'sipEnd' 는 예전 호출이 남아 있어도 조용히 넘어가도록 받아 둔다 */
+    case 'sipStart': case 'sip': case 'sipEnd': return;
+    case 'swallow': case 'gulp': {
+      const key = arg === 'whisky' ? 'gulpWhisky' : 'gulpCoffee';
+      playBank(key, dryBus, FOLEY_GAIN[key] * rnd(0.85, 1), rnd(0.96, 1.04), t);
       return;
     }
     case 'clink': ice(typeof arg === 'number' ? arg : 1, t); return;
