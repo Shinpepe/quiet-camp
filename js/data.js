@@ -70,3 +70,17 @@ export const WAKE = 7 / 24;
 /* 장작 패기: 그루터기 위치, 서는 거리(그루터기에서 플레이어 쪽으로 1.2m — 방향은 E 를 누른 자리에서 정한다),
    다음 장작을 집어 오는 장작더미, 내려다보는 각도, 시선 허용 범위(좌우·상하 rad) */
 export const CHOP = { stump: [2.55, -1.95], dist: 1.2, pile: [1.85, -2.55], pitch: -0.64, look: [0.32, 0.22] };
+
+/* 캠핑 장비 색: 차와 텐트가 같은 이름의 색을 공유한다.
+   car 는 도장이라 조금 깊고 차분하게, tent 는 천이라 조금 밝고 부드럽게. 메뉴 견본도 줄마다 각자의 값을 쓴다
+   (화이트는 설산의 눈에 묻혀 빠졌다 — 다시 넣으려면 이 목록에 한 줄만 추가하면 된다) */
+export const GEAR = [
+  { key: 'burgundy', name: '버건디', car: 0x8f2b28, tent: 0x9a3a36 },
+  { key: 'orange',   name: '오렌지', car: 0xc8642a, tent: 0xe0783a },
+  { key: 'forest',   name: '포레스트', car: 0x34503f, tent: 0x56704a },
+  { key: 'sky',      name: '스카이', car: 0x8fb3cc, tent: 0x7fa9c8 },
+  { key: 'navy',     name: '네이비', car: 0x26384f, tent: 0x34496a },
+  { key: 'black',    name: '블랙', car: 0x1c1d20, tent: 0x2a2b2d },
+];
+/* 처음 시작할 때의 색 (저장된 값이 목록에 없을 때도 이 값으로 돌아간다) */
+export const GEAR_DEFAULT = { car: 'burgundy', tent: 'orange' };

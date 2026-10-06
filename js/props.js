@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { ctx } from './state.js';
+import { ctx, state } from './state.js';
+import { GEAR, GEAR_DEFAULT } from './data.js';
 import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
@@ -9,6 +10,16 @@ const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.
 const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 const lathe = (pts, seg) => new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg || 28);
 function sagPlane(w, h, sag, seg = 8) { const g = new THREE.PlaneGeometry(w, h, seg, seg); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getX(i) / w + 0.5, v = p.getY(i) / h + 0.5; p.setZ(i, sag * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)); } g.computeVertexNormals(); return g; }
+
+/* ── 장비 색: 메뉴에서 고르면 바로 바뀐다 (재질 색만 바꾸므로 재컴파일·재빌드가 없다) ──
+   텐트는 천마다 원래 주황과의 밝기 비율을 곱해 음영을 유지한다(W.tentMats 의 두 번째 값).
+   재질 색은 선형 공간이라 sRGB 밝기 비율을 2.2 제곱한 값을 쓴다 */
+const gearOf = (k, def) => GEAR.find(g => g.key === k) || GEAR.find(g => g.key === def);
+export function applyGear() {
+  const W = ctx.W;
+  if (W.carBody) W.carBody.color.setHex(gearOf(state.carColor, GEAR_DEFAULT.car).car);
+  if (W.tentMats) { const c = gearOf(state.tentColor, GEAR_DEFAULT.tent).tent; W.tentMats.forEach(([m, k]) => m.color.setHex(c).multiplyScalar(k)); }
+}
 
 /* 차 안 내비 화면: 간단한 지도 */
 const naviTex = canvasTex(256, 128, (g, w, h) => {
@@ -93,9 +104,13 @@ export function makeAxe() {
 
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
-  const clothM = cloth(0xe0783a, 8), flyM = cloth(0xc4602a, 8), backM = cloth(0xb8562a, 4), liningM = cloth(0xc9673a, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
+  /* 천 색은 applyGear 가 정한다 (여기서는 흰색으로 만들어 두고 등록만) */
+  const clothM = cloth(0xffffff, 8), flyM = cloth(0xffffff, 8), backM = cloth(0xffffff, 4), liningM = cloth(0xffffff, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
+  const backInM = cloth(0xffffff, 4, { side: THREE.BackSide }), doorM = cloth(0xffffff, 2);
   /* 텐트 랜턴이 켜지면 main.js 가 이 천들의 emissive 를 올린다 */
   W.tentCloth = [clothM, flyM, backM];
+  /* [재질, 원래 주황 대비 밝기 비율(선형)]: 몸체 / 플라이 / 뒷면 / 안감 / 뒷면 안쪽 / 문 테두리 */
+  W.tentMats = [[clothM, 1], [flyM, 0.74], [backM, 0.65], [liningM, 0.79], [backInM, 0.53], [doorM, 0.89]];
   const slab = (m, halfW, h, y0, len, sag, inner) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => {
     const geo = sagPlane(side, len, -sag, 10); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w);
     if (inner) { const li = new THREE.Mesh(geo, inner); li.position.copy(w.position); li.rotation.copy(w.rotation); li.translateY(-0.035); g.add(li); linings.push(li); }
@@ -106,8 +121,8 @@ export function makeTent() {
   const sh = new THREE.Shape(); sh.moveTo(-Wd / 2, 0); sh.lineTo(Wd / 2, 0); sh.lineTo(0, H);
   const backGeo = new THREE.ShapeGeometry(sh);
   const back = new THREE.Mesh(backGeo, backM); back.position.z = L / 2; g.add(back);
-  const backIn = new THREE.Mesh(backGeo, cloth(0xa8502a, 4, { side: THREE.BackSide })); backIn.position.z = L / 2 - 0.035; g.add(backIn); linings.push(backIn);
-  [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, cloth(0xd46a30, 2), 8)));
+  const backIn = new THREE.Mesh(backGeo, backInM); backIn.position.z = L / 2 - 0.035; g.add(backIn); linings.push(backIn);
+  [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, doorM, 8)));
   /* 바닥은 뒷면 삼각형(z=L/2)보다 3cm 짧게 — 같은 평면에서 만나면 뒤쪽 아래가 깜빡인다 */
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd - 0.04, 0.05, L - 0.06), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
   const bag = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 1.35, 4, 14), cloth(0x2c4a7a, 4)); bag.rotation.x = Math.PI / 2; bag.scale.set(1.05, 1, 0.3); bag.position.set(0.5, 0.15, 0.05); g.add(bag);
@@ -117,7 +132,7 @@ export function makeTent() {
   [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * 1.95, 0.02, sz * 1.75], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * 1.95, 0.04, sz * 1.75); stake.rotation.z = -sx * 0.45; g.add(stake); });
   const lamp = makeLantern(W.tentLampLit); lamp.scale.setScalar(0.7); lamp.position.set(-0.75, 0.05, 0.9); g.add(lamp); W.tentLampObj = lamp;
   W.tentLamp = new THREE.PointLight(0xffc890, W.tentLampLit ? W.tm.tentLamp : 0, 4.5, 2); W.tentLamp.position.set(-0.6, 0.35, 0.8); g.add(W.tentLamp);
-  shadowed(g); linings.forEach(li => { li.castShadow = false; }); return g;
+  shadowed(g); linings.forEach(li => { li.castShadow = false; }); applyGear(); return g;
 }
 export function makeChair() {
   const g = new THREE.Group(), fabric = cloth(0x2f4f6a, 3, { side: THREE.DoubleSide }), frame = METAL(), arm = wood(0x8a6a48, 2, 1);
@@ -178,7 +193,9 @@ export function makeFire() {
    겹치는 박스는 5mm 이상 어긋나게 두어 같은 평면이 생기지 않게 한다 ── */
 export function makeCar() {
   const W = ctx.W, g = new THREE.Group();
+  /* 차체 색은 applyGear 가 정한다 (테일게이트도 같은 재질이라 함께 바뀐다) */
   const body = new THREE.MeshPhysicalMaterial({ color: 0x8f2b28, roughness: 0.5, metalness: 0.2, clearcoat: 0.5, clearcoatRoughness: 0.4 });
+  W.carBody = body;
   const dark = std(0x24252a, { roughness: 0.8 }), chrome = std(0xb8bcc2, { metalness: 0.85, roughness: 0.45 }), rubber = std(0x141414, { roughness: 0.95 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x7f9fb8, transparent: true, opacity: 0.28, roughness: 0.03, metalness: 0.0, envMapIntensity: 1.2, side: THREE.DoubleSide });
   /* 세워 둔 차: 전조등·후미등은 꺼져 있다. 유리 질감에 아주 약한 emissive 만 */
@@ -287,7 +304,7 @@ export function makeCar() {
   const lidG = new THREE.Mesh(new THREE.PlaneGeometry(1.66, 0.34), glass); lidG.position.set(0, -0.18, 0.005); lid.add(lidG);
   const lidH = new THREE.Mesh(B(0.2, 0.03, 0.03), chrome); lidH.position.set(0, -0.5, 0.04); lid.add(lidH);
   g.add(lid); W.trunkLid = lid;
-  shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); return g;
+  shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); applyGear(); return g;
 }
 
 /* ── 쿨러, 배낭, 장작더미, 도끼 박힌 그루터기, 잔가지 ── */

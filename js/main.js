@@ -66,6 +66,8 @@ function windAt(T, key) {
 
 let last = performance.now(), T = 0, lastSec = -1;
 const _c = new THREE.Color(), tmpV = new THREE.Vector3(), fwdV = new THREE.Vector3(), basePos = new THREE.Vector3(), sipPos = new THREE.Vector3(), firePos = new THREE.Vector3(0.3, 0.25, -1.4), _sp = new THREE.Vector3();
+/* 텐트 랜턴이 천에 비치는 색: 랜턴의 따뜻한 주황(_gw)과 천 색(_gc)을 섞는다 */
+const _gw = new THREE.Color(0xff8a30), _gc = new THREE.Color();
 const lampTo = (light, lit, base, floor, flick, dt) => { const tgt = lit ? Math.max(base, floor) * flick : 0; light.intensity += (tgt - light.intensity) * Math.min(1, dt * 6); };
 function startExhale(h) { const k = Math.min(h, 3) / 3; anim.exhale = 0.35 + k * 0.75; anim.exhaleStr = 0.6 + k * 0.8; sfx('exhale'); }
 /* 마시는 동안 다음 '꿀꺽'까지의 간격. 위스키는 천천히 머금으므로 더 길다 */
@@ -143,8 +145,17 @@ function loop(now) {
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
-  /* 텐트 랜턴이 켜지면 밖에서 천이 은은하게 빛난다. 점광원의 빠른 떨림(flick)은 천에 곱하지 않는다 — 큰 면이 13Hz 로 깜빡이면 지직거림으로 보인다 */
-  if (W.tentCloth) { W.tentGlow = (W.tentGlow || 0) + ((W.tentLampLit ? 1 : 0) - (W.tentGlow || 0)) * Math.min(1, dt * 3); const k = 0.32 * W.tentGlow * (0.97 + 0.03 * Math.sin(T * 1.7)); W.tentCloth.forEach(m => { m.emissive.setHex(0xff8a30).multiplyScalar(k); }); }
+  /* 텐트 랜턴이 켜지면 밖에서 천이 은은하게 빛난다.
+     빛 색은 랜턴의 따뜻한 주황과 천 색을 반씩 섞고(스카이 텐트가 주황으로 빛나지 않게), 어두운 천일수록 빛이 덜 샌다(블랙은 거의 비치지 않는다).
+     점광원의 빠른 떨림(flick)은 천에 곱하지 않는다 — 큰 면이 13Hz 로 깜빡이면 지직거림으로 보인다 */
+  if (W.tentCloth) {
+    W.tentGlow = (W.tentGlow || 0) + ((W.tentLampLit ? 1 : 0) - (W.tentGlow || 0)) * Math.min(1, dt * 3);
+    const k = 0.32 * W.tentGlow * (0.97 + 0.03 * Math.sin(T * 1.7));
+    W.tentCloth.forEach(m => {
+      const c = m.color, mx = Math.max(c.r, c.g, c.b, 1e-3), pass = 0.2 + 0.8 * Math.min(1, mx * 1.6);
+      _gc.setRGB(c.r / mx, c.g / mx, c.b / mx); m.emissive.copy(_gw).lerp(_gc, 0.5).multiplyScalar(k * pass);
+    });
+  }
   if (W.dockLight) { W.dockLight.intensity = W.tm.lantern * 0.8 * (0.96 + 0.04 * Math.sin(T * 3.1)); if (W.dockLampObj) W.dockLampObj.userData.setLit(W.tm.lantern > 0.5); }
   if (W.stars) W.stars.material.uniforms.uOp.value = W.tm.stars;
 

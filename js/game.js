@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { ctx, state, settings, saveSettings } from './state.js';
-import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON } from './data.js';
+import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
-import { makeItem } from './props.js';
+import { makeItem, applyGear } from './props.js';
 import { buildScene, precompileScene, rebakeEnv } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
@@ -374,6 +374,20 @@ function renderMenu() {
   Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div class="nm">${b.name}</div>`; d.onclick = () => { if (state.bg === b.key) return; sfx('ui'); state.bg = b.key; saveSettings(); renderMenu(); previewRebuild(); }; bl.append(d); });
   const tl = $('#timeList'); tl.innerHTML = '';
   Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { sfx('ui'); state.time = t.key; state.clock = t.clock; saveSettings(); renderMenu(); const W = ctx.W; if (W.tm) { W.fireLit = W.tm.stars > 0.1; W.lanternLit = W.tm.lantern > 0.5; W.tentLampLit = W.tm.tentLamp > 0.5; } if (!ctx.running) menuAmbience(state.bg); }; tl.append(d); });
+  /* 장비 색 견본: 차와 텐트가 같은 색 목록을 쓰고, 견본은 각 물체에 실제로 칠해지는 값으로 보여 준다.
+     누르면 프리뷰 씬의 차·텐트가 바로 바뀐다 (씬을 다시 만들지 않는다) */
+  const gear = (id, kind, prop) => {
+    const box = $('#' + id); if (!box) return; box.innerHTML = '';
+    const cur = GEAR.find(g => g.key === state[prop]) || GEAR.find(g => g.key === GEAR_DEFAULT[kind]);
+    GEAR.forEach(g => {
+      const b = document.createElement('button'); b.className = 'sw' + (g === cur ? ' sel' : '');
+      b.style.setProperty('--c', '#' + g[kind].toString(16).padStart(6, '0')); b.title = g.name; b.setAttribute('aria-label', g.name);
+      b.onclick = () => { if (state[prop] === g.key) return; sfx('ui'); state[prop] = g.key; saveSettings(); applyGear(); renderMenu(); };
+      box.append(b);
+    });
+    const lab = $('#' + id + 'Name'); if (lab) lab.textContent = cur.name;
+  };
+  gear('carList', 'car', 'carColor'); gear('tentList', 'tent', 'tentColor');
 }
 /* 씬 재구성은 동기라서, 로딩 오버레이가 화면에 먼저 그려지도록 한 틱 띄운다.
    씬을 만든 뒤 셰이더 사전 컴파일이 끝나야 로딩을 내린다 (첫 점화·첫 유성에서 멈칫하지 않게).
