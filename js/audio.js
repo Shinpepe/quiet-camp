@@ -18,8 +18,9 @@ export const FOLEY_FILES = {
   crackle: [], firePop: [], cricketChirp: [], cricketTrill: [],
   chopHit: [], chopSplit: [], chopKnot: [], logPlace: [], woodLand: [],
 };
+/* 꿀꺽은 잔향 없는 dryBus 로 나가므로 발소리(0.12~0.13)와 비슷한 값이어야 비슷한 크기로 들린다 */
 const FOLEY_GAIN = {
-  sand: 0.12, dirt: 0.13, gulpCoffee: 0.05, gulpWhisky: 0.06,
+  sand: 0.12, dirt: 0.13, gulpCoffee: 0.1, gulpWhisky: 0.11,
   crackle: 0.09, firePop: 0.17, cricketChirp: 0.022, cricketTrill: 0.016,
   chopHit: 0.32, chopSplit: 0.4, chopKnot: 0.3, logPlace: 0.2, woodLand: 0.17,
 };
@@ -249,15 +250,22 @@ function sweepRes(d, sr, t0, dur, f0, f1, q, amp, atk) {
   }
   mixIn(d, L, amp);
 }
+/* 몸통(200~560Hz)만 있으면 노트북·폰 스피커에서 거의 재생되지 않는다.
+   같은 움직임의 윗 공명(약 2.6~2.8배, 1~1.5kHz)과 젖은 딸깍(1.2~4.5kHz)이 작은 스피커에서도 '꿀꺽'의 윤곽을 들려준다 */
 function gulpBuf(heavy) {
   return makeBuf(heavy ? 0.34 : 0.28, (d, sr) => {
-    grainLayer(d, sr, 0, 0.015, 4, 0.0006, 0.0018, 1.2, heavy ? 0.08 : 0.12, 1500, 3500);   // 혀가 떨어지는 젖은 딸깍 (아주 작게)
-    const t1 = rnd(0.02, 0.035);
-    /* '꿀': 좁은 공명이 아래로 미끄러진다 */
-    sweepRes(d, sr, t1, heavy ? rnd(0.065, 0.085) : rnd(0.045, 0.06), heavy ? rnd(380, 450) : rnd(470, 560), heavy ? rnd(200, 240) : rnd(260, 320), heavy ? 6 : 7.5, 0.8, 0.2);
-    /* '꺽': 목이 닫히는 짧은 두 번째 공명 + 몸 안쪽의 둔한 울림 */
-    const t2 = t1 + (heavy ? rnd(0.09, 0.12) : rnd(0.065, 0.085));
-    sweepRes(d, sr, t2, rnd(0.03, 0.045), heavy ? rnd(270, 320) : rnd(320, 380), heavy ? rnd(180, 210) : rnd(220, 260), 6, 0.4, 0.15);
+    /* 혀가 입천장에서 떨어지는 젖은 딸깍 */
+    grainLayer(d, sr, 0, 0.012, 6, 0.0005, 0.0016, 1.2, heavy ? 0.28 : 0.34, 1200, 4500);
+    /* '꿀': 좁은 공명이 아래로 미끄러진다 (몸통 + 윗 공명) */
+    const t1 = rnd(0.02, 0.035), d1 = heavy ? rnd(0.065, 0.085) : rnd(0.045, 0.06);
+    const f0 = heavy ? rnd(380, 450) : rnd(470, 560), f1 = heavy ? rnd(200, 240) : rnd(260, 320);
+    sweepRes(d, sr, t1, d1, f0, f1, heavy ? 6 : 7.5, 0.8, 0.2);
+    sweepRes(d, sr, t1, d1, f0 * 2.6, f1 * 2.6, 5, heavy ? 0.35 : 0.42, 0.2);
+    /* '꺽': 목이 닫히는 짧은 두 번째 공명(+ 윗 공명) + 몸 안쪽의 둔한 울림 */
+    const t2 = t1 + (heavy ? rnd(0.09, 0.12) : rnd(0.065, 0.085)), d2 = rnd(0.03, 0.045);
+    const g0 = heavy ? rnd(270, 320) : rnd(320, 380), g1 = heavy ? rnd(180, 210) : rnd(220, 260);
+    sweepRes(d, sr, t2, d2, g0, g1, 6, 0.45, 0.15);
+    sweepRes(d, sr, t2, d2, g0 * 2.8, g1 * 2.8, 5, 0.25, 0.15);
     thud(d, sr, t2, heavy ? 120 : 150, 0.03, heavy ? 0.22 : 0.12, 0.006);
   });
 }
