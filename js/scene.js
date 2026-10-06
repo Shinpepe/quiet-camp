@@ -289,7 +289,13 @@ export function buildScene(bgKey) {
   if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
   if (cfg.key === 'beach') {
     const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
-    for (let i = 0; i < 3; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3); const h = terrainH(x, z, cfg); if (h < 0.1) continue; const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, rnd(1.5, 2.6), 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); }
+    /* 유목 3개: 누운 길이의 절반만큼 자리를 차지한다 (vegetation.js 가 만든 W.space 격자 — 야자수·조개와 겹치지 않게) */
+    for (let i = 0, n = 0; i < 40 && n < 3; i++) {
+      const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3), h = terrainH(x, z, cfg); if (h < 0.1) continue;
+      const len = rnd(1.5, 2.6), r = len * 0.5; if (!W.space.fits(x, z, r)) continue;
+      W.space.add(x, z, r, r);
+      const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, len, 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); n++;
+    }
   }
 
   const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);

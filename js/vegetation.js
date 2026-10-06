@@ -8,6 +8,32 @@ import { tex } from './textures.js';
 /* 모바일은 식생 밀도를 낮춘다 */
 const M = isTouch ? 0.55 : 1;
 
+/* ── 자리 잡기: 놓인 물체를 격자(기본 2m)에 기록해 두고, 새 물체가 근처 칸의 물체와 겹치는지만 빠르게 검사한다 ──
+   물체마다 두 반지름을 둔다.
+   r: 간격 반지름 — 같은 층(나무끼리, 바위끼리, 조개끼리)은 서로 이만큼 떨어진다
+   h: 단단한 반지름 — 줄기·바위 몸통. 덤불·풀·조개처럼 아래층에 깔리는 것은 이것만 피한다 (under = true)
+   노이즈 군집은 그대로 두므로, 격자처럼 고르게 퍼지지 않고 뭉쳐 자라되 겹치지만 않는다 */
+function makeSpace(cell = 2) {
+  const grid = new Map(), key = (i, j) => (i + 2048) * 4096 + (j + 2048);
+  let maxR = 0;
+  const hit = (x, z, reach, test) => {
+    const n = Math.ceil(reach / cell), ci = Math.floor(x / cell), cj = Math.floor(z / cell);
+    for (let i = ci - n; i <= ci + n; i++) for (let j = cj - n; j <= cj + n; j++) {
+      const l = grid.get(key(i, j)); if (l) for (const o of l) if (test(o)) return true;
+    }
+    return false;
+  };
+  return {
+    /* 이 자리에 반지름 r 짜리를 놓을 수 있는가. under 면 기존 물체의 단단한 반지름(h)만 피한다 */
+    fits(x, z, r, under) { return !hit(x, z, r + maxR, o => Math.hypot(x - o.x, z - o.z) < r + (under ? o.h : o.r)); },
+    add(x, z, r, h) {
+      const k = key(Math.floor(x / cell), Math.floor(z / cell));
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push({ x, z, r, h: h === undefined ? r : h }); if (r > maxR) maxR = r;
+    },
+  };
+}
+
 /* 잎 재질: 바람 흔들림 + 역광 투과 + 림 라이트 + 아랫면 어두움.
    흔들림 폭은 W.wind(0..1)를 따른다 — 바람 0.5 에서 예전과 같은 폭 */
 export function swayMat(extra, strength, from) {
@@ -134,54 +160,107 @@ function makePalm() {
 }
 function makeRock(s, color) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(s, 1), 0.4), std(color, tex('rock', 2, 2, 0.55))); r.rotation.set(rnd(0, 3), rnd(0, 3), rnd(0, 3)); return shadowed(r); }
 
-/* ── 조개껍데기 ── */
-function gridGeo(nu, nv, fn) {
-  const pos = [], idx = [];
-  for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) { const p = fn(i / nu, j / nv); pos.push(p[0], p[1], p[2]); }
-  for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = i * (nv + 1) + j, b = a + nv + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
-  const g = new THREE.BufferGeometry(); g.setIndex(idx); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g;
+/* ── 조개껍데기: 가리비·소라·바지락 (정점색 무늬 포함) ── */
+/* 격자 함수 fn(u,v) → [x,y,z,r,g,b] 여러 장을 한 지오메트리로 잇는다 (인덱스라 노멀이 매끈하다) */
+function shellGeo(parts) {
+  const pos = [], col = [], idx = [];
+  parts.forEach(([nu, nv, fn]) => {
+    const base = pos.length / 3;
+    for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) { const p = fn(i / nu, j / nv); pos.push(p[0], p[1], p[2]); col.push(p[3], p[4], p[5]); }
+    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = base + i * (nv + 1) + j, b = a + nv + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  });
+  const g = new THREE.BufferGeometry(); g.setIndex(idx);
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals(); return g;
 }
-/* 소라: 원뿔에 나선 이랑이 5바퀴 감기고, 아래 몸통이 볼록했다가 오므라든다. 옆으로 눕힘(축이 x) */
+/* 가장 낮은 점을 y 0 에, 가로 가운데를 원점에 — 모래 위에 바로 놓인다 */
+function sitOnGround(g) { g.computeBoundingBox(); const b = g.boundingBox; g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); return g; }
+const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/* 가리비: 경첩에서 부채꼴로 퍼지는 몸통에 방사형 골 16개, 촘촘한 성장선, 동심원 색띠.
+   경첩 양옆으로 납작한 귀 두 장. 볼록한 면이 위로, 가장자리가 모래에 닿는다 */
+function scallopGeo() {
+  const N = 50, SPAN = 0.95, base = [0.98, 0.91, 0.85], band = [0.9, 0.66, 0.56], rib = [1, 0.97, 0.93];
+  const body = (u, v) => {
+    const phi = (v * 2 - 1) * SPAN, rb = Math.pow(0.5 + 0.5 * Math.cos(phi * N), 1.5);
+    const r = u * (1 - 0.1 * phi * phi) * (1 + 0.025 * rb);
+    const y = 0.26 * Math.sin(Math.PI * Math.pow(u, 0.8)) * (1 - 0.25 * u) * (1 - 0.35 * phi * phi) + 0.03 * u * rb + 0.003 * Math.sin(u * 95) * u;
+    const c = mix3(mix3(base, band, 0.8 * sstep(0.3, 0.9, 0.5 + 0.5 * Math.sin(u * 13 + phi * 1.5))), rib, rb * 0.5);
+    return [r * Math.sin(phi), y, r * Math.cos(phi), ...c];
+  };
+  const ear = side => (a, b) => [side * 0.36 * a * (1 - 0.25 * b), 0.012 + 0.05 * b * (1 - 0.5 * a) + 0.004 * Math.cos(a * 30), 0.22 * b * (1 - 0.45 * a) - 0.02, ...mix3(base, band, 0.3)];
+  return sitOnGround(shellGeo([[24, 64, body], [6, 10, ear(1)], [6, 10, ear(-1)]]));
+}
+/* 소라: 로그 나선을 따라 커지는 타원 단면을 쓸어 만든다 (실제 고둥이 자라는 방식).
+   어깨에 돌기가 줄지어 나고, 표면엔 나선 이랑과 갈색 줄무늬, 입구는 넓게 벌어지며 안쪽이 분홍빛이다.
+   옆으로 누워 모래에 놓인 모습으로 돌려 두고, 가장 긴 길이를 1.7 로 맞춘다 */
 function conchGeo() {
-  const g = gridGeo(90, 36, (u, v) => {
-    const th = v * Math.PI * 2;
-    let r = u < 0.82 ? Math.pow(u / 0.82, 1.15) : 1 - 0.5 * Math.pow((u - 0.82) / 0.18, 1.6);
-    const sp = ((u * 5 - v) % 1 + 1) % 1, whorl = Math.exp(-Math.pow(sp - 0.5, 2) * 45);
-    r *= 1 + 0.13 * whorl * Math.min(1, u * 4) + 0.02 * Math.sin(th * 18);
-    return [r * Math.cos(th), 1.7 * (1 - u), r * Math.sin(th)];
-  });
-  g.rotateZ(Math.PI / 2); return g;
+  const T0 = -5.5 * Math.PI, B = 0.13, D = 0.7, H = 2.2, A = 0.75, BV = 1.05;
+  const cream = [0.97, 0.9, 0.8], brown = [0.7, 0.5, 0.37], pink = [1, 0.78, 0.7];
+  const g = shellGeo([[170, 36, (u, v) => {
+    const th = T0 * (1 - u), k = Math.exp(B * th), s = v * Math.PI * 2, cs = Math.cos(s), sn = Math.sin(s);
+    const lip = sstep(0.93, 1, u), flare = 1 + 0.35 * lip;
+    const knob = Math.pow(Math.max(0, Math.sin(th * 4.5)), 3) * Math.exp(-((s - 0.7) ** 2) / 0.12);
+    const rr = 1 + 0.03 * Math.sin(s * 16) + 0.22 * knob;
+    const ex = A * cs * rr * flare, ey = BV * sn * (sn < 0 ? 1.45 : 1) * rr * flare;
+    const cx = Math.cos(th), cz = Math.sin(th);
+    let c = mix3(cream, brown, 0.6 * sstep(0.55, 0.8, 0.5 + 0.5 * Math.sin(th * 2.5 + s * 3)));
+    c = mix3(c, pink, lip * sstep(0.3, -0.6, cs));
+    return [k * (D + ex) * cx, k * (-H + ey), k * (D + ex) * cz, ...c];
+  }]]);
+  g.rotateZ(Math.PI / 2); g.rotateX(0.5);
+  g.computeBoundingBox(); const bb = g.boundingBox, L = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
+  g.scale(1.7 / L, 1.7 / L, 1.7 / L);
+  return sitOnGround(g);
 }
-/* 가리비: 물결치는 가장자리, 방사형 골 16개, 가운데가 볼록, 경첩에 귀 두 개. 위·아래 면이 있어 두께가 보인다 */
+/* 바지락: 위가 살짝 좁은 달걀꼴, 앞쪽으로 비켜 난 꼭지(각정), 촘촘한 동심 성장선, 지그재그 무늬 */
 function clamGeo() {
-  const shell = (top) => gridGeo(14, 48, (u, v) => {
-    const a = (v - 0.5) * Math.PI * 1.25, rib = 0.5 + 0.5 * Math.cos(a * 16), r = u * (1 + 0.05 * (rib - 0.5) * u * u);
-    const dome = 0.32 * Math.sin(Math.PI * Math.min(1, r * 1.05)) * (1 - 0.25 * r);
-    const y = top ? dome + 0.05 * rib * r : -0.03 * (1 - r * r);
-    return [r * Math.sin(a), y, r * Math.cos(a)];
-  });
-  return mergeParts([
-    { geo: shell(true), color: 0xffffff }, { geo: shell(false), color: 0xffffff },
-    { geo: new THREE.BoxGeometry(0.24, 0.06, 0.18), color: 0xffffff, x: -0.3, y: 0.03, z: -0.06 }, { geo: new THREE.BoxGeometry(0.24, 0.06, 0.18), color: 0xffffff, x: 0.3, y: 0.03, z: -0.06 },
-  ]);
+  const base = [0.93, 0.89, 0.84], dark = [0.56, 0.5, 0.46];
+  return sitOnGround(shellGeo([[22, 64, (u, v) => {
+    const t = v * Math.PI * 2, sz = Math.sin(t);
+    const ex = 0.62 * Math.cos(t) * (1 + 0.06 * sz), ez = 0.5 * sz * (sz < 0 ? 0.88 : 1);
+    const x = -0.08 * (1 - u) + ex * u, z = -0.32 * (1 - u) + ez * u;
+    const y = 0.24 * Math.pow(1 - u * u, 0.7) + 0.006 * Math.sin(u * 60) * u;
+    const ray = sstep(0.6, 0.9, 0.5 + 0.5 * Math.sin(t * 9 + Math.sin(u * 18) * 0.8)), ring = sstep(0.5, 0.8, 0.5 + 0.5 * Math.sin(u * 11));
+    return [x, y, z, ...mix3(base, dark, Math.max(ray * 0.55, ring * 0.3) * sstep(0.1, 0.4, u))];
+  }]]));
 }
 function reserved(x, z) { if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true; if (ctx.W.cfg.dock && x > 3 && x < 9 && z < -6 && z > -22) return true; return false; }
 
 export function makeVegetation(cfg) {
   const W = ctx.W, scene = ctx.scene, pines = [], leafs = [], bushes = [];
+  /* 자리 격자: scene.js 의 해변 유목도 같은 격자를 쓴다 */
+  const S = W.space = makeSpace();
   const nPines = Math.round(cfg.pines * M), nLeafs = Math.round(cfg.leafs * M), nBushes = Math.round(cfg.bushes * M);
-  const tryPlace = (rMin, rMax, list, minH, maxH, radius, minUp, cluster, zmin) => {
+
+  /* 바위: 가장 먼저, 가장 단단한 것부터 자리를 잡는다 (몸통이 땅에 반쯤 묻혀 있어 간격 = 크기, 단단한 부분 = 0.9배) */
+  for (let i = 0, n = 0; i < (cfg.rocks || 0) * 4 && n < (cfg.rocks || 0); i++) {
+    const a = rnd(0, 6.3), r = rnd(9, 70), x = Math.cos(a) * r, z = Math.sin(a) * r; if (reserved(x, z)) continue;
+    const h = terrainH(x, z, cfg); if (h < 0.05) continue;
+    const s = rnd(0.35, 1.4); if (!S.fits(x, z, s)) continue;
+    S.add(x, z, s, s * 0.9);
+    const rk = makeRock(s, cfg.snow ? 0xa8b3c0 : 0x6f7276); rk.position.set(x, h + s * 0.15, z); scene.add(rk); W.trees.push([x, z, s * 0.9]); n++;
+  }
+
+  /* sp: 자리 규칙. r·h 는 크기(s)에 곱하는 간격·단단한 반지름, under 는 큰 나무 밑에도 들어갈 수 있는지(줄기·바위만 피한다) */
+  const tryPlace = (rMin, rMax, list, minH, maxH, radius, minUp, cluster, zmin, sp) => {
     const a = rnd(0, Math.PI * 2), r = rMax * Math.sqrt(rnd((rMin * rMin) / (rMax * rMax), 1)), x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (reserved(x, z) || (zmin !== undefined && z < zmin)) return; const h = terrainH(x, z, cfg); if (h < minH || h > maxH) return;
     if (cluster && fbm(x * 0.03 + 5, z * 0.03 + 9, 3) < cluster) return;
     if (slopeUp(x, z, cfg) < minUp) return;
-    const s = rnd(0.8, 1.6); list.push({ x, y: h - 0.15, z, s, rot: rnd(0, 6.3), tint: tintOf(0, rnd(-0.05, 0.05)) }); W.trees.push([x, z, radius * s]);
+    const s = rnd(0.8, 1.6); if (!S.fits(x, z, sp.r * s, sp.under)) return;
+    S.add(x, z, sp.r * s, sp.h * s);
+    list.push({ x, y: h - 0.15, z, s, rot: rnd(0, 6.3), tint: tintOf(0, rnd(-0.05, 0.05)) }); W.trees.push([x, z, radius * s]);
   };
+  /* 소나무: 원뿔 밑지름의 약 2/3 간격 — 가지 끝은 살짝 맞닿아도 줄기와 몸통은 겹치지 않는다
+     활엽수: 가지가 넓게 퍼지므로 조금 더 띄운다. 덤불: 나무 그늘 아래에도 자라되 줄기는 피하고, 덤불끼리는 겹치지 않는다 (bushes 는 아래에서 0.6배로 줄인다) */
+  const PINE = { r: 0.95, h: 0.3 }, LEAF = { r: 1.2, h: 0.25 }, BUSH = { r: 0.54, h: 0.3, under: true };
   const near = Math.round(nPines * 0.45);
-  for (let i = 0; i < near * 5 && pines.length < near; i++) tryPlace(10, 65, pines, 0.3, 60, 0.32, 0.68, cfg.key === 'lake' ? 0.34 : 0.42);
-  for (let i = 0; i < nPines * 4 && pines.length < nPines; i++) tryPlace(55, 180, pines, 0.3, 130, 0.32, 0.7, cfg.key === 'lake' ? 0.4 : 0.45);
-  for (let i = 0; i < nLeafs * 4 && leafs.length < nLeafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.35, 0.72, 0.36);
-  for (let i = 0; i < nBushes * 4 && bushes.length < nBushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin);
+  for (let i = 0; i < near * 5 && pines.length < near; i++) tryPlace(10, 65, pines, 0.3, 60, 0.32, 0.68, cfg.key === 'lake' ? 0.34 : 0.42, undefined, PINE);
+  for (let i = 0; i < nPines * 4 && pines.length < nPines; i++) tryPlace(55, 180, pines, 0.3, 130, 0.32, 0.7, cfg.key === 'lake' ? 0.4 : 0.45, undefined, PINE);
+  for (let i = 0; i < nLeafs * 4 && leafs.length < nLeafs; i++) tryPlace(10, 85, leafs, 0.3, 60, 0.35, 0.72, 0.36, undefined, LEAF);
+  for (let i = 0; i < nBushes * 4 && bushes.length < nBushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin, BUSH);
   const treeColor = cfg.key === 'snow' ? 0x2f4f46 : 0x2b5a2b, fol = () => tex('foliage', 1, 1, 0.3);
   /* 소나무: 방위 8조각 × 60m 안팎 = 최대 16개 메시. 지오메트리·재질은 공유하므로 셰이더는 그대로 하나 */
   if (pines.length) {
@@ -204,10 +283,15 @@ export function makeVegetation(cfg) {
     const list = bushes.map(b => Object.assign(b, { s: b.s * 0.6, y: b.y + 0.1 }));
     sectorize(list, 8, 35).forEach(sub => scene.add(culled(instanced(g, m, sub, true), 0.4)));
   }
-  for (let i = 0; i < cfg.palms; i++) { const x = (Math.random() < 0.5 ? -1 : 1) * rnd(5, 42), z = rnd(-2, 34); if (reserved(x, z)) continue; const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); }
-  for (let i = 0; i < (cfg.rocks || 0); i++) { const a = rnd(0, 6.3), r = rnd(9, 70), x = Math.cos(a) * r, z = Math.sin(a) * r; if (reserved(x, z)) continue; const h = terrainH(x, z, cfg); if (h < 0.05) continue; const s = rnd(0.35, 1.4), rk = makeRock(s, cfg.snow ? 0xa8b3c0 : 0x6f7276); rk.position.set(x, h + s * 0.15, z); scene.add(rk); W.trees.push([x, z, s * 0.9]); }
+  /* 야자수: 줄기 밑동 기준 0.6m 간격 (윗부분이 휘어 잎끼리는 겹쳐도 자연스럽다). 자리가 없으면 다른 곳을 다시 찾는다 */
+  for (let i = 0, n = 0; i < cfg.palms * 6 && n < cfg.palms; i++) {
+    const x = (Math.random() < 0.5 ? -1 : 1) * rnd(5, 42), z = rnd(-2, 34);
+    if (reserved(x, z) || !S.fits(x, z, 0.6)) continue;
+    S.add(x, z, 0.6, 0.3);
+    const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); n++;
+  }
 
-  /* 낙엽: 활엽수 밑에만 (눈·모래사장 제외). 물 반사에서는 제외 */
+  /* 낙엽: 활엽수 밑에만 (눈·모래사장 제외). 물 반사에서는 제외. 땅에 납작하게 깔려 서로 겹쳐도 자연스러우므로 자리 검사를 하지 않는다 */
   if (leafs.length && !cfg.snow) {
     const lv = [], cols = [0xc8742a, 0x8a5a2e, 0xd6a33a, 0x9a4a22], c = new THREE.Color();
     leafs.forEach(t => { for (let i = 0; i < 7; i++) { const a = rnd(0, 6.3), r = rnd(0.5, 4.5) * t.s, x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r; const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.1) continue; c.set(cols[Math.floor(Math.random() * 4)]).multiplyScalar(rnd(0.75, 1.15)); lv.push({ x, y: h + 0.012, z, s: rnd(0.7, 1.2), rot: rnd(0, 6.3), rx: rnd(-0.15, 0.15), tint: [c.r, c.g, c.b] }); } });
@@ -217,41 +301,53 @@ export function makeVegetation(cfg) {
   /* 물가: 갈대(호수) + 자갈(호수) + 조개껍데기(모래사장) */
   if (cfg.water) {
     if (cfg.key === 'lake') {
+      /* 갈대: 바위·줄기만 피한다. 갈대끼리는 무더기로 뭉쳐 자라므로 기록하지 않는다 */
       const reeds = [], nReeds = Math.round(520 * M);
       for (let t = 0; t < 1100 && reeds.length < nReeds; t++) {
         const x = rnd(-110, 110); if (cfg.dock && x > 2 && x < 9.5) continue;
         const z = cfg.water.z + shoreOff(x, cfg) - 2.3 + rnd(-1.6, 1.4);
         const h = terrainH(x, z, cfg); if (h < WATER_Y - 0.4 || h > WATER_Y + 0.15) continue;
         if (fbm(x * 0.05 + 21, z * 0.05 + 8, 3) < 0.5) continue;
+        if (!S.fits(x, z, 0.12, true)) continue;
         reeds.push({ x, y: h - 0.05, z, s: rnd(0.8, 1.3), sy: rnd(0.9, 1.4), rot: rnd(0, 6.3), tint: tintOf(0, rnd(-0.04, 0.06)) });
       }
       if (reeds.length) scene.add(instanced(reedGeo(), swayMat(fol(), 0.05, 0.2), reeds, false));
     }
     if (cfg.key !== 'beach') {
+      /* 자갈: 바위·줄기를 피하고, 자갈끼리도 포개지지 않게 */
       const pb = [];
       for (let t = 0; t < 1400 && pb.length < 450; t++) {
         const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
         const z = cfg.water.z + shoreOff(x, cfg) - 2.3 + rnd(-1.8, 1.8), h = terrainH(x, z, cfg); if (h < WATER_Y - 0.25) continue;
-        const g = rnd(0.55, 0.85); pb.push({ x, y: h + 0.01, z, s: rnd(0.03, 0.08), rot: rnd(0, 6.3), tint: [g, g, g * 0.97] });
+        const s = rnd(0.03, 0.08); if (!S.fits(x, z, s, true)) continue;
+        S.add(x, z, s);
+        const g = rnd(0.55, 0.85); pb.push({ x, y: h + 0.01, z, s, rot: rnd(0, 6.3), tint: [g, g, g * 0.97] });
       }
       if (pb.length) { const im = instanced(jitter(new THREE.DodecahedronGeometry(1, 0), 0.5), std(0xffffff, { roughness: 0.85 }), pb, false); im.userData.noRefl = true; scene.add(im); }
     }
     if (cfg.key === 'beach') {
-      const tints = [[0.96, 0.92, 0.82], [0.95, 0.84, 0.8], [0.97, 0.97, 0.94], [0.86, 0.76, 0.62], [0.92, 0.88, 0.9]], conch = [], clam = [];
-      for (let t = 0; t < 400 && conch.length + clam.length < 60; t++) {
+      /* 조개: 가리비 40% · 소라 30% · 바지락 30%. 모양에 정점색 무늬가 구워져 있고, 인스턴스 색(tint)이 그 위에 곱해진다.
+         지오메트리의 바닥이 y 0 이라 모래 높이에 바로 놓는다 (1mm 묻어 떠 보이지 않게).
+         조개끼리 포개지지 않고, 야자수 줄기도 피한다. 반지름은 모양의 반폭(소라는 길쭉해서 조금 더 크게) */
+      const tints = [[1, 0.97, 0.92], [1, 0.9, 0.86], [0.97, 0.97, 0.95], [0.92, 0.84, 0.74], [0.96, 0.92, 0.95]], lists = [[], [], []], SHELL_R = [0.75, 0.85, 0.65];
+      for (let t = 0; t < 600 && lists[0].length + lists[1].length + lists[2].length < 70; t++) {
         const x = rnd(-90, 90); if (cfg.dock && x > 2.5 && x < 9) continue;
         const z = cfg.water.z + shoreOff(x, cfg) + rnd(-1.6, 4.2), h = terrainH(x, z, cfg); if (h < WATER_Y + 0.02) continue;
-        const tint = tints[Math.floor(Math.random() * tints.length)];
-        if (Math.random() < 0.55) { const s = rnd(0.04, 0.065); clam.push({ x, y: h + s * 0.03, z, s, rot: rnd(0, 6.3), rx: rnd(-0.2, 0.2), tint }); }
-        else { const s = rnd(0.045, 0.07); conch.push({ x, y: h + s * rnd(0.55, 0.85), z, s, rot: rnd(0, 6.3), rx: rnd(-0.25, 0.25), tint }); }
+        const r = Math.random(), k = r < 0.4 ? 0 : r < 0.7 ? 1 : 2, s = k === 1 ? rnd(0.045, 0.07) : rnd(0.04, 0.065), sr = s * SHELL_R[k];
+        if (!S.fits(x, z, sr, true)) continue;
+        S.add(x, z, sr);
+        lists[k].push({ x, y: h - 0.001, z, s, rot: rnd(0, 6.3), rx: rnd(-0.12, 0.12), tint: tints[Math.floor(Math.random() * tints.length)] });
       }
-      const shellM = smoothM(0xffffff, { roughness: 0.5, side: THREE.DoubleSide });
-      if (conch.length) { const im = instanced(conchGeo(), shellM, conch, false); im.userData.noRefl = true; scene.add(im); }
-      if (clam.length) { const im = instanced(clamGeo(), shellM, clam, false); im.userData.noRefl = true; scene.add(im); }
+      const shellM = smoothM(0xffffff, { roughness: 0.45, vertexColors: true, side: THREE.DoubleSide });
+      [scallopGeo(), conchGeo(), clamGeo()].forEach((g, k) => {
+        if (!lists[k].length) return;
+        const im = instanced(g, shellM, lists[k], false); im.userData.noRefl = true; scene.add(im);
+      });
     }
   }
 
   const gr = cfg.grass; if (!gr) return;
+  /* 풀: 바위·줄기·조개 같은 단단한 부분만 피한다 (나무 그늘 아래 풀은 그대로). 풀끼리는 기록하지 않는다 */
   const list = [], base = new THREE.Color(gr.color), c = new THREE.Color(), nGrass = Math.round(gr.n * M);
   for (let tries = 0; tries < nGrass * 4 && list.length < nGrass; tries++) {
     const a = rnd(0, Math.PI * 2), r = 3.5 + 44 * Math.pow(Math.random(), 0.7), x = Math.cos(a) * r, z = 3 + Math.sin(a) * r;
@@ -261,6 +357,7 @@ export function makeVegetation(cfg) {
     if (cfg.dock && x > 4.6 && x < 6.8 && z < -7.5) continue;
     const cl = fbm(x * 0.11 + 3, z * 0.11 + 8, 3); if (cl < 0.42 && Math.random() > (cl - 0.25) * 2) continue;
     const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.3 && cfg.water) continue;
+    if (!S.fits(x, z, 0.04, true)) continue;
     c.copy(base).multiplyScalar(rnd(0.7, 1.25)); list.push({ x, y: h - 0.02, z, s: rnd(0.6, 1.4), sy: rnd(0.8, 1.3), rot: rnd(0, 6.3), tint: [c.r, c.g, c.b] });
   }
   /* 풀: 돌풍 세기는 W.wind 를 따르고, 위치마다 약간의 변화만 남긴다 */
