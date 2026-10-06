@@ -11,6 +11,66 @@ const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 const lathe = (pts, seg) => new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg || 28);
 function sagPlane(w, h, sag, seg = 8) { const g = new THREE.PlaneGeometry(w, h, seg, seg); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getX(i) / w + 0.5, v = p.getY(i) / h + 0.5; p.setZ(i, sag * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)); } g.computeVertexNormals(); return g; }
 
+/* ── 모양 도우미: 아이스박스·침낭·베개·배낭이 같이 쓴다 ── */
+const spow = (v, s) => Math.sign(v) * Math.pow(Math.abs(v), s);
+const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+/* 16진 색 → 정점색. 색 관리가 켜져 있어 sRGB → 선형으로 바뀌므로 화면에서는 적은 그대로의 색으로 보인다 */
+const hexRGB = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
+
+/* 둥근 상자: 평평한 면은 완전히 평평하고, 모서리 반지름 r 안에만 정점을 모아 둥글게 깎는다. 원점 = 바닥 가운데.
+   노멀은 "안쪽 상자에서 표면까지의 방향"을 그대로 넣어 면과 면 사이에 이음매가 생기지 않는다.
+   opt.dome: 윗면 가운데를 이만큼 부풀린다 (뚜껑용)
+   opt.warp(x, y, z, t): 모양을 더 비튼다 (t = 높이 비율 0..1). 이때 노멀은 변형의 야코비안으로 다시 계산해 음영이 모양을 따라간다
+   (예전처럼 구를 초타원체로 늘리면, 각진 모양일수록 옆면 가운데에 정점이 비어 가로로 접힌 띠가 보였다) */
+function roundedBox(w, h, d, r, opt) {
+  const o = opt || {}, n = 16, g = new THREE.BoxGeometry(1, 1, 1, n, n, n), p = g.attributes.position, nm = g.attributes.normal;
+  const H = [w / 2, h / 2, d / 2], P = [0, 0, 0], I = [0, 0, 0], U = [0, 0, 0], E = 1e-4;
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), Cv = new THREE.Vector3(), N = new THREE.Vector3(), T = new THREE.Vector3();
+  const W = (x, y, z) => o.warp(x, y, z, y / h);
+  for (let i = 0; i < p.count; i++) {
+    U[0] = p.getX(i) * 2; U[1] = p.getY(i) * 2; U[2] = p.getZ(i) * 2;
+    for (let k = 0; k < 3; k++) {
+      const a = Math.abs(U[k]), inner = H[k] - r;
+      /* 격자의 바깥 절반을 모서리 띠(r)에, 안쪽 절반을 평평한 면에 배정한다 */
+      P[k] = Math.sign(U[k]) * (a < 0.5 ? a / 0.5 * inner : inner + (a - 0.5) / 0.5 * r);
+      I[k] = Math.max(-inner, Math.min(inner, P[k]));
+    }
+    let nx = P[0] - I[0], ny = P[1] - I[1], nz = P[2] - I[2]; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+    const x = I[0] + nx * r, z = I[2] + nz * r;
+    let y = I[1] + ny * r + h / 2;
+    if (o.dome && ny > 0.5) y += o.dome * ny * Math.max(0, 1 - (x / H[0]) ** 2) * Math.max(0, 1 - (z / H[2]) ** 2);
+    if (o.warp) {
+      const p0 = W(x, y, z), px = W(x + E, y, z), py = W(x, y + E, z), pz = W(x, y, z + E);
+      A.set(px[0] - p0[0], px[1] - p0[1], px[2] - p0[2]); B.set(py[0] - p0[0], py[1] - p0[1], py[2] - p0[2]); Cv.set(pz[0] - p0[0], pz[1] - p0[1], pz[2] - p0[2]);
+      /* 노멀 변환 = 야코비안의 역전치 ∝ (열벡터 외적들의 조합) */
+      N.set(0, 0, 0).addScaledVector(T.crossVectors(B, Cv), nx).addScaledVector(T.crossVectors(Cv, A), ny).addScaledVector(T.crossVectors(A, B), nz).normalize();
+      p.setXYZ(i, p0[0], p0[1], p0[2]); nm.setXYZ(i, N.x, N.y, N.z);
+    } else { p.setXYZ(i, x, y, z); nm.setXYZ(i, nx, ny, nz); }
+  }
+  return g;
+}
+/* 베개처럼 부푼 모양: 구를 초타원체로 편다 (sq 0.4 이상으로 둥글 때만 쓴다 — 더 각지면 roundedBox). 원점 = 바닥 가운데 */
+function pillowGeo(w, h, d, sq, warp) {
+  const geo = new THREE.SphereGeometry(1, 28, 20), p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    let x = spow(p.getX(i), sq) * w / 2, y = (spow(p.getY(i), sq) + 1) * h / 2, z = spow(p.getZ(i), sq) * d / 2;
+    if (warp) [x, y, z] = warp(x, y, z, y / h);
+    p.setXYZ(i, x, y, z);
+  }
+  geo.computeVertexNormals(); return geo;
+}
+/* 격자 함수 fn(u,v) → [x,y,z,r,g,b] 로 정점색이 있는 면을 만든다 (uv 는 (u, v) 그대로 — 천 질감용).
+   u 는 길이 방향, v 는 단면을 반시계(x → y)로 한 바퀴 — 이 방향일 때 겉면이 앞면이 되도록 감는다 */
+function paramGeo(nu, nv, fn) {
+  const pos = [], col = [], uv = [], idx = [];
+  for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) { const p = fn(i / nu, j / nv); pos.push(p[0], p[1], p[2]); col.push(p[3], p[4], p[5]); uv.push(i / nu, j / nv); }
+  for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = i * (nv + 1) + j, b = a + nv + 1; idx.push(a, a + 1, b, b, a + 1, b + 1); }
+  const g = new THREE.BufferGeometry(); g.setIndex(idx);
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.computeVertexNormals(); return g;
+}
+
 /* ── 장비 색: 메뉴에서 고르면 바로 바뀐다 (재질 색만 바꾸므로 재컴파일·재빌드가 없다) ──
    텐트는 천마다 원래 주황과의 밝기 비율을 곱해 음영을 유지한다(W.tentMats 의 두 번째 값).
    재질 색은 선형 공간이라 sRGB 밝기 비율을 2.2 제곱한 값을 쓴다 */
@@ -102,6 +162,47 @@ export function makeAxe() {
   return g;
 }
 
+/* ── 머미형 침낭: 원점 = 바닥(텐트 바닥 윗면) 가운데, 길이 방향 = z (머리 = +z). 길이 2.0m
+   발 쪽도 넉넉한 풋박스(반폭 25cm), 어깨에서 가장 넓고(34cm), 머리 쪽은 후드가 살짝 솟아 있다 (지퍼를 닫은 채 접어 둔 모습).
+   윗면엔 가로 칸막이(배플) 13줄이 볼록볼록하고, 옆엔 테두리, 한쪽엔 지퍼. 베개는 머리 쪽 윗면에 얹는다
+   M: shell(겉감, 흰색 + 정점색) · piping(테두리) · zip(지퍼) · pillow(베개) ── */
+function makeSleepingBag(M) {
+  const g = new THREE.Group(), L = 2.0;
+  const SHELL = hexRGB(0x2c4a7a), VALLEY = hexRGB(0x1a2f50), UNDER = hexRGB(0x22395e);
+  const wOf = u => 0.25 + 0.09 * sstep(0.05, 0.7, u) - 0.03 * sstep(0.85, 1, u);                          // 반폭: 발 25 → 어깨 34 → 머리 31cm
+  const hOf = u => 0.085 + 0.02 * (1 - sstep(0, 0.2, u)) + 0.05 * sstep(0.78, 0.95, u);                    // 반높이: 풋박스·후드에서 부푼다
+  const endK = u => { const d = u < 0.06 ? (0.06 - u) / 0.06 : u > 0.95 ? (u - 0.95) / 0.05 : 0; return Math.sqrt(Math.max(0, 1 - d * d)); };
+  const pt = (u, s) => {
+    const w = wOf(u), h = hOf(u), e = endK(u), cs = Math.cos(s), sn = Math.sin(s), q = 0.5 + 0.5 * Math.cos(u * Math.PI * 2 * 13);
+    const x = w * e * spow(cs, 0.45);
+    let y = sn > 0 ? h * e * spow(sn, 0.6) * (1 + 0.25 * Math.sqrt(q)) : -0.25 * h * e * Math.pow(-sn, 0.6);
+    y += 0.25 * h;
+    return { x, y, z: -L / 2 + L * u, q, top: sn > 0 };
+  };
+  g.add(new THREE.Mesh(paramGeo(180, 40, (u, v) => {
+    const p = pt(u, v * Math.PI * 2);
+    const c = p.top ? mix3(VALLEY, SHELL, 0.4 + 0.6 * p.q) : UNDER;
+    return [p.x, p.y, p.z, ...c];
+  }), M.shell));
+  /* 겉면을 따라가는 가는 관: 옆 테두리와 지퍼 */
+  const tube = (s, u0, u1, out, r, mat) => {
+    const pts = []; for (let i = 0; i <= 30; i++) { const p = pt(u0 + (u1 - u0) * i / 30, s); pts.push(new THREE.Vector3(p.x + Math.sign(p.x) * out, p.y, p.z)); }
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, r, 6, false), mat)); return pts;
+  };
+  tube(-0.05, 0.07, 0.94, 0.003, 0.006, M.piping);
+  tube(Math.PI + 0.05, 0.07, 0.94, 0.003, 0.006, M.piping);
+  const zp = tube(0.3, 0.3, 0.9, 0.007, 0.004, M.zip), end = zp[zp.length - 1];
+  const pull = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.012, 0.03), M.zip); pull.position.set(end.x + 0.008, end.y - 0.004, end.z - 0.012); pull.rotation.x = 0.4; g.add(pull);
+  /* 베개: 솜이 찬 납작한 쿠션. 가장자리 솔기가 살짝 조여 있고, 머리가 닿는 가운데가 눌려 있다 */
+  const pl = new THREE.Mesh(pillowGeo(0.38, 0.11, 0.24, 0.42, (x, y, z, t) => {
+    const pinch = 1 - 0.05 * Math.exp(-((t - 0.5) ** 2) / 0.004);
+    return [x * pinch, t > 0.5 ? y - 0.025 * Math.exp(-(x * x / 0.012 + z * z / 0.006)) : y, z * pinch];
+  }), M.pillow);
+  /* 그 자리의 침낭 윗면 높이(가운데)에서 1.2cm 눌려 앉는다 — 칸막이 볼록한 곳은 베개 밑으로 살짝 묻힌다 */
+  pl.position.set(0, pt(0.88, Math.PI / 2).y - 0.012, -L / 2 + L * 0.88); pl.rotation.y = 0.06; g.add(pl);
+  return g;
+}
+
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
   /* 천 색은 applyGear 가 정한다 (여기서는 흰색으로 만들어 두고 등록만) */
@@ -125,8 +226,9 @@ export function makeTent() {
   [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, doorM, 8)));
   /* 바닥은 뒷면 삼각형(z=L/2)보다 3cm 짧게 — 같은 평면에서 만나면 뒤쪽 아래가 깜빡인다 */
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd - 0.04, 0.05, L - 0.06), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
-  const bag = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 1.35, 4, 14), cloth(0x2c4a7a, 4)); bag.rotation.x = Math.PI / 2; bag.scale.set(1.05, 1, 0.3); bag.position.set(0.5, 0.15, 0.05); g.add(bag);
-  const pillow = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.28, 4, 10), cloth(0xd9d2c5, 3)); pillow.rotation.z = Math.PI / 2; pillow.scale.set(1, 1, 0.55); pillow.position.set(0.5, 0.3, 0.98); g.add(pillow);
+  /* 침낭·베개: 바닥 윗면(y 0.05)에 놓는다. 머리 쪽이 텐트 뒤(+z) */
+  const sleep = makeSleepingBag({ shell: cloth(0xffffff, 4, { vertexColors: true }), piping: cloth(0x1a2840, 2), zip: smoothM(0x1b1d22, { roughness: 0.4, metalness: 0.4 }), pillow: cloth(0xd9d2c5, 3) });
+  sleep.position.set(0.5, 0.05, 0.05); g.add(sleep);
   /* 앞 매트: 접지 그림자 평면(y 0.02)과 같은 높이가 되지 않게 살짝 띄운다 */
   const mat2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.45), cloth(0x6b5a45, 3)); mat2.position.set(0, 0.035, -L / 2 - 0.4); g.add(mat2);
   [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * 1.95, 0.02, sz * 1.75], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * 1.95, 0.04, sz * 1.75); stake.rotation.z = -sx * 0.45; g.add(stake); });
@@ -307,23 +409,38 @@ export function makeCar() {
   shadowed(g); g.traverse(o => { if (o.material === glass) o.castShadow = false; }); applyGear(); return g;
 }
 
+/* ── 아이스박스: 원점 = 바닥 가운데, 앞(걸쇠 쪽) = +z. 크기 0.57 × 0.45 × 0.40
+   M: body(몸통) · lid(뚜껑·손잡이·걸쇠) · dark(바닥 고무 띠) · trim(경첩) ── */
+function makeCooler(M) {
+  const g = new THREE.Group();
+  const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
+  /* 바닥 고무 띠 → 몸통. 뚜껑은 몸통 위에 바로 얹혀, 둘의 둥근 모서리가 만나는 자리에 자연스러운 홈이 생긴다 */
+  add(roundedBox(0.56, 0.035, 0.39, 0.012), M.dark, 0, 0, 0);
+  add(roundedBox(0.55, 0.36, 0.38, 0.03), M.body, 0, 0.02, 0);
+  /* 앞면의 살짝 도드라진 판 (사출 성형 느낌) */
+  add(roundedBox(0.42, 0.2, 0.014, 0.006), M.body, 0, 0.09, 0.19);
+  /* 뚜껑: 가운데가 8mm 부풀어 있다 */
+  add(roundedBox(0.57, 0.07, 0.4, 0.025, { dome: 0.008 }), M.lid, 0, 0.38, 0);
+  /* 뒤 경첩 두 개, 앞 걸쇠(몸통과 뚜껑의 이음매를 덮고 뚜껑 가장자리를 붙잡는다) */
+  [-0.16, 0.16].forEach(x => add(new THREE.CylinderGeometry(0.011, 0.011, 0.07, 10), M.trim, x, 0.378, -0.204, 0, 0, Math.PI / 2));
+  add(new THREE.BoxGeometry(0.07, 0.05, 0.018), M.lid, 0, 0.355, 0.196);
+  add(new THREE.BoxGeometry(0.05, 0.012, 0.022), M.lid, 0, 0.393, 0.205);
+  /* 양옆 손잡이: 받침 두 개 + 가로 막대 */
+  [-1, 1].forEach(s => {
+    [-0.085, 0.085].forEach(z => add(new THREE.BoxGeometry(0.03, 0.04, 0.026), M.lid, s * 0.285, 0.3, z));
+    add(new THREE.CylinderGeometry(0.011, 0.011, 0.2, 10), M.lid, s * 0.302, 0.3, 0, Math.PI / 2);
+  });
+  return g;
+}
+
 /* ── 배낭 ──
-   원점 = 바닥 가운데, 앞(주머니 쪽) = +z, 등판(어깨끈 쪽) = −z, 머그 쪽 = −x, 물병 쪽 = +x.
+   원점 = 바닥 가운데, 앞(주머니 쪽) = +z, 등판(어깨끈 쪽) = −z, 머그 쪽 = −x, 물병 쪽 = +x. (makeProps 에서 1.15배로 키운다)
+   몸통·덮개·앞주머니는 둥근 상자(roundedBox)에 테이퍼·불룩함을 입혀 만든다 — 노멀이 변형을 따라가 가로 띠가 생기지 않는다.
+   끈·지퍼의 점은 이 둥근 상자의 실제 표면에서 끈 두께만큼 바깥에 잡혀 있다.
    M: 재질 묶음 (body·dark·pocket·strap·web·buckle·metal·mesh·bottle·pad·padIn·mug·rim) */
 function makeBackpack(M) {
   const g = new THREE.Group(), V = THREE.Vector3;
   const add = (geo, mat, x, y, z, rx, ry, rz) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); g.add(m); return m; };
-  const f = (v, s) => Math.sign(v) * Math.pow(Math.abs(v), s);
-  /* 둥근 상자: 구를 초타원체로 펴서 모서리만 둥글게 (sq 가 작을수록 각진다). 원점 = 바닥 가운데. warp 로 모양을 더 다듬는다 */
-  const pillow = (w, h, d, sq, warp) => {
-    const geo = new THREE.SphereGeometry(1, 28, 20), p = geo.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      let x = f(p.getX(i), sq) * w / 2, y = (f(p.getY(i), sq) + 1) * h / 2, z = f(p.getZ(i), sq) * d / 2;
-      if (warp) [x, y, z] = warp(x, y, z, y / h);
-      p.setXYZ(i, x, y, z);
-    }
-    geo.computeVertexNormals(); return geo;
-  };
   /* 납작한 끈: 곡선을 따라가는 튜브의 단면을 한 축(wide: 0=x, 1=y)으로만 넓힌다 */
   const strap = (pts, wide, a, b, mat) => {
     const curve = new THREE.CatmullRomCurve3(pts.map(q => new V(q[0], q[1], q[2]))), SEG = 24, RAD = 8;
@@ -341,30 +458,29 @@ function makeBackpack(M) {
 
   /* 몸통: 바닥에 바로 선다. 위로 갈수록 살짝 좁아지고, 앞(+z)은 짐이 차서 불룩, 등판(−z)은 평평하게 */
   const BW = 0.34, BH = 0.46, BD = 0.2, BY = 0.02, LY = BY + BH - 0.06;
-  add(pillow(BW, BH, BD, 0.3, (x, y, z, t) => [x * (1 - 0.12 * t), y, z > 0 ? z + 0.03 * Math.sin(Math.PI * t) * (1 - Math.min(1, Math.abs(x) / (BW / 2))) : z * 0.92]), M.body, 0, BY, 0);
+  add(roundedBox(BW, BH, BD, 0.05, { warp: (x, y, z, t) => [x * (1 - 0.12 * t), y, z > 0 ? z + 0.03 * Math.sin(Math.PI * t) * (1 - Math.min(1, Math.abs(x) / (BW / 2))) : z * 0.92] }), M.body, 0, BY, 0);
   /* 상단 덮개: 몸통보다 살짝 크고, 앞쪽이 아래로 늘어진다 */
-  add(pillow(0.33, 0.1, 0.23, 0.38, (x, y, z) => [x, y - (z > 0 ? 0.025 * (z / 0.115) ** 2 : 0), z]), M.dark, 0, LY, 0.012);
+  add(roundedBox(0.33, 0.1, 0.23, 0.045, { warp: (x, y, z) => [x, y - (z > 0 ? 0.025 * (z / 0.115) ** 2 : 0), z] }), M.dark, 0, LY, 0.012);
   /* 덮개 위에 묶은 돌돌 만 매트 + 고정 끈 두 줄 */
   const RY = LY + 0.1 + 0.058;
   add(new THREE.CylinderGeometry(0.065, 0.065, 0.42, 24), M.pad, 0, RY, -0.008, 0, 0, Math.PI / 2);
   add(new THREE.CylinderGeometry(0.028, 0.028, 0.424, 12), M.padIn, 0, RY, -0.008, 0, 0, Math.PI / 2);
   [-0.13, 0.13].forEach(x => add(new THREE.TorusGeometry(0.067, 0.005, 6, 24), M.web, x, RY, -0.008, 0, Math.PI / 2, 0));
   /* 앞주머니 + 지퍼 */
-  add(pillow(0.24, 0.2, 0.06, 0.32, (x, y, z, t) => [x, y, z > 0 ? z + 0.01 * Math.sin(Math.PI * t) : z]), M.pocket, 0, 0.06, 0.128);
-  add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new V(-0.095, 0.222, 0.157), new V(0, 0.226, 0.167), new V(0.095, 0.222, 0.157)]), 12, 0.003, 5, false), M.metal, 0, 0, 0);
+  add(roundedBox(0.24, 0.2, 0.06, 0.028, { warp: (x, y, z, t) => [x, y, z > 0 ? z + 0.01 * Math.sin(Math.PI * t) : z] }), M.pocket, 0, 0.06, 0.128);
+  add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new V(-0.095, 0.222, 0.166), new V(0, 0.226, 0.168), new V(0.095, 0.222, 0.166)]), 12, 0.003, 5, false), M.metal, 0, 0, 0);
   /* 덮개를 잡아 주는 앞 끈 두 줄 + 버클.
-     끈은 매트 밑(덮개 윗면)에서 나와 덮개 윗면 → 앞 모서리 → 덮개 앞면 → 몸통 앞면을 따라 내려간다.
-     각 점은 덮개·몸통의 실제 표면(초타원체 + 앞쪽 처짐)에서 끈 두께만큼만 바깥이다 (예전엔 시작점이 표면보다 2cm 떠 있었다) */
+     매트 밑(덮개 윗면)에서 나와 덮개 윗면 → 둥근 앞 모서리 → 덮개 앞면 → 몸통 앞면을 따라 내려간다 */
   [-0.085, 0.085].forEach(x => {
-    strap([[x, 0.521, 0.03], [x, 0.516, 0.07], [x, 0.502, 0.1], [x, 0.487, 0.123], [x, 0.445, 0.129], [x, 0.405, 0.121], [x, 0.37, 0.112], [x, 0.31, 0.115]], 0, 0.014, 0.003);
-    add(new THREE.BoxGeometry(0.036, 0.024, 0.01), M.buckle, x, 0.37, 0.118);
+    strap([[x, 0.522, 0.03], [x, 0.517, 0.065], [x, 0.513, 0.086], [x, 0.5, 0.106], [x, 0.477, 0.124], [x, 0.45, 0.13], [x, 0.415, 0.124], [x, 0.37, 0.113], [x, 0.31, 0.117]], 0, 0.014, 0.003);
+    add(new THREE.BoxGeometry(0.036, 0.024, 0.01), M.buckle, x, 0.37, 0.12);
   });
-  /* 옆면 압축 끈: 왼쪽(−x) 두 줄, 오른쪽(+x) 위 한 줄 */
-  [[0.19, 0.162], [0.35, 0.156]].forEach(([y, hw]) => {
-    strap([[-hw + 0.004, y, 0.085], [-hw - 0.006, y, 0], [-hw + 0.004, y, -0.075]], 1, 0.012, 0.003);
+  /* 옆면 압축 끈: 왼쪽(−x) 두 줄, 오른쪽(+x) 위 한 줄. hw = 그 높이의 몸통 반폭(테이퍼 반영) */
+  [[0.19, 0.1625], [0.35, 0.1554]].forEach(([y, hw]) => {
+    strap([[-hw + 0.011, y, 0.085], [-hw - 0.004, y, 0], [-hw + 0.008, y, -0.075]], 1, 0.012, 0.003);
     add(new THREE.BoxGeometry(0.01, 0.026, 0.034), M.buckle, -hw - 0.004, y, 0.05);
   });
-  strap([[0.152, 0.35, 0.085], [0.162, 0.35, 0], [0.152, 0.35, -0.075]], 1, 0.012, 0.003);
+  strap([[0.1444, 0.35, 0.085], [0.1594, 0.35, 0], [0.1474, 0.35, -0.075]], 1, 0.012, 0.003);
   /* 오른쪽 그물 주머니 + 물병 */
   add(new THREE.CylinderGeometry(0.047, 0.043, 0.12, 18, 1, true), M.mesh, 0.205, 0.1, 0.005);
   add(new THREE.CylinderGeometry(0.036, 0.036, 0.2, 18), M.bottle, 0.205, 0.145, 0.005);
@@ -386,11 +502,14 @@ function makeBackpack(M) {
 
 /* ── 쿨러, 배낭, 장작더미, 도끼 박힌 그루터기, 잔가지 ── */
 export function makeProps() {
-  const scene = ctx.scene, cooler = new THREE.Group();
-  const cb = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.38, 0.38), smoothM(0x3d6f9e, { roughness: 0.6 })); cb.position.y = 0.19; cooler.add(cb);
-  const cl = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.07, 0.4), smoothM(0xdde6ee, { roughness: 0.5 })); cl.position.y = 0.415; cooler.add(cl);
-  cooler.add(bar([-0.2, 0.46, 0], [0.2, 0.46, 0], 0.012, METAL())); cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = 0.2; scene.add(shadowed(cooler));
-  /* 배낭: 게임 질감(천 노멀)을 입힌 재질로 makeBackpack 을 만든다.
+  const scene = ctx.scene;
+  /* 아이스박스: 걸쇠가 있는 앞면이 캠프 가운데를 보도록 돌려 둔다 */
+  const cooler = makeCooler({
+    body: smoothM(0x3d6f9e, { roughness: 0.55 }), lid: smoothM(0xdde6ee, { roughness: 0.5 }),
+    dark: smoothM(0x2a2c30, { roughness: 0.8 }), trim: smoothM(0x9aa3ab, { roughness: 0.45, metalness: 0.2 }),
+  });
+  cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = -1.8; scene.add(shadowed(cooler));
+  /* 배낭: 게임 질감(천 노멀)을 입힌 재질로 makeBackpack 을 만들고 1.15배로 키운다 (높이 약 75cm).
      머그가 아이스박스와 붙어 보이지 않게 아이스박스 반대쪽으로 조금 떼어 놓는다 (data.js 의 BLOCKS·scene.js 의 접지 그림자도 이 위치) */
   const pack = makeBackpack({
     body: cloth(0x4d6b3a, 3), dark: cloth(0x3e5730, 3), pocket: cloth(0x46633a, 3),
@@ -399,7 +518,7 @@ export function makeProps() {
     pad: cloth(0xb8743a, 4), padIn: smoothM(0x6a4020, { roughness: 0.9 }),
     mug: smoothM(0xece6d6, { roughness: 0.35, side: THREE.DoubleSide }), rim: smoothM(0x24405e, { roughness: 0.35 }),
   });
-  pack.position.set(3.05, 0, 0.15); pack.rotation.y = -0.6; scene.add(shadowed(pack));
+  pack.scale.setScalar(1.15); pack.position.set(3.05, 0, 0.15); pack.rotation.y = -0.6; scene.add(shadowed(pack));
 
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5))), cut = smoothM(0xc9a97c, Object.assign({ roughness: 0.85 }, tex('wood', 1, 1, 0.3)));
   const pile = new THREE.Group();
