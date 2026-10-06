@@ -16,24 +16,28 @@ export const ICON = {
   axe:      svg('<path d="M10.6 2.8c-.3 6-1 12-2.2 18.4"/><path d="M9.4 4.2h5l4.2-2.2c1.6 3 1.6 6.2 0 9.2l-4.2-2.2h-5z"/>'),
 };
 
+/* haze: 장소별 안개 배율. 시간대의 fogDen 에 곱한다 — 해변은 바다 습기로 조금 더, 설산은 맑은 고산 공기라 조금 덜 */
 export const BG = {
-  beach: { key: 'beach', name: '바다가 보이는 모래사장', ic: ICON.beach, ground: 0xead9ad, rock: 0x8a7a66, amp: 0.7, mtAmp: 120, mtBase: 6, bloomMul: 0.45,
+  beach: { key: 'beach', name: '바다가 보이는 모래사장', ic: ICON.beach, ground: 0xead9ad, rock: 0x8a7a66, amp: 0.7, mtAmp: 120, mtBase: 6, bloomMul: 0.45, haze: 1.3,
     water: { deep: 0x1c6d9c, shallow: 0x62c3d9, z: -9, size: 1200, wave: 1.0, wobble: 5 }, grass: { n: 2600, color: 0xbdaa6c, zmin: -4 }, palms: 16, bushes: 14, bushZmin: 6, rocks: 0, pines: 0, leafs: 0, birds: true, snow: false, fireflies: false, ambience: 'waves' },
-  lake:  { key: 'lake', name: '호수가 보이는 숲속', ic: ICON.lake, ground: 0x4b8038, rock: 0x5c5a55, amp: 2.4, mtAmp: 300, mtBase: 25, bloomMul: 1.0,
+  lake:  { key: 'lake', name: '호수가 보이는 숲속', ic: ICON.lake, ground: 0x4b8038, rock: 0x5c5a55, amp: 2.4, mtAmp: 300, mtBase: 25, bloomMul: 1.0, haze: 1.0,
     water: { deep: 0x173f52, shallow: 0x3c8a8c, z: -9, size: 600, wave: 0.28, wobble: 9 }, grass: { n: 9000, color: 0x58a03c, zmin: -8 }, palms: 0, bushes: 90, rocks: 14, pines: 1400, leafs: 260, birds: true, snow: false, fireflies: true, dock: true, ambience: 'forest' },
-  snow:  { key: 'snow', name: '경치가 좋은 설산', ic: ICON.snow, ground: 0xf3f6fb, rock: 0x7d8792, amp: 6, mtAmp: 420, mtBase: 70, bloomMul: 0.35,
+  snow:  { key: 'snow', name: '경치가 좋은 설산', ic: ICON.snow, ground: 0xf3f6fb, rock: 0x7d8792, amp: 6, mtAmp: 420, mtBase: 70, bloomMul: 0.35, haze: 0.7,
     water: null, grass: null, palms: 0, bushes: 0, rocks: 12, pines: 480, leafs: 0, birds: false, snow: true, fireflies: false, ambience: 'wind' },
 };
 
-/* 시간대 키프레임. fogH: 안개 높이 스케일, insc: 해/달 쪽 산란 세기 */
+/* 시간대 키프레임.
+   fogDen: 지면 높이에서의 안개 밀도(1m 당). 거리 d 에서 대략 1 - exp(-fogDen·d) 만큼 흐려진다
+           (0.0004 → 1km 에서 약 33%, 0.0035 → 300m 에서 약 65%). 예전엔 fogFar 에서 거꾸로 계산해 낮에도 300m 에서 절반이 뿌옇었다
+   fogH: 안개가 위로 옅어지는 높이 스케일, insc: 해/달 쪽 산란 세기 */
 export const TIME = {
-  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: ICON.dawn, clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogFar: 650, fogH: 40, insc: 0.6, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a,
+  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: ICON.dawn, clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogDen: 0.0035, fogH: 40, insc: 0.6, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a,
     grade: { tint: [1.0, 0.98, 1.02], sat: 0.95, con: 1.0, bloom: 0.28 } },
-  afternoon: { key: 'afternoon', name: '화창한 오후', ic: ICON.afternoon, clock: 0.58, top: 0x2b6fd6, bottom: 0xd8edff, sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogFar: 950, fogH: 90, insc: 0.3, exposure: 0.92, waterMul: 1, cloudCover: 0.45, cloudLit: 0xffffff, cloudShade: 0x8a96a8,
+  afternoon: { key: 'afternoon', name: '화창한 오후', ic: ICON.afternoon, clock: 0.58, top: 0x2b6fd6, bottom: 0xd8edff, sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogDen: 0.0004, fogH: 120, insc: 0.3, exposure: 0.92, waterMul: 1, cloudCover: 0.45, cloudLit: 0xffffff, cloudShade: 0x8a96a8,
     grade: { tint: [1, 1, 1], sat: 1.04, con: 1.0, bloom: 0.12 } },
-  sunset: { key: 'sunset', name: '노을지는 저녁', ic: ICON.sunset, clock: 0.735, top: 0x2b2557, bottom: 0xff8c4c, sunColor: 0xffa25a, sunI: 3.4, amb: 0.5, hemi: 0.75, ibl: 0.5, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 6, tentLamp: 3, fireI: 18, fog: 0xf7925e, fogFar: 880, fogH: 60, insc: 0.8, exposure: 1.0, waterMul: 0.75, cloudCover: 0.5, cloudLit: 0xffb08a, cloudShade: 0x5a4a6a,
+  sunset: { key: 'sunset', name: '노을지는 저녁', ic: ICON.sunset, clock: 0.735, top: 0x2b2557, bottom: 0xff8c4c, sunColor: 0xffa25a, sunI: 3.4, amb: 0.5, hemi: 0.75, ibl: 0.5, stars: 0.3, sunSize: 24, disc: 0xffa040, glow: 1.1, lantern: 6, tentLamp: 3, fireI: 18, fog: 0xf7925e, fogDen: 0.0007, fogH: 80, insc: 0.8, exposure: 1.0, waterMul: 0.75, cloudCover: 0.5, cloudLit: 0xffb08a, cloudShade: 0x5a4a6a,
     grade: { tint: [1.03, 0.99, 0.96], sat: 1.08, con: 1.02, bloom: 0.34 } },
-  night: { key: 'night', name: '별이 빛나는 밤', ic: ICON.night, clock: 0.0, top: 0x030614, bottom: 0x18243b, sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogFar: 720, fogH: 70, insc: 0.3, exposure: 1.12, waterMul: 0.3, cloudCover: 0.35, cloudLit: 0x2a3550, cloudShade: 0x05070f,
+  night: { key: 'night', name: '별이 빛나는 밤', ic: ICON.night, clock: 0.0, top: 0x030614, bottom: 0x18243b, sunColor: 0x93aaff, sunI: 1.0, amb: 0.18, hemi: 0.35, ibl: 0.3, stars: 1, sunSize: 8, disc: 0xf0f3ff, glow: 0.3, lantern: 14, tentLamp: 6, fireI: 28, fog: 0x0c1426, fogDen: 0.0008, fogH: 80, insc: 0.3, exposure: 1.12, waterMul: 0.3, cloudCover: 0.35, cloudLit: 0x2a3550, cloudShade: 0x05070f,
     grade: { tint: [0.96, 0.98, 1.05], sat: 0.97, con: 1.02, bloom: 0.5 } },
 };
 /* 자정부터 4시 30분(0.19)까지는 밤을 유지하고, 그 뒤 해 뜨기 직전에 새벽으로 넘어간다.

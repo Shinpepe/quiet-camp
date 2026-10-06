@@ -190,9 +190,11 @@ export function applyTime() {
   const mk = cur.stars * smooth(-0.05, 0.05, md.y);
   W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.uniforms.uOp.value = mk; W.moon.material.uniforms.uLight.value.copy(sd);
   W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
-  ctx.scene.fog.color.copy(cur.fog); ctx.scene.fog.far = cur.fogFar; ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
+  ctx.scene.fog.color.copy(cur.fog); ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
+  /* 대기 안개: 밀도는 시간대의 fogDen 에 장소의 haze 배율을 곱한 값 그대로 (예전엔 2.3 / fogFar 로 거꾸로 계산해 낮에도 뿌옇었다).
+     물 셰이더도 같은 FOG 배열을 읽는다 */
   FOG[0] = L.x; FOG[1] = L.y; FOG[2] = L.z; FOG[3] = cur.insc * fade;
-  FOG[4] = 2.3 / cur.fogFar; FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
+  FOG[4] = cur.fogDen * (W.cfg.haze || 1); FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
   _fc.copy(cur.disc).multiplyScalar(up ? 1.0 : 0.45); FOG[8] = _fc.r; FOG[9] = _fc.g; FOG[10] = _fc.b; FOG[11] = 0;
   ctx.camera.matrixWorldInverse.copy(ctx.camera.matrixWorld).invert();
   W.uSunV.value.copy(L).transformDirection(ctx.camera.matrixWorldInverse);
@@ -249,7 +251,9 @@ export function buildScene(bgKey) {
     wind: { value: 0.4 },
     /* 모닥불: fireBase = 부드럽게 따라가는 기본 밝기, firePop = 오디오 파칙이 올려 주는 순간 밝기, fireBurst = 큰 파칙 → 불티 */
     fireBase: 0, firePop: 0, fireBurst: false };
-  scene.fog = new THREE.Fog(cur.fog, 40, cur.fogFar);
+  /* 안개 객체는 셰이더의 USE_FOG 를 켜고 fogColor 를 넘기는 용도. near·far 는 쓰이지 않고,
+     실제 농도는 util.js 의 대기 안개(FOG 배열)가 정한다 — applyTime 에서 매 프레임 갱신 */
+  scene.fog = new THREE.Fog(cur.fog, 40, 1000);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
   const skyMat = new THREE.ShaderMaterial({
