@@ -49,18 +49,22 @@ function makeSpace(cell = 2) {
   };
 }
 
+/* ── 흔들림 정점 코드: 화면 재질과 그림자 깊이 재질이 똑같이 써야 한다 ──
+   한쪽에만 넣으면 그림자맵과 화면의 나무 위치가 달라 그림자가 어긋난다 */
+const swayGLSL = (strength, from) => `#include <begin_vertex>
+    #ifdef USE_INSTANCING
+    vec3 ip=instanceMatrix[3].xyz;float hh=max(transformed.y-${from.toFixed(2)},0.0);float sw=(sin(uTime*0.9+ip.x*0.25+ip.z*0.2)+0.5*sin(uTime*2.3+ip.x*0.9))*${strength.toFixed(4)}*hh*(0.35+1.3*uWind);transformed.x+=sw;transformed.z+=sw*0.6;
+    #endif`;
 /* 잎 재질: 바람 흔들림 + 역광 투과 + 림 라이트 + 아랫면 어두움.
-   흔들림 폭은 W.wind(0..1)를 따른다 — 바람 0.5 에서 예전과 같은 폭 */
+   흔들림 폭은 W.wind(0..1)를 따른다 — 바람 0.5 에서 예전과 같은 폭.
+   세기·시작 높이마다 셰이더가 따로 만들어지도록 캐시 키를 준다 (없으면 첫 번째로 컴파일된 세기를 모두가 함께 쓴다) */
 export function swayMat(extra, strength, from) {
   const W = ctx.W, mat = new THREE.MeshStandardMaterial(Object.assign({ vertexColors: true, roughness: 0.95 }, extra || {}));
   mat.onBeforeCompile = sh => {
     sh.uniforms.uTime = W.uTime; sh.uniforms.uSunV = W.uSunV; sh.uniforms.uLeafCol = W.uLeafCol; sh.uniforms.uWind = W.wind;
     sh.vertexShader = 'uniform float uTime;uniform float uWind;varying vec3 vWN;\n' + sh.vertexShader
       .replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\nvWN=inverseTransformDirection(transformedNormal,viewMatrix);')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-    #ifdef USE_INSTANCING
-    vec3 ip=instanceMatrix[3].xyz;float hh=max(transformed.y-${from.toFixed(2)},0.0);float sw=(sin(uTime*0.9+ip.x*0.25+ip.z*0.2)+0.5*sin(uTime*2.3+ip.x*0.9))*${strength.toFixed(4)}*hh*(0.35+1.3*uWind);transformed.x+=sw;transformed.z+=sw*0.6;
-    #endif`);
+      .replace('#include <begin_vertex>', swayGLSL(strength, from));
     sh.fragmentShader = 'uniform vec3 uSunV,uLeafCol;varying vec3 vWN;\n' + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         diffuseColor.rgb*=mix(0.62,1.0,smoothstep(-0.45,0.4,vWN.y));`)
@@ -68,12 +72,32 @@ export function swayMat(extra, strength, from) {
         { vec3 Vd=normalize(vViewPosition);float rim=pow(1.0-max(dot(normal,Vd),0.0),3.0);float back=pow(max(dot(-Vd,uSunV),0.0),3.0);
           totalEmissiveRadiance+=diffuseColor.rgb*uLeafCol*(back*0.7+rim*0.25); }`);
   };
+  mat.customProgramCacheKey = () => `sway:${strength}:${from}`;
+  mat.userData.sway = [strength, from];
   return mat;
+}
+/* 그림자용 깊이 재질(태양 = depth, 모닥불 = distance)에도 같은 흔들림을 넣는다. 세기별로 씬마다 한 벌씩만 만든다 */
+const _shadowMats = new Map();
+function swayShadow(im) {
+  const [strength, from] = im.material.userData.sway, key = `${strength}:${from}`, W = ctx.W;
+  let m = _shadowMats.get(key);
+  if (!m || m.w !== W) {
+    const inject = sh => { sh.uniforms.uTime = W.uTime; sh.uniforms.uWind = W.wind; sh.vertexShader = 'uniform float uTime;uniform float uWind;\n' + sh.vertexShader.replace('#include <begin_vertex>', swayGLSL(strength, from)); };
+    const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), dist = new THREE.MeshDistanceMaterial();
+    depth.onBeforeCompile = dist.onBeforeCompile = inject;
+    depth.customProgramCacheKey = dist.customProgramCacheKey = () => `swayShadow:${key}`;
+    m = { depth, dist, w: W }; _shadowMats.set(key, m);
+  }
+  im.customDepthMaterial = m.depth; im.customDistanceMaterial = m.dist; return im;
 }
 export function instanced(geo, mat, list, cast) {
   const im = new THREE.InstancedMesh(geo, mat, list.length), d = new THREE.Object3D(), c = new THREE.Color();
   list.forEach((t, i) => { d.position.set(t.x, t.y, t.z); d.rotation.set(t.rx || 0, t.rot || 0, t.rz || 0); d.scale.set(t.s, t.s * (t.sy || 1), t.s); d.updateMatrix(); im.setMatrixAt(i, d.matrix); im.setColorAt(i, c.setRGB(t.tint[0], t.tint[1], t.tint[2])); });
-  im.castShadow = !!cast; im.receiveShadow = true; im.frustumCulled = false; return im;
+  im.castShadow = !!cast; im.receiveShadow = true; im.frustumCulled = false;
+  /* 흔들리는 나무: 그림자 깊이 재질에도 같은 흔들림을 넣고, 주변광(GTAO)에서는 뺀다
+     (GTAO 는 흔들림이 없는 노멀 재질로 다시 그려 위치가 어긋난다) */
+  if (mat.userData.sway) { im.userData.noAO = true; if (cast) swayShadow(im); }
+  return im;
 }
 /* ── 넓게 흩어진 인스턴스를 구역별로 나눈다 ──
    하나의 InstancedMesh 가 360°를 덮으면 바운딩 구가 전부를 감싸 컬링이 아무 효과가 없다.
@@ -110,7 +134,7 @@ function bake(parts) {
 }
 
 /* ── 잎 덩어리: 정이십면체(분할 1)를 두 겹의 노이즈로 울퉁불퉁하게 부풀린다 ──
-   노멀은 "주변 면 평균(매끈) 70% + 자기 면 30%" 로 섞는다 — 완전히 매끈하면 고무공 같고, 면 그대로면 이전처럼 투박하다.
+   노멀은 "주변 면 평균(매끈) 70% + 자기 면 30%" 로 섞는다 — 완전히 매끈하면 고무공 같고, 면 그대로면 투박하다.
    같은 자리의 정점은 같은 위치 함수로 움직이므로 갈라지지 않는다. 활엽수와 덤불이 같이 쓴다 */
 const FACET = 0.3;
 function lumpGeo(seed) {
@@ -137,11 +161,10 @@ function lumpGeo(seed) {
 }
 
 /* ── 소나무: 원뿔 네 단 + 줄기 ──
-   각진 면을 없앴다: 원뿔 16각(먼 나무 10각), 노멀을 조각마다 매끈하게 계산한 그대로 합친다
-   (예전엔 합친 뒤 면마다 노멀을 다시 계산해서 각져 보였다). 원뿔 가장자리는 가지 끝처럼 완만하게 물결치고 밑단이 조금 처진다.
-   물결·눈 무늬는 둘레에 2·3번만 — 꼭짓점 16개(먼 나무 10개)로 충분히 그릴 수 있는 낮은 주파수여야 한다.
-   예전엔 7·11번(눈 무늬 5·9번)이라 이웃 꼭짓점이 번갈아 안팎·위아래로 튀어, 아랫단이 톱니처럼 갈라지고 삼각형이 빠진 것처럼 보였다.
-   눈 덮인 소나무: 흰 원뿔을 따로 씌우지 않고(맨 위가 흰 고깔처럼 보였다) 각 원뿔 윗면에 눈을 직접 칠한다 —
+   원뿔 16각(먼 나무 10각), 노멀을 조각마다 매끈하게 계산한 그대로 합친다.
+   원뿔 가장자리는 가지 끝처럼 완만하게 물결치고 밑단이 조금 처진다.
+   물결·눈 무늬는 둘레에 2·3번만 — 꼭짓점 16개(먼 나무 10개)로 충분히 그릴 수 있는 낮은 주파수여야 톱니처럼 갈라지지 않는다.
+   눈 덮인 소나무: 흰 원뿔을 따로 씌우지 않고 각 원뿔 윗면에 눈을 직접 칠한다 —
    뾰족한 끝·가지 끝·아랫면엔 초록이 남고, 눈은 둘레를 따라 군데군데 끊긴다.
    detail: 1 = 가까운 나무, 0 = 먼 나무 */
 function pineGeo(color, snowy, detail) {
@@ -162,13 +185,15 @@ function pineGeo(color, snowy, detail) {
     }
     const ix = geo.index.array; for (let i = 0; i < ix.length; i++) idx.push(ix[i] + o);
   };
-  /* 원뿔 하나: 가장자리가 완만하게 물결치고(가지 끝), 밑단이 살짝 처진다. y = 원뿔 가운데 높이 */
+  /* 원뿔 하나: 가장자리가 완만하게 물결치고(가지 끝), 밑단이 살짝 처진다. y = 원뿔 가운데 높이
+     변형은 높이(t)에 정비례(1차)만 — 모든 점이 "꼭짓점 + t × 방향"이 되어 사각형이 한 평면에 있다.
+     t² 항이 있으면 사각형이 대각선으로 접혀, 아래로 뾰족한 반쪽 삼각형만 꺾여 빠진 것처럼 보인다 */
   const cone = (r, h, y, seed) => {
     const g = new THREE.ConeGeometry(r, h, SEG, 3), p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), yy = p.getY(i), z = p.getZ(i), t = (h / 2 - yy) / h, a = Math.atan2(z, x);
-      const w = Math.sin(a * 3 + seed), k = 1 + t * (0.06 * w + 0.03 * Math.sin(a * 2 + seed * 1.7));
-      p.setXYZ(i, x * k, yy - 0.08 * r * t * t * (0.8 + 0.2 * w) + y, z * k);
+      const w = Math.sin(a * 3 + seed), k = 1 + 0.06 * w + 0.03 * Math.sin(a * 2 + seed * 1.7);
+      p.setXYZ(i, x * k, yy - 0.08 * r * t * (0.8 + 0.2 * w) + y, z * k);
     }
     g.computeVertexNormals(); return g;
   };

@@ -216,7 +216,7 @@ export function fishPress() {
         F.p0.copy(F.entry); F.model.visible = true; F.jump = -1; F.count++;
         const rec = !best[c.sp.n] || c.size > best[c.sp.n]; if (rec) best[c.sp.n] = c.size;
         ring(F.entry.x, F.entry.z, 0.9, 1.2); sfx('fishOut'); gaugeHide(); setSt('caught');
-        showCard(`<div style="font-size:19px;font-weight:500">${c.sp.n} ${c.size}cm</div><div style="font-size:12px;color:#5a6668;margin-top:2px">${rec ? '새 기록 · ' : ''}클릭하면 놓아줍니다</div>`);
+        showCard(`<div style="font-size:19px;font-weight:500">${c.sp.n} ${c.size}cm</div>${rec ? '<div style="font-size:12px;color:#c98a10;margin-top:2px">새 기록</div>' : ''}`);
       } else if (F.fails >= FISHING.fails) {
         banner('줄이 풀려 도망갔다', 1.8, '#ffffff'); sfx('snap'); disposeModel(F.model); F.model = null; gaugeHide(); setSt('snap');
       }
@@ -228,10 +228,10 @@ export function fishPress() {
 /* HUD 안내 (game.js 의 아이템 상자). 끌어올리는 동안에는 게이지만 보면 되므로 안내 문구를 비운다 */
 export function fishHint(btn) {
   return ({
-    idle: [`${btn}: 바라보는 쪽으로 던지기 (멀리 보면 멀리)`, '던지기'], cast: ['던지는 중', '…'],
-    wait: ['찌를 지켜보는 중 · 톡톡은 헛입질', '기다리기'], bite: [`${btn}: 챔질!`, '챔질'],
-    missed: ['놓쳤다 · 찌가 떠오르면 다시 기다린다', '기다리기'], reel: ['', '당기기'],
-    caught: [`${btn}: 놓아주기`, '놓아주기'], release: ['물속으로 돌아갔다', '…'], snap: ['줄이 풀렸다', '…'], reelback: ['찌를 감아 들이는 중', '…'],
+    idle: [`${btn} 던지기`, '던지기'], cast: ['던지는 중', '…'],
+    wait: ['찌를 지켜보는 중', '기다리기'], bite: [`${btn} 물었다`, '챔질'],
+    missed: ['놓쳤다. 다시 기다려보자', '기다리기'], reel: ['', '당기기'],
+    caught: [`${btn} 놓아주기`, '놓아주기'], release: ['물속으로 돌아갔다', '…'], snap: ['줄이 풀렸다', '…'], reelback: ['찌를 감아 들이는 중', '…'],
   })[F.st] || ['', '…'];
 }
 
@@ -297,8 +297,8 @@ export function updateFish(dt) {
       break;
     }
     case 'caught': {
-      showBob = false; const u = Math.min(1, F.t / 0.7), e = eio(u), d = 0.42 + F.cur.size / 100 * 0.55;
-      _a.set(0, -0.06, -d); cam.localToWorld(_a); F.model.position.lerpVectors(F.p0, _a, e); F.model.position.y += 0.5 * Math.sin(Math.PI * u);
+      showBob = false; const u = Math.min(1, F.t / 0.7), e = eio(u), d = 0.5 + F.cur.size / 100 * 0.6;
+      _a.set(0, -0.1, -d); cam.localToWorld(_a); F.model.position.lerpVectors(F.p0, _a, e); F.model.position.y += 0.5 * Math.sin(Math.PI * u);
       F.model.quaternion.copy(cam.quaternion); F.model.rotateY(Math.sin(T * 7) * 0.22 * (1 - 0.5 * u)); F.model.rotateZ(-0.12 + Math.sin(T * 9) * 0.05);
       bend = 0.2; _b.set(0.5, 0, 0); end = F.model.localToWorld(_b); break;
     }

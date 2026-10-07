@@ -9,7 +9,7 @@ import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
 import { beginFish, stopFish, resetFish, fishPress, fishActive, fishHint, fishHooks, fishCount } from './fish.js';
-import { hideAllFx } from './gauge.js';
+import { hideAllFx, gaugeHide } from './gauge.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기 ──
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다 */
@@ -321,21 +321,23 @@ export function updateCaption() { $('#capText').textContent = BG[state.bg].name 
 /* 아이템 상자: 첫 줄 = 이름, 둘째 줄 = 안내·기록. 장작 패기는 "도끼" 아래에 "쪼갠 장작 N / 최고 N연속" */
 export function updateHUD() {
   updateCaption();
-  const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼' : '클릭';
+  const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
   ib.classList.toggle('on', chop || fish || (!!state.item && state.mode !== 'trunk' && state.mode !== 'sleep'));
+  /* 기록은 이름 줄 안의 둘째 줄로 — .hn(조작 안내)은 모바일 세로에서 숨겨질 수 있다 */
+  const sub = t => `<span style="display:block;font-size:.82em;opacity:.8;margin-top:2px">${t}</span>`;
   if (chop) {
     const s = chopStats();
-    ib.querySelector('.ic').innerHTML = ICON.axe; ib.querySelector('.nm').textContent = '도끼';
-    ib.querySelector('.hn').textContent = `쪼갠 장작 ${s.count} / 최고 ${s.best}연속`;
+    ib.querySelector('.ic').innerHTML = ICON.axe; ib.querySelector('.nm').innerHTML = '도끼' + sub(`쪼갠 장작 ${s.count} / 최고 ${s.best}연속`);
+    ib.querySelector('.hn').textContent = '';
     $('#mSip').textContent = '내려치기';
   } else if (fish) {
     const n = fishCount(), [hn, act] = fishHint(btn);
-    ib.querySelector('.ic').innerHTML = ICON.rod; ib.querySelector('.nm').textContent = '낚싯대' + (n ? ` · 잡은 물고기 ${n}` : '');
+    ib.querySelector('.ic').innerHTML = ICON.rod; ib.querySelector('.nm').innerHTML = '낚싯대' + (n ? sub(`잡은 물고기 ${n}`) : '');
     ib.querySelector('.hn').textContent = hn; $('#mSip').textContent = act;
   } else if (state.item) {
     const def = ITEMS[state.item], ud = ctx.W.item && ctx.W.item.userData, empty = ud && ud.amount <= 0;
     ib.querySelector('.ic').innerHTML = def.ic; ib.querySelector('.nm').textContent = def.name;
-    ib.querySelector('.hn').textContent = empty ? '비었다, 트렁크에서 새로 꺼내기' : ud && ud.lit ? btn + ': 땅에 꽂기 (타는 중)' : btn + ': ' + def.act + (def.hold ? ', 길게 누르면 계속' : '');
+    ib.querySelector('.hn').textContent = empty ? '비었다. 트렁크에서 새로 꺼내기' : ud && ud.lit ? btn + ' 땅에 꽂기 (타는 중)' : btn + ' ' + def.act + (def.hold ? ', 길게 누르면 계속' : '');
     $('#mSip').textContent = ud && ud.lit ? '땅에 꽂기' : def.act;
   }
   $('#mSip').style.display = chop || fish || (state.item && state.mode !== 'trunk' && state.mode !== 'sleep') ? '' : 'none';
@@ -350,7 +352,7 @@ export function updatePrompt() {
   if (label) { p.innerHTML = `<kbd class="a">E</kbd>${label}`; p.classList.add('on'); } else p.classList.remove('on');
   $('#cross').classList.toggle('hot', !!t);
 }
-function showPause() { if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock); }
+function showPause() { if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock); }
 function hidePause() { if (ctx.paused) sfx('uiClose'); ctx.paused = false; $('#pause').classList.remove('on'); }
 
 /* ── 사진: 지금 보이는 화면을 그대로 담고, 아래에 장소와 시각 캡션을 얹는다.
