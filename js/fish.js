@@ -225,12 +225,12 @@ export function fishPress() {
     case 'caught': if (F.t > 0.7) { F.p0.copy(F.model.position); hideCard(); setSt('release'); } break;
   }
 }
-/* HUD 안내 (game.js 의 아이템 상자) */
+/* HUD 안내 (game.js 의 아이템 상자). 끌어올리는 동안에는 게이지만 보면 되므로 안내 문구를 비운다 */
 export function fishHint(btn) {
   return ({
     idle: [`${btn}: 바라보는 쪽으로 던지기 (멀리 보면 멀리)`, '던지기'], cast: ['던지는 중', '…'],
     wait: ['찌를 지켜보는 중 · 톡톡은 헛입질', '기다리기'], bite: [`${btn}: 챔질!`, '챔질'],
-    missed: ['놓쳤다 · 찌가 떠오르면 다시 기다린다', '기다리기'], reel: [`${btn}: 삼각형이 초록·금색 구간에 있을 때 당기기`, '당기기'],
+    missed: ['놓쳤다 · 찌가 떠오르면 다시 기다린다', '기다리기'], reel: ['', '당기기'],
     caught: [`${btn}: 놓아주기`, '놓아주기'], release: ['물속으로 돌아갔다', '…'], snap: ['줄이 풀렸다', '…'], reelback: ['찌를 감아 들이는 중', '…'],
   })[F.st] || ['', '…'];
 }
@@ -246,6 +246,8 @@ export function updateFish(dt) {
   if (!F.ok) return;
   updRings(dt, T);
   if (!F.on) { line.visible = false; bob.visible = false; if (rodRoot) { segs.forEach(s => { s.rotation.x = 0; }); rod.rotation.x = ROD_BASE; } return; }
+  /* 상태 시간: 던지기·기다리기·입질·챔질 시간·놓아주기가 모두 이 값으로 넘어간다 */
+  F.t += dt;
   const cam = ctx.camera; rodRoot.updateMatrixWorld(true); tipObj.getWorldPosition(TIP);
   let bend = 0, lift = 0, sag = 0.02, showBob = true, end = null;
   switch (F.st) {

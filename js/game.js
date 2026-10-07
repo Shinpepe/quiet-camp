@@ -198,7 +198,6 @@ function act(id) {
 }
 
 /* ── 장작 패기 시작·끝: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ── */
-let chopTold = false;
 function beginChop() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
   if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('장작을 팰 자리가 없다'); return; }
@@ -206,7 +205,6 @@ function beginChop() {
   const eye = chopEye();
   state.mode = 'chop'; state.seat = null; player.x = eye.x; player.z = eye.z;
   startMove(eye.clone(), chopYaw(), CHOP.pitch); updateHUD();
-  if (!chopTold) { chopTold = true; setTimeout(() => { if (state.mode === 'chop') showToast('삼각형이 초록·금색 구간에 있을 때 내려치자'); }, 1500); }
 }
 function endChop() {
   state.mode = 'walk'; ctx.hand.visible = true;
@@ -320,14 +318,15 @@ export function updateSleep(dt) {
 
 export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
 export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
+/* 아이템 상자: 첫 줄 = 이름, 둘째 줄 = 안내·기록. 장작 패기는 "도끼" 아래에 "쪼갠 장작 N / 최고 N연속" */
 export function updateHUD() {
   updateCaption();
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼' : '클릭';
   ib.classList.toggle('on', chop || fish || (!!state.item && state.mode !== 'trunk' && state.mode !== 'sleep'));
   if (chop) {
     const s = chopStats();
-    ib.querySelector('.ic').innerHTML = ICON.axe; ib.querySelector('.nm').textContent = '도끼' + (s.count ? ` · 쪼갠 장작 ${s.count}` : '') + (s.best >= 2 ? ` · 최고 ${s.best}연속` : '');
-    ib.querySelector('.hn').textContent = `${btn}: 삼각형이 초록·금색 구간에 있을 때 내려치기`;
+    ib.querySelector('.ic').innerHTML = ICON.axe; ib.querySelector('.nm').textContent = '도끼';
+    ib.querySelector('.hn').textContent = `쪼갠 장작 ${s.count} / 최고 ${s.best}연속`;
     $('#mSip').textContent = '내려치기';
   } else if (fish) {
     const n = fishCount(), [hn, act] = fishHint(btn);

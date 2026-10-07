@@ -1,20 +1,21 @@
 /* ── 공통 타이밍 게이지 (장작 패기·낚시) + 화면 가운데 문구 + 결과 카드 ──
-   막대: 실패(빨강)가 성공(초록)을 감싸고, 성공이 대성공(금색)을 감싼다. 삼각형이 좌우로 오가고, 누른 순간의 위치로 판정한다.
+   세로 막대: 실패(빨강)가 성공(초록)을 감싸고, 성공이 대성공(금색)을 감싼다. 삼각형이 아래위로 오가고, 누른 순간의 위치로 판정한다.
+   도구(도끼·낚싯대) 오른쪽 옆, 오른쪽 아래 버튼들보다 위에 작게 둔다.
    한 번 판정하면 0.5초 쉬었다가 성공 구간이 새 자리로 옮겨 간다 (같은 자리만 노리는 방식이 통하지 않게).
    요소는 처음 쓸 때 #hud 안에 만든다 (index.html 은 고치지 않는다) */
-const BOTTOM = '13%';   // 게이지 높이 (화면 아래에서)
+const POS = { right: '13%', top: '44%', h: 'min(26vh, 200px)' };   // 게이지 위치(화면 오른쪽에서, 세로 가운데)·길이
 let el = null;
 
 function ensure() {
   if (el && el.root.isConnected) return el;
   const hud = document.querySelector('#hud'); if (!hud) return null;
   const root = document.createElement('div');
-  root.style.cssText = `position:absolute;left:50%;bottom:${BOTTOM};width:min(46vw,520px);transform:translateX(-50%);opacity:0;transition:opacity .2s;pointer-events:none;z-index:5`;
+  root.style.cssText = `position:absolute;right:${POS.right};top:${POS.top};height:${POS.h};width:12px;transform:translateY(-50%);opacity:0;transition:opacity .2s;pointer-events:none;z-index:5`;
   root.innerHTML =
-    '<div data-k="fb" style="position:absolute;bottom:34px;transform:translateX(-50%);font-size:17px;font-weight:500;white-space:nowrap;padding:2px 10px;border-radius:8px;background:rgba(0,0,0,.4);opacity:0;transition:opacity .15s"></div>' +
-    '<div data-k="mk" style="position:absolute;bottom:16px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:13px solid #fff;margin-left:-8px"></div>' +
-    '<div style="position:relative;height:14px;border-radius:7px;background:#b9655a;overflow:hidden;box-shadow:0 0 0 1.5px rgba(0,0,0,.35)">' +
-    '<div data-k="ok" style="position:absolute;top:0;bottom:0;background:#6aa85a"></div><div data-k="gr" style="position:absolute;top:0;bottom:0;background:#f0c24f"></div></div>';
+    '<div style="position:absolute;inset:0;border-radius:6px;background:#b9655a;overflow:hidden;box-shadow:0 0 0 1.5px rgba(0,0,0,.35)">' +
+    '<div data-k="ok" style="position:absolute;left:0;right:0;background:#6aa85a"></div><div data-k="gr" style="position:absolute;left:0;right:0;background:#f0c24f"></div></div>' +
+    '<div data-k="mk" style="position:absolute;left:-15px;width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-left:11px solid #fff;margin-bottom:-7px"></div>' +
+    '<div data-k="fb" style="position:absolute;right:24px;transform:translateY(50%);font-size:15px;font-weight:500;white-space:nowrap;padding:2px 8px;border-radius:8px;background:rgba(0,0,0,.4);opacity:0;transition:opacity .15s"></div>';
   const ban = document.createElement('div');
   ban.style.cssText = 'position:absolute;left:0;right:0;top:17%;text-align:center;font-size:28px;font-weight:500;color:#f3d27a;opacity:0;transition:opacity .25s;pointer-events:none;text-shadow:0 1px 6px rgba(0,0,0,.45);z-index:5';
   const card = document.createElement('div');
@@ -40,13 +41,14 @@ export function gaugeJudge(G) {
   G.flash = r; G.ft = 0.8; G.pause = 0.5; return r;
 }
 const FB = { great: ['대성공!', '#f3d27a'], ok: ['성공', '#a8e08c'], fail: ['실패', '#f0a090'] };
+/* p 0 = 막대 아래, 1 = 위. 판정 문구는 삼각형 높이에서 막대 왼쪽에 뜬다 */
 export function gaugeShow(G) {
   const e = ensure(); if (!e) return;
   e.root.style.opacity = 1;
-  e.ok.style.left = (G.c - G.ok / 2) * 100 + '%'; e.ok.style.width = G.ok * 100 + '%';
-  e.gr.style.left = (G.c - G.great / 2) * 100 + '%'; e.gr.style.width = G.great * 100 + '%';
-  e.mk.style.left = G.p * 100 + '%';
-  if (G.ft > 0) { const m = FB[G.flash]; e.fb.textContent = m[0]; e.fb.style.color = m[1]; e.fb.style.left = G.p * 100 + '%'; e.fb.style.opacity = Math.min(1, G.ft / 0.3); }
+  e.ok.style.bottom = (G.c - G.ok / 2) * 100 + '%'; e.ok.style.height = G.ok * 100 + '%';
+  e.gr.style.bottom = (G.c - G.great / 2) * 100 + '%'; e.gr.style.height = G.great * 100 + '%';
+  e.mk.style.bottom = G.p * 100 + '%';
+  if (G.ft > 0) { const m = FB[G.flash]; e.fb.textContent = m[0]; e.fb.style.color = m[1]; e.fb.style.bottom = G.p * 100 + '%'; e.fb.style.opacity = Math.min(1, G.ft / 0.3); }
   else e.fb.style.opacity = 0;
 }
 export function gaugeHide() { if (el) el.root.style.opacity = 0; }

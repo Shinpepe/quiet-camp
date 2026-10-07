@@ -138,7 +138,9 @@ function lumpGeo(seed) {
 
 /* ── 소나무: 원뿔 네 단 + 줄기 ──
    각진 면을 없앴다: 원뿔 16각(먼 나무 10각), 노멀을 조각마다 매끈하게 계산한 그대로 합친다
-   (예전엔 합친 뒤 면마다 노멀을 다시 계산해서 각져 보였다). 원뿔 가장자리는 가지 끝처럼 살짝 물결치고 밑단이 조금 처진다.
+   (예전엔 합친 뒤 면마다 노멀을 다시 계산해서 각져 보였다). 원뿔 가장자리는 가지 끝처럼 완만하게 물결치고 밑단이 조금 처진다.
+   물결·눈 무늬는 둘레에 2·3번만 — 꼭짓점 16개(먼 나무 10개)로 충분히 그릴 수 있는 낮은 주파수여야 한다.
+   예전엔 7·11번(눈 무늬 5·9번)이라 이웃 꼭짓점이 번갈아 안팎·위아래로 튀어, 아랫단이 톱니처럼 갈라지고 삼각형이 빠진 것처럼 보였다.
    눈 덮인 소나무: 흰 원뿔을 따로 씌우지 않고(맨 위가 흰 고깔처럼 보였다) 각 원뿔 윗면에 눈을 직접 칠한다 —
    뾰족한 끝·가지 끝·아랫면엔 초록이 남고, 눈은 둘레를 따라 군데군데 끊긴다.
    detail: 1 = 가까운 나무, 0 = 먼 나무 */
@@ -153,20 +155,20 @@ function pineGeo(color, snowy, detail) {
       c.set(hex).multiplyScalar(k);
       if (snow) {
         const t = (hi - y) / (hi - lo + 1e-6), a = Math.atan2(p.getZ(i), p.getX(i));
-        const s = sstep(0.1, 0.28, t) * (1 - sstep(0.8, 0.95, t)) * sstep(0, 0.3, n.getY(i)) * sstep(-0.3, 0.5, Math.sin(a * 5 + seed) + 0.6 * Math.sin(a * 9 + seed * 1.7) + 0.4);
+        const s = sstep(0.1, 0.28, t) * (1 - sstep(0.8, 0.95, t)) * sstep(0, 0.3, n.getY(i)) * sstep(-0.3, 0.5, Math.sin(a * 3 + seed) + 0.6 * Math.sin(a * 2 + seed * 1.7) + 0.4);
         c.lerp(SNOW, 0.85 * s);
       }
       pos.push(p.getX(i), y, p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); col.push(c.r, c.g, c.b); uv.push(u.getX(i) * 3, u.getY(i) * 3);
     }
     const ix = geo.index.array; for (let i = 0; i < ix.length; i++) idx.push(ix[i] + o);
   };
-  /* 원뿔 하나: 가장자리가 물결치고(가지 끝), 밑단이 살짝 처진다. y = 원뿔 가운데 높이 */
+  /* 원뿔 하나: 가장자리가 완만하게 물결치고(가지 끝), 밑단이 살짝 처진다. y = 원뿔 가운데 높이 */
   const cone = (r, h, y, seed) => {
     const g = new THREE.ConeGeometry(r, h, SEG, 3), p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), yy = p.getY(i), z = p.getZ(i), t = (h / 2 - yy) / h, a = Math.atan2(z, x);
-      const k = 1 + t * (0.09 * Math.sin(a * 7 + seed) + 0.05 * Math.sin(a * 11 + seed * 2.3));
-      p.setXYZ(i, x * k, yy - 0.12 * r * t * t * (0.6 + 0.4 * Math.sin(a * 7 + seed)) + y, z * k);
+      const w = Math.sin(a * 3 + seed), k = 1 + t * (0.06 * w + 0.03 * Math.sin(a * 2 + seed * 1.7));
+      p.setXYZ(i, x * k, yy - 0.08 * r * t * t * (0.8 + 0.2 * w) + y, z * k);
     }
     g.computeVertexNormals(); return g;
   };
