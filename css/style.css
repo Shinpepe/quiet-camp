@@ -140,6 +140,11 @@ h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:.12em;
 .hint{margin-top:16px;font-size:11px;color:var(--mute);text-align:center;letter-spacing:.05em}
 .hint kbd{margin:0 2px}
 
+/* ── 터치 기기: 키보드 조작 안내(E·클릭·P·ESC)는 쓸 일이 없으니 숨긴다 (태블릿 포함) ── */
+@media (pointer:coarse){
+  #legend{display:none}
+}
+
 /* ── 좁은 화면(폰): 메뉴는 아래쪽 시트, 프리뷰가 위에 보이게. 조작 목록은 숨김 ── */
 @media (max-width:700px){
   #menu{align-items:flex-end}
@@ -170,7 +175,9 @@ h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:.12em;
   .cards{grid-template-columns:repeat(2,1fr)}
   #sleep span{font-size:36px}
 }
-/* 가로 폰: 높이가 낮으니 메뉴를 옆으로, 폭은 좁게 */
+/* 가로 폰: 높이가 낮으니 메뉴를 옆으로, 폭은 좁게.
+   아이템 상자는 세로와 같이 왼쪽 아래(키보드 안내 자리), 버튼은 오른쪽 아래.
+   폭 700px 이하 폰은 위 세로 규칙도 함께 걸리므로, 안내 줄(.hn)을 여기서 다시 보이게 한다 */
 @media (max-width:900px) and (max-height:480px){
   #menu{align-items:stretch}
   #menu .side{width:min(360px,60%);height:100%;max-height:none;border-radius:0;padding:18px 18px 18px calc(18px + var(--sal));
@@ -179,4 +186,8 @@ h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:.12em;
   .tag{display:none}
   .preview-tag{top:auto;bottom:calc(14px + var(--sab))}
   #prompt{bottom:calc(84px + var(--sab))}
+  #legend{display:none}
+  #itembox{right:auto;left:calc(18px + var(--sal));bottom:calc(16px + var(--sab));max-width:min(340px,calc(100% - 220px));padding:8px 14px 8px 12px}
+  #itembox .hn{display:block}
+  #mobile{right:calc(18px + var(--sar));bottom:calc(16px + var(--sab))}
 }
