@@ -160,47 +160,75 @@ function lumpGeo(seed) {
   return g;
 }
 
-/* ── 소나무: 원뿔 네 단 + 줄기 ──
-   원뿔 16각(먼 나무 10각), 노멀을 조각마다 매끈하게 계산한 그대로 합친다.
-   원뿔 가장자리는 가지 끝처럼 완만하게 물결치고 밑단이 조금 처진다.
-   물결·눈 무늬는 둘레에 2·3번만 — 꼭짓점 16개(먼 나무 10개)로 충분히 그릴 수 있는 낮은 주파수여야 톱니처럼 갈라지지 않는다.
-   눈 덮인 소나무: 흰 원뿔을 따로 씌우지 않고 각 원뿔 윗면에 눈을 직접 칠한다 —
-   뾰족한 끝·가지 끝·아랫면엔 초록이 남고, 눈은 둘레를 따라 군데군데 끊긴다.
-   detail: 1 = 가까운 나무, 0 = 먼 나무 */
+/* ── 소나무: 줄기 + 원뿔 치마 네 단 ──
+   원뿔은 ConeGeometry 를 고쳐 쓰지 않고 삼각형을 하나씩 직접 만든다 (인덱스 없음).
+   삼각형마다 위치·노멀·색을 직접 넣으므로 공유 정점·노멀 재계산·밑면 뚜껑에서 생기는 문제가 없다.
+   각 단: 꼭대기 → 가운데 고리(55%) → 밑단.
+   밑단은 가지 끝(바깥으로 나오고 조금 처짐)과 오목한 곳이 번갈아 오는 톱니 치마.
+   노멀은 원뿔 면의 해석적 노멀 (cos a, r/h, sin a) — 면이 매끈하게 이어진다.
+   삼각형마다 바깥을 향하도록 감는 방향을 확인해 맞춘다 (양면 재질에서 안쪽 면 음영이 바르게 나오게).
+   밑면 뚜껑은 없다. 재질을 양면으로 그려 아래에서 보면 치마 안쪽이 어둡게 보인다.
+   눈 덮인 소나무: 각 단 윗면에 눈을 칠한다 (뾰족한 끝·밑단 가장자리엔 초록이 남고, 둘레를 따라 군데군데 끊긴다).
+   detail: 1 = 가까운 나무(둘레 16칸), 0 = 먼 나무(10칸). 칸 수가 짝수여야 톱니가 이음매에서 맞물린다 */
 function pineGeo(color, snowy, detail) {
-  const SEG = detail ? 16 : 10, pos = [], nor = [], col = [], uv = [], idx = [], c = new THREE.Color(), SNOW = new THREE.Color(0xf3f6fb);
-  /* 조각 하나를 붙인다. grad: 아래→위로 밝아짐, snow: 윗면에 눈 (seed 로 무늬가 달라진다) */
-  const add = (geo, hex, grad, snow, seed) => {
-    const p = geo.attributes.position, n = geo.attributes.normal, u = geo.attributes.uv, o = pos.length / 3; let lo = 1e9, hi = -1e9;
-    for (let i = 0; i < p.count; i++) { lo = Math.min(lo, p.getY(i)); hi = Math.max(hi, p.getY(i)); }
+  const SEG = detail ? 16 : 10, TAU = Math.PI * 2, V = THREE.Vector3;
+  const pos = [], nor = [], col = [], uv = [];
+  const c = new THREE.Color(), base = new THREE.Color(), SNOW = new THREE.Color(0xf3f6fb), e1 = new V(), e2 = new V(), fn = new V();
+
+  /* 줄기: 위아래가 뚫린 원기둥 (밑은 땅속, 위는 첫 단 안쪽에 숨는다) */
+  {
+    const g = new THREE.CylinderGeometry(0.16, 0.26, 1.8, 10, 1, true).toNonIndexed(); g.translate(0, 0.9, 0);
+    const p = g.attributes.position, n = g.attributes.normal, u = g.attributes.uv; base.set(0x4a3325);
     for (let i = 0; i < p.count; i++) {
-      const y = p.getY(i), k = grad ? 0.72 + 0.4 * (y - lo) / (hi - lo + 1e-6) : 1;
-      c.set(hex).multiplyScalar(k);
-      if (snow) {
-        const t = (hi - y) / (hi - lo + 1e-6), a = Math.atan2(p.getZ(i), p.getX(i));
-        const s = sstep(0.1, 0.28, t) * (1 - sstep(0.8, 0.95, t)) * sstep(0, 0.3, n.getY(i)) * sstep(-0.3, 0.5, Math.sin(a * 3 + seed) + 0.6 * Math.sin(a * 2 + seed * 1.7) + 0.4);
+      pos.push(p.getX(i), p.getY(i), p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i));
+      col.push(base.r, base.g, base.b); uv.push(u.getX(i) * 2, u.getY(i) * 2);
+    }
+    g.dispose();
+  }
+
+  /* 한 단: 반지름 r, 높이 h, 밑단 높이 yb. shade = 단마다 조금씩 밝아지는 배율 */
+  const tier = (r, h, yb, seed, shade) => {
+    const yt = yb + h, slope = r / h; base.set(color).multiplyScalar(shade);
+    /* 점 하나: 각도 a, 꼭대기에서의 비율 t(0 = 꼭대기, 1 = 밑단), 반지름 배율 rk, 처짐 droop */
+    const vert = (a, t, rk, droop) => ({
+      p: new V(Math.cos(a) * r * t * rk, yt - h * t - droop, Math.sin(a) * r * t * rk),
+      n: new V(Math.cos(a), slope, Math.sin(a)).normalize(), a, t,
+    });
+    /* 색: 아래→위로 밝아지고, 눈 덮인 맵이면 윗면에 눈을 칠한다 */
+    const paint = v => {
+      c.copy(base).multiplyScalar(0.72 + 0.4 * cl((v.p.y - yb) / h, 0, 1));
+      if (snowy) {
+        const s = sstep(0.1, 0.28, v.t) * (1 - sstep(0.8, 0.95, v.t)) * sstep(-0.3, 0.5, Math.sin(v.a * 3 + seed) + 0.6 * Math.sin(v.a * 2 + seed * 1.7) + 0.4);
         c.lerp(SNOW, 0.85 * s);
       }
-      pos.push(p.getX(i), y, p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); col.push(c.r, c.g, c.b); uv.push(u.getX(i) * 3, u.getY(i) * 3);
+      return c;
+    };
+    /* 삼각형 하나: 면 노멀이 바깥(정점 노멀 쪽)을 향하도록 감는 방향을 맞춘 뒤 붙인다 */
+    const tri = (A, B, C) => {
+      e1.subVectors(B.p, A.p); e2.subVectors(C.p, A.p); fn.crossVectors(e1, e2);
+      if (fn.dot(A.n) + fn.dot(B.n) + fn.dot(C.n) < 0) { const T = B; B = C; C = T; }
+      for (const v of [A, B, C]) {
+        const k = paint(v);
+        pos.push(v.p.x, v.p.y, v.p.z); nor.push(v.n.x, v.n.y, v.n.z); col.push(k.r, k.g, k.b); uv.push(v.a / TAU * 3, v.t * 3);
+      }
+    };
+    /* 가운데 고리(살짝 물결) · 밑단(짝수 칸 = 가지 끝, 홀수 칸 = 오목한 곳). i = SEG 는 i = 0 과 같은 자리 */
+    const mid = [], hem = [];
+    for (let i = 0; i <= SEG; i++) {
+      const a = i / SEG * TAU, tip = i % 2 === 0;
+      mid.push(vert(a, 0.55, 1 + 0.03 * Math.sin(a * 3 + seed), 0));
+      hem.push(vert(a, 1, tip ? 1.06 : 0.86, tip ? 0.09 * r : 0.02 * r));
     }
-    const ix = geo.index.array; for (let i = 0; i < ix.length; i++) idx.push(ix[i] + o);
-  };
-  /* 원뿔 하나: 가장자리가 완만하게 물결치고(가지 끝), 밑단이 살짝 처진다. y = 원뿔 가운데 높이
-     변형은 높이(t)에 정비례(1차)만 — 모든 점이 "꼭짓점 + t × 방향"이 되어 사각형이 한 평면에 있다.
-     t² 항이 있으면 사각형이 대각선으로 접혀, 아래로 뾰족한 반쪽 삼각형만 꺾여 빠진 것처럼 보인다 */
-  const cone = (r, h, y, seed) => {
-    const g = new THREE.ConeGeometry(r, h, SEG, 3), p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), yy = p.getY(i), z = p.getZ(i), t = (h / 2 - yy) / h, a = Math.atan2(z, x);
-      const w = Math.sin(a * 3 + seed), k = 1 + 0.06 * w + 0.03 * Math.sin(a * 2 + seed * 1.7);
-      p.setXYZ(i, x * k, yy - 0.08 * r * t * (0.8 + 0.2 * w) + y, z * k);
+    for (let i = 0; i < SEG; i++) {
+      const am = (i + 0.5) / SEG * TAU;
+      tri(vert(am, 0, 1, 0), mid[i], mid[i + 1]);                            // 꼭대기 → 가운데 고리
+      tri(mid[i], hem[i], hem[i + 1]); tri(mid[i], hem[i + 1], mid[i + 1]);   // 가운데 고리 → 밑단
     }
-    g.computeVertexNormals(); return g;
   };
-  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 1.8, 10); trunk.translate(0, 0.9, 0); add(trunk, 0x4a3325, false, false, 0);
-  [[1.45, 2.8, 2.3], [1.15, 2.6, 3.4], [0.85, 2.3, 4.5], [0.5, 2.0, 5.5]].forEach(([r, h, y], i) =>
-    add(cone(r, h, y, i * 1.9), new THREE.Color(color).multiplyScalar(1 + i * 0.07).getHex(), true, snowy, i * 1.9));
-  const g = new THREE.BufferGeometry(); g.setIndex(idx);
+  /* [반지름, 높이, 밑단 높이] — 예전 원뿔과 같은 크기·위치 (꼭대기 3.7 · 4.7 · 5.65 · 6.5) */
+  [[1.45, 2.8, 0.9], [1.15, 2.6, 2.1], [0.85, 2.3, 3.35], [0.5, 2.0, 4.5]].forEach(([r, h, yb], i) => tier(r, h, yb, i * 1.9, 1 + i * 0.07));
+
+  const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   return g;
@@ -436,10 +464,10 @@ export function makeVegetation(cfg) {
   for (let i = 0; i < nLeafs * 8 && leafs.length < nLeafs; i++) tryPlace(10, 60, leafs, 0.3, 60, 0.35, 0.72, 0.36, undefined, LEAF);
   for (let i = 0; i < nBushes * 8 && bushes.length < nBushes; i++) tryPlace(5, 70, bushes, 0.15, 60, 0.45, 0.6, 0, cfg.bushZmin, BUSH);
   const treeColor = cfg.key === 'snow' ? 0x2f4f46 : 0x2b5a2b, fol = () => tex('foliage', 1, 1, 0.3);
-  /* 소나무: 방위 8조각 × 60m 안팎 = 최대 16개 메시. 60m 안쪽은 16각, 바깥은 10각 모양 (멀리선 차이가 보이지 않는다).
-     재질은 하나라 셰이더도 하나 */
+  /* 소나무: 방위 8조각 × 60m 안팎 = 최대 16개 메시. 60m 안쪽은 16칸, 바깥은 10칸 모양 (멀리선 차이가 보이지 않는다).
+     치마 아래가 뚫려 있으므로 양면으로 그린다. 재질은 하나라 셰이더도 하나 */
   if (pines.length) {
-    const pg = pineGeo(treeColor, cfg.snow, 1), pgFar = pineGeo(treeColor, cfg.snow, 0), pm = swayMat(fol(), 0.012, 1.5);
+    const pg = pineGeo(treeColor, cfg.snow, 1), pgFar = pineGeo(treeColor, cfg.snow, 0), pm = swayMat(Object.assign(fol(), { side: THREE.DoubleSide }), 0.012, 1.5);
     sectorize(pines, 8, 60).forEach(list => { const far = Math.hypot(list[0].x, list[0].z) >= 60; scene.add(culled(instanced(far ? pgFar : pg, pm, list, true), 0.6)); });
   }
   /* 활엽수: 모양 3종 × 방위 8조각 × 45m 안팎. 45m 안쪽은 잎 덩어리 셋, 바깥은 하나로 합친 가벼운 모양 (같은 가지 구조).
