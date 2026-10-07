@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ctx } from './state.js';
+import { ctx, records, saveSettings } from './state.js';
 import { FISHING } from './data.js';
 import { rnd, smoothM } from './util.js';
 import { WATER_Y } from './terrain.js';
@@ -8,13 +8,13 @@ import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner, showC
 import { DOCK } from './dock.js';
 
 /* ══ 부두 낚시 ══
-   부두 끝에 앉으면 낚싯대를 든다. 시선은 game.js 가 물 쪽 180°·아래 약 20°로 제한한다 (하늘은 볼 수 있다).
-   던지기: 바라보는 쪽으로. 거리는 시선 높이로 정해진다 — 수평선 근처를 보면 멀리, 아래를 볼수록 가까이 (착수 표시 없이 감으로).
+   부두 끝에 앉으면 낚싯대를 든다. 시선은 game.js 가 물 쪽 180°·아래 약 20°로 제한한다.
+   던지기: 바라보는 쪽으로, 거리는 시선 높이로 (수평선 근처 = 멀리, 아래 = 가까이).
    기다리기: 찌가 1~3번 톡톡(헛입질). 이때 누르면 "너무 일렀다" → 찌를 감아 들인다.
-   입질: 찌가 잠기고 낚싯대가 휜다. FISHING.biteWin(2초) 안에 눌러야 챔질 → 게이지. 놓치면 "물고기가 도망갔다" 후 다시 기다린다.
-   끌어올리기: 성공 needOk 번 또는 대성공 needGr 번이면 잡힌다. 실패 3번이면 줄이 풀려 도망간다.
+   입질: FISHING.biteWin 안에 눌러야 챔질 → 게이지. 놓치면 다시 기다린다.
+   끌어올리기: 성공 needOk 번 또는 대성공 needGr 번이면 잡힌다. 실패 FISHING.fails 번이면 줄이 풀린다.
    잡으면 눈앞에 들어 이름·크기를 보여 주고, 누르면 놓아준다.
-   줄은 수면을 지나는 지점에서 끊어 그리고(물속 부분은 그리지 않는다), 끌어올릴 때의 물결도 그 지점에서 퍼진다 */
+   줄은 수면을 지나는 지점에서 끊어 그리고, 끌어올릴 때의 물결도 그 지점에서 퍼진다 */
 
 const V = THREE.Vector3, WY = WATER_Y;
 const cl = (x, a, b) => Math.max(a, Math.min(b, x)), lerp = (a, b, t) => a + (b - a) * t;
@@ -28,10 +28,10 @@ function n3(x, y, z) {
 }
 const hx = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; }, mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
 
-/* game.js 가 연결한다: 안내 문구, HUD 갱신 */
+/* game.js 가 연결한다 */
 export const fishHooks = { toast: null, hud: null };
 
-/* ── 물고기 8종: 몸 비율·색·무늬·지느러미. s = 크기 범위(cm). 종류와 크기는 시간대와 상관없이 무작위 ── */
+/* ── 물고기 8종: 몸 비율·색·무늬·지느러미. s = 크기 범위(cm) ── */
 export const FISH_SPECIES = [
   { n: '붕어', s: [15, 40], H: .19, W: .085, pk: .38, ped: .055, sn: .6, hump: .02, back: '#3c4a2a', side: '#a08c48', belly: '#e6d8a8', pat: 'scale', tail: 'fork', fin: '#6b6040', dors: [[.36, .72, .085, 0]], anal: [.72, .83, .06], eye: 1 },
   { n: '잉어', s: [30, 90], H: .15, W: .08, pk: .4, ped: .05, sn: .55, hump: .025, back: '#4a3c20', side: '#c09440', belly: '#eedaa4', pat: 'scale', tail: 'fork', fin: '#8a6a38', dors: [[.36, .78, .075, 0]], anal: [.74, .84, .06], barbel: 'short', eye: .9 },
@@ -43,7 +43,7 @@ export const FISH_SPECIES = [
   { n: '빙어', s: [8, 15], H: .08, W: .045, pk: .4, ped: .03, sn: .75, hump: 0, back: '#8fa8a0', side: '#d6e0e2', belly: '#f4f6f4', pat: 'smelt', tail: 'fork', fin: '#c8d4d4', dors: [[.46, .56, .06, 0]], adi: .82, anal: [.7, .8, .04], eye: 1.4 },
 ];
 
-/* ── 물고기 모델: 길이 1(머리 +x). 몸은 단면이 타원인 관을 길이를 따라 쓸어 만들고, 무늬는 정점색. 지느러미·눈·입·수염을 붙인다 ── */
+/* ── 물고기 모델: 길이 1(머리 +x). 단면이 타원인 관을 길이 방향으로 쓸어 몸을 만들고, 무늬는 정점색 ── */
 export function fishModel(sp) {
   const g = new THREE.Group(), XU = u => 0.5 - 0.88 * u;
   const prof = (u, H, ped) => u < sp.pk ? H * Math.pow(Math.sin(Math.PI / 2 * u / sp.pk), sp.sn) : lerp(H, ped, Math.pow((u - sp.pk) / (1 - sp.pk), 0.8));
@@ -97,13 +97,13 @@ export function fishModel(sp) {
 }
 function disposeModel(m) { if (!m) return; if (m.parent) m.parent.remove(m); m.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
 
-/* ── 낚싯대: 카메라에 붙는다 (씬이 바뀌어도 살아남는다). 릴과 가이드(줄 고리)는 낚싯대 아래쪽 ──
-   낚싯대 축은 로컬 +y, 앞으로 기울인 상태에서 로컬 −z 가 아래쪽이다. 네 마디라 끝으로 갈수록 더 휜다 */
+/* ── 낚싯대: 카메라에 붙어 씬이 바뀌어도 살아남는다. 축은 로컬 +y, 네 마디라 끝으로 갈수록 더 휜다.
+   ctx.rod 에 등록해 두면 main.js 가 물 반사를 그릴 때 숨긴다 ── */
 let rodRoot = null, rod = null, tipObj = null;
 const segs = [];
 function ensureRod() {
   if (rodRoot) return;
-  rodRoot = new THREE.Group(); rodRoot.visible = false; ctx.camera.add(rodRoot);
+  rodRoot = new THREE.Group(); rodRoot.visible = false; ctx.camera.add(rodRoot); ctx.rod = rodRoot;
   rod = new THREE.Group(); rodRoot.add(rod);
   const chrome = smoothM(0x9aa0a6, { metalness: 0.85, roughness: 0.28 }), blankM = smoothM(0x2a3a4a, { roughness: 0.3, metalness: 0.4 });
   const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.3, 12), smoothM(0xb48c5c, { roughness: 0.8 })); cork.position.y = 0.15; rod.add(cork);
@@ -126,18 +126,17 @@ function ensureRod() {
 }
 const ROD_BASE = -1.05;
 
-/* ── 상태 ── */
+/* ── 상태. count = 이번 캠핑에서 잡은 수 (종별 최고 기록은 state.js 의 records 에 저장) ── */
 const F = {
   ok: false, on: false, st: 'idle', t: 0, raise: 0, wait: 0, nibs: [], nibHit: new Set(), G: null, cur: null, oks: 0, gr: 0, fails: 0,
   target: new V(), hook: new V(), p0: new V(), entry: new V(), bend: 0, bendV: 0, thr: 0, jt: 0, jump: -1, model: null, flying: false, count: 0,
 };
-const best = {};
 let line = null, lineGeo = null, bob = null, rings = [];
 const LN = 40, TIP = new V(), _a = new V(), _b = new V(), _fw = new V();
 
-/* 씬마다: 줄·찌·물결을 만든다 (부두가 있는 맵만). 사전 컴파일용 물고기 하나를 숨겨 둔다 (첫 입질에서 멈칫하지 않게) */
+/* 씬마다: 줄·찌·물결을 만든다 (부두가 있는 맵만). 첫 입질에서 멈칫하지 않게 사전 컴파일용 물고기 하나를 숨겨 둔다 */
 export function buildFish() {
-  const W = ctx.W; F.ok = false; F.on = false; F.st = 'idle'; F.model = null; rings = [];
+  const W = ctx.W; F.ok = false; F.on = false; F.st = 'idle'; F.model = null; F.count = 0; rings = [];
   ensureRod();
   if (!W.cfg.dock) return;
   lineGeo = new THREE.BufferGeometry(); lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(LN * 3), 3));
@@ -162,7 +161,7 @@ function updRings(dt, T) {
   rings.forEach(r => { if (r.t >= r.life) { r.m.visible = false; return; } r.t += dt; const u = r.t / r.life; r.m.scale.setScalar(0.04 + r.size * eout(u)); r.m.material.opacity = 0.6 * (1 - u); });
   const dr = ctx.W.dockRings; if (dr) dr.forEach((r, i) => { r.scale.setScalar(1 + 0.25 * Math.sin(T * 1.6 + i)); r.material.opacity = 0.16 + 0.1 * Math.sin(T * 1.6 + i); });
 }
-/* 줄: 끝에서 끝까지 처지는 곡선. 수면 아래로 내려가는 첫 지점에서 끊고, 그 지점을 F.entry 에 기록한다 (물결이 여기서 퍼진다) */
+/* 줄: 처지는 곡선. 수면 아래로 내려가는 첫 지점에서 끊고, 그 지점을 F.entry 에 기록한다 */
 function setLine(a, b, sag) {
   const p = lineGeo.attributes.position; let py = 0, px = 0, pz = 0, cut = -1; const lim = WY + 0.01;
   for (let i = 0; i < LN; i++) {
@@ -180,7 +179,7 @@ function startWait() {
   const n = FISHING.nibbles[0] + Math.floor(Math.random() * (FISHING.nibbles[1] - FISHING.nibbles[0] + 1));
   for (let i = 0; i < n; i++) F.nibs.push(rnd(0.8, F.wait - 0.4));
 }
-/* 던질 곳: 바라보는 방향, 거리는 시선 높이로 (수평선 근처 = 멀리, 아래 = 가까이) */
+/* 던질 곳: 바라보는 방향, 거리는 시선 높이로 */
 function aimPoint(out) {
   const cam = ctx.camera; cam.getWorldDirection(_fw);
   const pitch = Math.asin(cl(_fw.y, -1, 1)), d = lerp(FISHING.cast[0], FISHING.cast[1], sst(FISHING.pitch[0] + 0.05, 0.05, pitch)), hl = Math.hypot(_fw.x, _fw.z) || 1;
@@ -191,7 +190,15 @@ export const fishActive = () => F.on;
 export const fishCount = () => F.count;
 export function beginFish() { if (!F.ok) return false; ensureRod(); F.on = true; setSt('idle'); sfx('rodUp'); return true; }
 export function stopFish() { if (!F.on) return; disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; gaugeHide(); hideCard(); if (fishHooks.hud) fishHooks.hud(); }
-export function resetFish() { disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; F.raise = 0; if (rodRoot) rodRoot.visible = false; gaugeHide(); hideCard(); }
+export function resetFish() { disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; F.raise = 0; F.count = 0; if (rodRoot) rodRoot.visible = false; gaugeHide(); hideCard(); }
+
+/* 잡은 물고기 카드: 처음 잡은 종 / 기록 경신 / 기록 이하를 구분해 보여 준다 */
+function catchCard(c) {
+  const prev = records.fish[c.sp.n], rec = !prev || c.size > prev;
+  if (rec) { records.fish[c.sp.n] = c.size; saveSettings(); }
+  const note = !prev ? '처음 잡았다' : rec ? `새 기록 · 이전 ${prev}cm` : `최고 ${prev}cm`;
+  showCard(`<div style="font-size:19px;font-weight:500">${c.sp.n} ${c.size}cm</div><div style="font-size:12px;color:${rec ? '#c98a10' : '#6a7578'};margin-top:2px">${note}</div>`);
+}
 
 export function fishPress() {
   if (!F.on) return;
@@ -214,9 +221,8 @@ export function fishPress() {
       const c = F.cur;
       if (F.gr >= c.needGr || F.oks >= c.needOk) {
         F.p0.copy(F.entry); F.model.visible = true; F.jump = -1; F.count++;
-        const rec = !best[c.sp.n] || c.size > best[c.sp.n]; if (rec) best[c.sp.n] = c.size;
         ring(F.entry.x, F.entry.z, 0.9, 1.2); sfx('fishOut'); gaugeHide(); setSt('caught');
-        showCard(`<div style="font-size:19px;font-weight:500">${c.sp.n} ${c.size}cm</div>${rec ? '<div style="font-size:12px;color:#c98a10;margin-top:2px">새 기록</div>' : ''}`);
+        catchCard(c);
       } else if (F.fails >= FISHING.fails) {
         banner('줄이 풀려 도망갔다', 1.8, '#ffffff'); sfx('snap'); disposeModel(F.model); F.model = null; gaugeHide(); setSt('snap');
       }
@@ -225,7 +231,7 @@ export function fishPress() {
     case 'caught': if (F.t > 0.7) { F.p0.copy(F.model.position); hideCard(); setSt('release'); } break;
   }
 }
-/* HUD 안내 (game.js 의 아이템 상자). 끌어올리는 동안에는 게이지만 보면 되므로 안내 문구를 비운다 */
+/* HUD 안내 [아이템 상자 둘째 줄, 모바일 버튼]. 끌어올리는 동안에는 게이지만 보면 되므로 안내를 비운다 */
 export function fishHint(btn) {
   return ({
     idle: [`${btn} 던지기`, '던지기'], cast: ['던지는 중', '…'],
@@ -246,7 +252,6 @@ export function updateFish(dt) {
   if (!F.ok) return;
   updRings(dt, T);
   if (!F.on) { line.visible = false; bob.visible = false; if (rodRoot) { segs.forEach(s => { s.rotation.x = 0; }); rod.rotation.x = ROD_BASE; } return; }
-  /* 상태 시간: 던지기·기다리기·입질·챔질 시간·놓아주기가 모두 이 값으로 넘어간다 */
   F.t += dt;
   const cam = ctx.camera; rodRoot.updateMatrixWorld(true); tipObj.getWorldPosition(TIP);
   let bend = 0, lift = 0, sag = 0.02, showBob = true, end = null;

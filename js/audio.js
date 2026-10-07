@@ -563,7 +563,7 @@ function startEvents(type, timeKey) {
 }
 function playEvent(type, timeKey) {
   if (!AC || ctx.paused) return; const r = Math.random(), night = timeKey === 'night';
-  if (state.seat === 'dock' && Math.random() < 0.4) ropeCreak();
+  if (ctx.running && state.seat === 'dock' && Math.random() < 0.4) ropeCreak();
   if (type === 'waves') { if (!night && r < 0.5) gull(); else if (night && r >= 0.8 && r < 0.92) foghorn(); }
   else if (type === 'forest') {
     if (!night) { if (r < 0.55) chirp(); else if (r < 0.68) woodpecker(); }

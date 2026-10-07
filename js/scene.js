@@ -20,7 +20,7 @@ const streakTex = canvasTex(128, 16, (g, w, h) => {
 });
 const _fc = new THREE.Color(), _ag = new THREE.Color(0x2fae70);
 
-/* 카메라 아래(손, 손에 든 아이템)는 씬이 바뀌어도 살아남는다 — 조상 중에 카메라가 있으면 건너뛴다 */
+/* 카메라 아래(손, 낚싯대)는 씬이 바뀌어도 살아남는다 */
 const underCamera = o => { for (let p = o; p; p = p.parent) if (p === ctx.camera) return true; return false; };
 
 function disposeScene() {
@@ -31,7 +31,7 @@ function disposeScene() {
   if (W.shoreTex) { W.shoreTex.dispose(); W.shoreTex = null; }
   scene.traverse(o => {
     if (underCamera(o)) return;
-    /* 라이트의 그림자맵(태양 2048², 모닥불 큐브맵)과 InstancedMesh 의 인스턴스 버퍼는 dispose 를 불러야 GPU 에서 풀린다 */
+    /* 라이트의 그림자맵과 InstancedMesh 의 인스턴스 버퍼는 dispose 를 불러야 GPU 에서 풀린다 */
     if ((o.isLight || o.isInstancedMesh) && o.dispose) o.dispose();
     /* userData.shared: 여러 씬에 걸쳐 재사용하는 자원(새 지오메트리·재질)은 정리하지 않는다 */
     if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
@@ -57,16 +57,23 @@ export function rebakeEnv() {
   } catch (e) { console.warn('IBL skipped', e); }
 }
 
+/* 물 반사의 클리핑 변형 셰이더를 만든다. compile 은 clippingPlanes 를 반영하지 않으므로 반사 타깃에 한 번 실제로 그린다.
+   숨긴 물체도 잠깐 보이게 해서 함께 만든다 */
+export function compileReflection() {
+  const r = ctx.renderer, W = ctx.W, scene = ctx.scene;
+  if (!scene || !W.water || !FINE || !ctx.reflClip) return;
+  const shown = []; scene.traverse(o => { if (!o.visible) { o.visible = true; shown.push(o); } });
+  r.clippingPlanes = ctx.reflClip; r.setRenderTarget(ctx.reflRT);
+  try { r.render(scene, ctx.camera); } finally { r.setRenderTarget(null); r.clippingPlanes = []; shown.forEach(o => { o.visible = false; }); }
+}
+
 /* ── 사전 컴파일: 로딩 화면 뒤에서 셰이더를 미리 만든다 ──
-   - 숨겨진 것(불꽃·유성·오로라·스파클라 데칼·장작 패기 도구 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다
-   - 손에 드는 아이템은 임시로 한 벌 만들어 같은 프로그램을 캐시에 올린다.
-     재질을 dispose 하면 프로그램도 해제되므로 임시 아이템은 지오메트리만 정리한다
-   - 물 반사는 클리핑 평면이 켜진 셰이더 변형이 따로 있어서, 반사 타깃에 한 번 실제로 그려서 만든다
-   - ctx.compiling 동안 메인 루프는 그리지 않는다
-   - 컴파일이 겹치면(빌드를 연달아 요청) 가장 마지막 컴파일이 끝날 때만 ctx.compiling 을 푼다 */
+   숨겨진 것(불꽃·유성·오로라·장작 패기 도구 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다.
+   손에 드는 아이템은 임시로 한 벌 만들어 프로그램을 캐시에 올린다 — 재질을 dispose 하면 프로그램도 풀리므로 지오메트리만 정리한다.
+   ctx.compiling 동안 메인 루프는 그리지 않고, 컴파일이 겹치면 마지막 것이 끝날 때만 푼다 */
 let compileGen = 0;
 export function precompileScene() {
-  const scene = ctx.scene, r = ctx.renderer, W = ctx.W; if (!scene) return Promise.resolve();
+  const scene = ctx.scene, r = ctx.renderer; if (!scene) return Promise.resolve();
   const gen = ++compileGen;
   ctx.compiling = true;
   const temp = new THREE.Group();
@@ -75,12 +82,7 @@ export function precompileScene() {
   const shown = []; scene.traverse(o => { if (!o.visible) { o.visible = true; shown.push(o); } });
   const run = async () => {
     await r.compileAsync(scene, ctx.camera);
-    /* compile 은 renderer.clippingPlanes 를 반영하지 않으므로, 반사 타깃에 한 번 실제로 그려서
-       클리핑 변형 셰이더를 만든다 (로딩 화면이 덮고 있어 보이지 않는다) */
-    if (W.water && settings.reflect && FINE && ctx.reflClip) {
-      r.clippingPlanes = ctx.reflClip; r.setRenderTarget(ctx.reflRT);
-      try { r.render(scene, ctx.camera); } finally { r.setRenderTarget(null); r.clippingPlanes = []; }
-    }
+    if (settings.reflect) compileReflection();
   };
   return run().catch(e => console.warn('precompile skipped', e)).finally(() => {
     shown.forEach(o => { o.visible = false; });
@@ -128,7 +130,7 @@ function makeAurora(W, scene) {
   }
 }
 
-/* 별: 대부분 작고 소수만 밝은 분포, 미세한 색온도 차이, 밝은 별만 아주 약하게 깜빡임, 지평선 근처는 대기에 가려 어둡다 */
+/* 별: 대부분 작고 소수만 밝게, 미세한 색온도 차이, 밝은 별만 약하게 깜빡임, 지평선 근처는 어둡게 */
 function makeStars(W, scene) {
   const n = 2600, sp = new Float32Array(n * 3), sz = new Float32Array(n), ph = new Float32Array(n), tint = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
@@ -155,7 +157,7 @@ function makeStars(W, scene) {
   });
   W.stars = new THREE.Points(g, m); W.stars.frustumCulled = false; W.stars.userData.noAO = true; scene.add(W.stars);
 }
-/* 달: 노이즈 바다(mare)와 크레이터, 태양 방향에 따른 위상, 어두운 면의 지구조 */
+/* 달: 노이즈 바다(mare), 태양 방향에 따른 위상, 어두운 면의 지구조 */
 function makeMoon(W, scene) {
   const m = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
@@ -193,8 +195,7 @@ export function applyTime() {
   W.moon.position.copy(md).multiplyScalar(1500); W.moon.material.uniforms.uOp.value = mk; W.moon.material.uniforms.uLight.value.copy(sd);
   W.moonGlow.position.copy(W.moon.position); W.moonGlow.material.opacity = mk * 0.45;
   ctx.scene.fog.color.copy(cur.fog); ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
-  /* 대기 안개: 밀도는 시간대의 fogDen 에 장소의 haze 배율을 곱한 값 그대로 (예전엔 2.3 / fogFar 로 거꾸로 계산해 낮에도 뿌옇었다).
-     물 셰이더도 같은 FOG 배열을 읽는다 */
+  /* 대기 안개: 밀도 = 시간대의 fogDen × 장소의 haze. 물 셰이더도 같은 FOG 배열을 읽는다 */
   FOG[0] = L.x; FOG[1] = L.y; FOG[2] = L.z; FOG[3] = cur.insc * fade;
   FOG[4] = cur.fogDen * (W.cfg.haze || 1); FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
   _fc.copy(cur.disc).multiplyScalar(up ? 1.0 : 0.45); FOG[8] = _fc.r; FOG[9] = _fc.g; FOG[10] = _fc.b; FOG[11] = 0;
@@ -248,15 +249,14 @@ export function buildScene(bgKey) {
   disposeScene();
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
+  /* dome·domeLit·domeK: 차 실내등 (makeCar 가 채우고, game.js 가 켜고, main.js 가 밝힌다)
+     wind: 바람 0..1 (main.js 가 계산하고 셰이더·오디오가 읽는다)
+     fireBase·firePop·fireBurst: 모닥불 기본 밝기·오디오 파칙의 순간 밝기·큰 파칙의 불티 */
   const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
-    /* 차 실내등: dome = { light, lens } (makeCar 가 채운다), domeLit = 켜짐 여부 (game.js 가 바꾸고 main.js 가 밝힌다), domeK = 부드럽게 따라가는 밝기 */
     dome: null, domeLit: false, domeK: 0,
-    /* 바람(0..1): main.js 가 매 프레임 계산, 풀·나무 셰이더와 오디오가 같이 읽는다 */
     wind: { value: 0.4 },
-    /* 모닥불: fireBase = 부드럽게 따라가는 기본 밝기, firePop = 오디오 파칙이 올려 주는 순간 밝기, fireBurst = 큰 파칙 → 불티 */
     fireBase: 0, firePop: 0, fireBurst: false };
-  /* 안개 객체는 셰이더의 USE_FOG 를 켜고 fogColor 를 넘기는 용도. near·far 는 쓰이지 않고,
-     실제 농도는 util.js 의 대기 안개(FOG 배열)가 정한다 — applyTime 에서 매 프레임 갱신 */
+  /* Fog 객체는 셰이더의 USE_FOG 를 켜고 fogColor 를 넘기는 용도. 실제 농도는 util.js 의 FOG 배열이 정한다 */
   scene.fog = new THREE.Fog(cur.fog, 40, 1000);
   ctx.renderer.toneMappingExposure = cur.exposure;
 
@@ -294,8 +294,7 @@ export function buildScene(bgKey) {
   buildFish();
   if (cfg.key === 'beach') {
     const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
-    /* 유목 3개: 누운 길이의 절반만큼 자리를 차지한다 (vegetation.js 가 만든 W.space 격자 — 야자수·조개와 겹치지 않게).
-       모양은 makeDriftwood 가 매번 조금씩 다르게 만들고, 바닥이 3cm 모래에 묻히게 놓는다 */
+    /* 유목 3개: vegetation.js 의 자리 격자(W.space)로 야자수·조개와 겹치지 않게 놓고, 바닥이 3cm 모래에 묻히게 한다 */
     for (let i = 0, n = 0; i < 40 && n < 3; i++) {
       const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3), h = terrainH(x, z, cfg); if (h < 0.1) continue;
       const len = rnd(1.5, 2.6), r = len * 0.5; if (!W.space.fits(x, z, r)) continue;
@@ -309,13 +308,12 @@ export function buildScene(bgKey) {
   const table = makeTable(); table.position.set(0.6, 0, 0.5); scene.add(table);
   W.lantern = new THREE.PointLight(0xffc07a, W.lanternLit ? cur.lantern : 0, 12, 2); W.lantern.position.set(0.65, 0.75, 0.5); scene.add(W.lantern);
   const fire = makeFire(); fire.position.set(0.3, 0, -1.4); scene.add(fire);
-  /* 모닥불 그림자는 켜고 끄면 셰이더 재컴파일이 나므로 castShadow 는 고정.
-     대신 불이 꺼져 있으면 main.js 가 shadow.autoUpdate 를 꺼서 큐브맵 갱신 비용을 없앤다 */
+  /* 모닥불 그림자: castShadow 를 바꾸면 재컴파일이 나므로 고정하고, 불이 꺼져 있으면 main.js 가 큐브맵 갱신만 멈춘다 */
   W.fireLight.castShadow = settings.shadow && FINE;
   W.fireLight.shadow.autoUpdate = W.fireLit;
   const car = makeCar(); car.position.set(0, 0, 8); scene.add(car);
   makeProps();
-  /* 장작 패기 도구(도끼·장작·반쪽·조각)는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
+  /* 장작 패기 도구는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
   buildChop();
   if (cfg.snow) makeSnowCaps();
   contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(3.05, 0.15, 0.8, 0.8, 0.5);
@@ -343,7 +341,7 @@ export function buildScene(bgKey) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.ff = new THREE.Points(g, new THREE.PointsMaterial({ map: softTex, color: 0xd6ff7a, size: 0.14, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); W.ff.frustumCulled = false; scene.add(W.ff);
   }
-  /* 물 반사 렌더에서 뺄 것들 (풀·낙엽·자갈·조개·발자국) */
+  /* 물 반사에서 뺄 것들 (풀·낙엽·자갈·조개·발자국·낚싯줄 등) */
   scene.traverse(o => { if (o.userData.noRefl) W.noRefl.push(o); });
 
   W.interact = [
@@ -356,7 +354,6 @@ export function buildScene(bgKey) {
     { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
     { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기' },
     { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기' },
-    /* 차 실내등: 운전석에서 위를 올려다보면 (지붕 안쪽 가운데, 차 기준 z 0.32 → 월드 z 8.32) */
     { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.4, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기' },
   ];
   if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.4], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉아 낚시하기' });

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ctx, state } from './state.js';
+import { ctx, state, records, saveSettings } from './state.js';
 import { CHOP, CHOP_GAUGE, EYE } from './data.js';
 import { rnd, smooth, smoothM, shadowed, wrapPI } from './util.js';
 import { terrainH } from './terrain.js';
@@ -9,10 +9,7 @@ import { makeAxe, AXE_EDGE } from './props.js';
 import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner } from './gauge.js';
 
 /* ══ 장작 패기 ══
-   타이밍 게이지: 누른 순간 삼각형이 초록(성공)·금색(대성공) 구간에 있어야 한다.
-   성공 CHOP_GAUGE.hits(3)번이면 쪼개지고, 대성공은 한 번에 쪼개진다. 실패는 몇 번을 해도 쪼개지지 않는다 (벌점 없음).
-   대성공이 이어지면 "대성공 n연속". 장작 크기는 하나로 고정.
-   손맛(히트 스톱·흔들림·시선 반동·시야 펀치·나무 조각·소리)은 그대로.
+   타이밍 게이지: 성공 CHOP_GAUGE.hits 번이면 쪼개지고, 대성공은 한 번에 쪼개진다. 실패는 벌점 없이 튕기기만 한다.
    모든 메시는 그루터기에 붙은 rig 좌표계 안에 있다: 원점 = 그루터기 바닥 중심, +z = 플레이어가 서는 쪽.
    rig 는 시작할 때마다 플레이어가 다가온 방향으로 돈다 */
 
@@ -25,7 +22,7 @@ const _UP = new V(0, 1, 0);
 /* 치수 (props.js 의 그루터기와 맞춘다) */
 const STUMP_TOP = 0.32, STUMP_R = 0.19, LOG_H = 0.36, LOG_R = 0.12, LOG_TOP = STUMP_TOP + LOG_H, LOG_CY = STUMP_TOP + LOG_H / 2;
 
-/* 도끼 각도(rad): 손(피벗)을 축으로 x 회전. 클수록 머리가 위로. 기다릴 때는 살짝 든 자세(A_READY) */
+/* 도끼 각도(rad): 손(피벗)을 축으로 x 회전. 클수록 머리가 위로 */
 const A_READY = 0.5, A_UP = 1.75, A_HIT = -0.25, A_EMB = A_HIT - 0.045;
 const EDGE_Y = AXE_EDGE.y, EDGE_Z = AXE_EDGE.z;
 const edgeAt = a => ({ y: EDGE_Y * Math.cos(a) - EDGE_Z * Math.sin(a), z: EDGE_Y * Math.sin(a) + EDGE_Z * Math.cos(a) });
@@ -35,15 +32,15 @@ const FOLLOW_D = new V(0, -0.05, -0.08);
 let A_FOLLOW = A_HIT - 0.4;
 for (let a = A_HIT; a > -1.4; a -= 0.005) if (PIVOT.y + FOLLOW_D.y + edgeAt(a).y <= STUMP_TOP + 0.012) { A_FOLLOW = a; break; }
 
-/* 시간(초): 누르면 번쩍 들었다(T_RAISE) 내려친다(T_STRIKE). 판정은 누른 순간에 이미 끝나 있다 */
+/* 누르면 번쩍 들었다(T_RAISE) 내려친다(T_STRIKE). 판정은 누른 순간에 끝나 있다 */
 const T_RAISE = 0.12, T_STRIKE = 0.09;
 
-/* game.js 가 연결한다: 그만두기 완료, 안내 문구, HUD 갱신 */
+/* game.js 가 연결한다 */
 export const chopHooks = { stop: null, toast: null, hud: null };
 
 const C = {
   on: false, st: 'off', a: A_READY, t: 0, from: A_READY, pk: 0, pkFrom: 0, stop: 0, wantStop: false,
-  G: null, res: null, hits: 0, combo: 0, best: 0, log: null, nextLogT: 0,
+  G: null, res: null, hits: 0, combo: 0, log: null, nextLogT: 0,
   eye: new V(), fwd: new V(), right: new V(), clock: 0, trauma: 0, kick: 0, kickV: 0, fov: 0,
 };
 const P = { x: 0, z: 0, yaw: 0 };
@@ -57,9 +54,9 @@ function dust(x, y, z, n, op) {
 function setPile() { R.pile.set(CHOP.pile[0] - CHOP.stump[0], 0, CHOP.pile[1] - CHOP.stump[1]).applyAxisAngle(_UP, -R.rig.rotation.y); }
 
 /* ── 장작 윗면의 금: 도끼날 방향(rig z)을 따라 들쭉날쭉하게 갈라진다 ──
-   장작마다 시드로 갈라짐 경로가 정해지고, 성공 단계에 따라 보이는 길이·폭이 늘어난다.
-   1단계: 가운데만 짧게 / 2단계: 양끝까지 벌어지고 곁금이 생기며 옆면으로도 갈라져 내려간다.
-   어두운 틈 둘레에 밝은 생나무 테두리를 깔아 실제로 벌어진 것처럼 보이게 한다 */
+   장작마다 시드로 경로가 정해지고, 성공 단계에 따라 길이·폭이 늘어난다.
+   1단계: 가운데만 짧게 / 2단계: 양끝까지 + 곁금 + 옆면으로 갈라져 내려감.
+   어두운 틈 둘레에 밝은 생나무 테두리를 깔아 벌어진 것처럼 보이게 한다 */
 function crackPath(seed) {
   let s = Math.floor(seed * 2147483646) + 1; const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
   const pts = [], N = 28; let x = (r() - 0.5) * 0.01, dx = 0;
@@ -178,7 +175,7 @@ export function startChop(px, pz, free) {
   sfx('chopPick');
   return true;
 }
-/* 클릭·스페이스: 장작이 놓여 있고 도끼가 준비 자세일 때만 판정한다 */
+/* 장작이 놓여 있고 도끼가 준비 자세일 때만 판정한다 */
 export function chopPress() {
   if (!C.on || C.st !== 'ready' || !C.log || !C.log.landed) return;
   const r = gaugeJudge(C.G); if (!r) return;
@@ -194,7 +191,7 @@ export function resetChop() {
   if (ctx.W.stumpAxe) ctx.W.stumpAxe.visible = true;
   gaugeHide();
 }
-export function chopStats() { return { count: ctx.W.splitCount || 0, best: C.best }; }
+export function chopStats() { return { count: ctx.W.splitCount || 0, best: records.chopBest }; }
 
 /* ── 매 프레임 ── */
 export function updateChop(dt) {
@@ -261,7 +258,8 @@ function impact() {
   C.stop = great ? 0.09 : 0.055; C.trauma = Math.min(1, C.trauma + (great ? 0.5 : 0.28));
   C.kickV -= great ? 0.7 : 0.45; C.fov = great ? -2.4 : -1.1; L.sqV -= great ? 3 : 2;
   if (great) {
-    C.combo++; C.best = Math.max(C.best, C.combo);
+    C.combo++;
+    if (C.combo > records.chopBest) { records.chopBest = C.combo; saveSettings(); }
     if (C.combo >= 2) banner(`대성공 ${C.combo}연속`, 1.5);
     if (navigator.vibrate) navigator.vibrate(30);
     split(1.3); return;

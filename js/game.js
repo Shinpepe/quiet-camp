@@ -4,20 +4,20 @@ import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DE
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
-import { buildScene, precompileScene, rebakeEnv } from './scene.js';
+import { buildScene, precompileScene, rebakeEnv, compileReflection } from './scene.js';
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
 import { beginFish, stopFish, resetFish, fishPress, fishActive, fishHint, fishHooks, fishCount } from './fish.js';
 import { hideAllFx, gaugeHide } from './gauge.js';
 
-/* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기 ──
-   장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다 */
+/* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
+   장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다 ── */
 
+const FINE = matchMedia('(pointer:fine)').matches;
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
-/* 마시기: mouth = 이번 모금에서 잔이 입에 닿았는지, leftLips = 잔이 입술에서 떨어졌는지,
-   lastGulp = 마지막 '꿀꺽' 시각(연달아 겹치지 않게), nextSwallow = 길게 마실 때 다음 '꿀꺽' 시각 */
+/* 마시기: mouth = 잔이 입에 닿았는지, leftLips = 입술에서 떨어졌는지, lastGulp·nextSwallow = '꿀꺽' 시각 */
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
 const canvas = () => ctx.renderer.domElement;
@@ -25,9 +25,7 @@ const locked = () => document.pointerLockElement === canvas();
 export const isNightClock = c => c < 0.22 || c > 0.8;
 const NITEMS = Object.keys(ITEMS).length;
 
-/* 오브젝트 하위의 지오메트리·재질을 GPU 에서 해제한다.
-   텍스처는 건드리지 않는다 — 아이템의 글로우 맵(softTex) 등은 여러 곳이 공유한다.
-   셰이더 프로그램은 사전 컴파일용 임시 아이템의 재질이 계속 붙잡고 있어서, 다시 꺼낼 때 재컴파일이 일어나지 않는다 */
+/* 지오메트리·재질을 GPU 에서 해제한다. 텍스처(softTex 등)는 여러 곳이 공유하므로 건드리지 않는다 */
 function disposeTree(root) {
   root.traverse(o => {
     if (o.geometry) o.geometry.dispose();
@@ -35,7 +33,7 @@ function disposeTree(root) {
   });
 }
 
-/* 모바일 가상 조이스틱 표시 */
+/* 모바일 가상 조이스틱 */
 const joy = $('#joy'), joyStick = joy && joy.querySelector('.stick');
 const moveJoy = (dx, dy) => { if (joyStick) joyStick.style.transform = `translate(${dx * 28}px, ${dy * 28}px)`; };
 const showJoy = (x, y) => { if (!joy) return; joy.style.left = x + 'px'; joy.style.top = y + 'px'; joy.classList.add('on'); moveJoy(0, 0); };
@@ -48,30 +46,30 @@ function bindToggle(id, key, onChange) {
   el.onclick = () => { settings[key] = !settings[key]; paint(); onChange(settings[key]); saveSettings(); }; paint();
 }
 
-/* 포인터 잠금 요청. 브라우저가 거절하면(ESC 직후 등) "화면을 클릭하면 시작합니다" 안내를 띄운다 */
+/* 포인터 잠금. 브라우저가 거절하면(ESC 직후 등) 클릭 안내를 띄운다 */
 function lock() {
   if (isTouch) return;
   const p = canvas().requestPointerLock(); if (p && p.catch) p.catch(() => { $('#lockmsg').style.opacity = 0.85; });
 }
 
-/* 타이밍 입력(장작 패기·낚시) 중인가 */
 const timingMode = () => state.mode === 'chop' || fishActive();
 function timingPress() { if (cam.t < 1 || ctx.paused) return; if (state.mode === 'chop') chopPress(); else if (fishActive()) fishPress(); }
 
 export function bindInput() {
   chopHooks.stop = endChop; chopHooks.toast = showToast; chopHooks.hud = updateHUD;
   fishHooks.toast = showToast; fishHooks.hud = updateHUD;
-  /* 첫 입력에서 오디오를 켜고 메뉴 배경음을 작게 시작한다 (씬이 아직 없으면 main.js 의 빌드 완료 콜백이 대신 시작) */
+  /* 첫 입력에서 오디오를 켠다. 씬이 아직 없으면 main.js 의 빌드 완료 콜백이 메뉴 배경음을 시작한다 */
   const boot = () => { initAudio(); resumeAudio(); if (!ctx.running) menuAmbience(state.bg); };
   addEventListener('pointerdown', boot, { once: true }); addEventListener('keydown', boot, { once: true });
 
   addEventListener('keydown', e => {
     keys[e.code] = true;
     if (e.repeat) return;
-    if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) startGame(); return; }
-    if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape' || e.code === 'Space') resume(); return; }
+    /* Enter 의 기본 동작(포커스된 버튼의 click)을 막아 두 번 실행되지 않게 한다 */
+    if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) { e.preventDefault(); startGame(); } return; }
+    if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape' || e.code === 'Space') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
-    /* 트렁크가 열려 있으면 포인터 잠금이 풀려 있어 ESC 가 일시정지로 이어지지 않는다 → 트렁크를 닫는다 */
+    /* 트렁크가 열려 있으면 포인터 잠금이 풀려 있어 ESC 가 일시정지로 이어지지 않는다 */
     if (e.code === 'Escape' && state.mode === 'trunk') { closeTrunk(); return; }
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyP') takePhoto();
@@ -94,9 +92,9 @@ export function bindInput() {
   $('#pause').addEventListener('click', e => { if (e.target === $('#pause')) resume(); });
   $('#pausebtn').style.display = isTouch ? '' : 'none';
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
-  /* 잠자는 중에 메뉴로 나가도 페이드가 검게 남지 않고, 메뉴 프리뷰의 시간도 다시 흐르도록 mode 를 되돌린다.
-     땅에 꽂아 둔 스파클라도 치운다 — 남겨 두면 메뉴 프리뷰에서 계속 타면서 소리가 난다. 장작 패기·낚시 중이었다면 정리한다 */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
+  /* 메뉴로 나가기: 잠자기 페이드·꽂아 둔 스파클라·장작 패기·낚시를 정리하고, 자리는 운전석으로 되돌린다
+     (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다) */
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   $('#mAct').onclick = interact;
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다 */
@@ -104,7 +102,7 @@ export function bindInput() {
   ms.onpointerdown = e => { e.preventDefault(); try { ms.setPointerCapture(e.pointerId); } catch (_) {} useItem(); };
   ms.onpointerup = ms.onpointercancel = endSip; ms.oncontextmenu = e => e.preventDefault();
   $('#start').onclick = startGame;
-  /* 슬라이더: 저장된 값으로 위치·라벨을 먼저 맞추고, 바뀔 때마다 같은 키의 다른 슬라이더(메뉴/일시정지)도 같이 움직인 뒤 저장 */
+  /* 슬라이더: 같은 키의 메뉴·일시정지 슬라이더를 함께 움직이고 저장한다 */
   const bindRange = (id, key, fmt, apply) => {
     const el = $('#' + id); el.dataset.k = key; el.value = settings[key];
     const paint = () => document.querySelectorAll('[id^=' + key + 'V]').forEach(l => { l.textContent = fmt(settings[key]); });
@@ -121,10 +119,17 @@ export function bindInput() {
   });
   bindToggle('bloom', 'bloom', on => ctx.post.setBloom(on));
   bindToggle('ao', 'ao', on => ctx.post.setAO(on));
-  bindToggle('reflect', 'reflect', on => { if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on && !isTouch ? 1 : 0; });
+  /* 물 반사: 켜는 순간 로딩 화면 뒤에서 클리핑 셰이더를 만들어 두면, 시작할 때 씬을 다시 빌드하지 않는다 */
+  bindToggle('reflect', 'reflect', on => {
+    if (ctx.W.water) ctx.W.water.material.uniforms.uReflect.value = on && FINE ? 1 : 0;
+    if (on && FINE && ctx.W.water && !builtReflect && !ctx.compiling) {
+      $('#loading').classList.add('on');
+      setTimeout(() => { compileReflection(); builtReflect = true; $('#loading').classList.remove('on'); }, 40);
+    }
+  });
   renderMenu();
 }
-/* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만 (하늘은 볼 수 있다) */
+/* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만 */
 function look(dx, dy, s) {
   player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3);
   if (state.mode === 'chop' && cam.t >= 1) {
@@ -168,8 +173,11 @@ function standUp() {
   if (state.seat === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (state.seat === 'tent') sfx('zipper', 'close'); else sfx('stand');
   player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); setIndoor(false);
 }
-/* 부두 끝에 앉으면 손에 든 것을 내려놓고 낚싯대를 든다 */
-function startFishing() { if (state.item) putBack(); sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다'); }
+/* 부두 끝에 앉으면 손에 든 것을 내려놓고 낚싯대를 든다. 타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙) */
+function startFishing() {
+  if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
+  if (state.item) putBack(); sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다');
+}
 function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx(W.fireLit ? 'fireOn' : 'fireOff'); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); }
 const LAMP = { lantern: { flag: 'lanternLit', name: '랜턴' }, tentLamp: { flag: 'tentLampLit', name: '텐트 랜턴' }, dome: { flag: 'domeLit', name: '실내등' } };
 function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx(k === 'dome' ? 'ui' : ctx.W[L.flag] ? 'lampOn' : 'lampOff'); showToast(josa(L.name, '을', '를') + (ctx.W[L.flag] ? ' 켰다' : ' 껐다')); }
@@ -197,7 +205,7 @@ function act(id) {
   }
 }
 
-/* ── 장작 패기 시작·끝: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ── */
+/* ── 장작 패기: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ── */
 function beginChop() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
   if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('장작을 팰 자리가 없다'); return; }
@@ -221,9 +229,9 @@ function renderTrunk() {
 }
 const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/></svg>';
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); sfx('pick', type); showToast(josa(ITEMS[type].name, '을', '를') + ' 챙겼다'); }
-/* 손에 든 것을 내려놓는다. 떼어 내기 전에 GPU 자원을 해제한다 (예전엔 바꿀 때마다 지오메트리·재질이 쌓였다) */
+/* 손에 든 것을 내려놓는다. 떼어 내기 전에 GPU 자원을 해제한다 */
 export function putBack() { state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; anim.mouth = false; }
-/* 땅에 꽂힌 스파클라를 모두 치운다 (메뉴로 나갈 때, 잠들어 시간이 건너뛸 때, 같은 씬으로 다시 시작할 때) */
+/* 땅에 꽂힌 스파클라를 모두 치운다 (메뉴로 나갈 때, 잠들 때, 같은 씬으로 다시 시작할 때) */
 function clearPlanted() {
   const W = ctx.W; if (!W.planted) return;
   W.planted.forEach(s => { ctx.scene.remove(s.g); disposeTree(s.g); });
@@ -236,9 +244,8 @@ export function resetHand() {
   else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); }
 }
 
-/* ── 손에 든 것 사용: 마실 것·담배는 길게, 스파클라는 클릭으로 점화 → 다시 클릭으로 땅에 꽂기 ──
-   장작을 패거나 낚시하는 중이면 클릭이 타이밍 입력이 된다.
-   마시는 소리는 누르는 순간이 아니라 잔이 입술에서 떨어질 때(길게 마시면 그 사이에도) main.js 가 '꿀꺽'으로 낸다 */
+/* ── 손에 든 것 사용: 마실 것·담배는 길게, 스파클라는 클릭으로 점화 → 다시 클릭으로 땅에 꽂기.
+   장작 패기·낚시 중이면 클릭이 타이밍 입력. 마시는 소리('꿀꺽')는 main.js 가 잔의 움직임에 맞춰 낸다 ── */
 function useItem() {
   if (timingMode()) { timingPress(); return; }
   if (!state.item || !ctx.W.item || state.mode === 'trunk' || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
@@ -254,8 +261,8 @@ function igniteSparkler() {
   ud.igniting = true; sfx('lighter');
   setTimeout(() => { if (ctx.W.item !== it || !ctx.running) return; ud.igniting = false; ud.setLit(true); sfx('sparkOn'); updateHUD(); }, 450);
 }
-/* 타는 스파클라를 앞쪽 땅에 꽂는다 — 서 있을 때만. 남은 양을 그대로 이어받아 계속 탄다.
-   그룹은 지면 기울기에 맞춰 세우고(발밑 데칼이 땅에 붙게), 스틱 자체만 살짝 비뚤게 */
+/* 타는 스파클라를 앞쪽 땅에 꽂는다 (서 있을 때만). 남은 양을 이어받아 계속 탄다.
+   그룹은 지면 기울기에 맞춰 세우고(발밑 데칼이 땅에 붙게), 스틱만 살짝 비뚤게 */
 const _UP = new THREE.Vector3(0, 1, 0), _nrm = new THREE.Vector3();
 function plantSparkler() {
   const it = ctx.W.item, ud = it.userData; if (!ud.lit) return;
@@ -287,7 +294,7 @@ function startSleep() {
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
   $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('bag');
 }
-/* 잠자기 화면을 정리한다. 잠자는 도중(페이드가 검은 상태)에 불렸다면 페이드도 걷어 낸다 */
+/* 잠자기 화면을 정리한다. 잠자는 도중(페이드가 검은 상태)이었다면 페이드도 걷어 낸다 */
 function endSleepUI() {
   const was = sleep.on; sleep.on = false; sleep.phase = ''; sleep.t = 0;
   $('#sleep').classList.remove('on');
@@ -318,12 +325,12 @@ export function updateSleep(dt) {
 
 export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
 export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
-/* 아이템 상자: 첫 줄 = 이름, 둘째 줄 = 안내·기록. 장작 패기는 "도끼" 아래에 "쪼갠 장작 N / 최고 N연속" */
+/* 아이템 상자: 첫 줄 = 이름(+ 기록), 둘째 줄 = 조작 안내 */
 export function updateHUD() {
   updateCaption();
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
   ib.classList.toggle('on', chop || fish || (!!state.item && state.mode !== 'trunk' && state.mode !== 'sleep'));
-  /* 기록은 이름 줄 안의 둘째 줄로 — .hn(조작 안내)은 모바일 세로에서 숨겨질 수 있다 */
+  /* 기록은 이름 줄 안에 넣는다 — .hn 은 모바일 세로에서 숨겨진다 */
   const sub = t => `<span style="display:block;font-size:.82em;opacity:.8;margin-top:2px">${t}</span>`;
   if (chop) {
     const s = chopStats();
@@ -355,9 +362,9 @@ export function updatePrompt() {
 function showPause() { if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock); }
 function hidePause() { if (ctx.paused) sfx('uiClose'); ctx.paused = false; $('#pause').classList.remove('on'); }
 
-/* ── 사진: 지금 보이는 화면을 그대로 담고, 아래에 장소와 시각 캡션을 얹는다.
-   WebGL 캔버스는 화면에 표시된 뒤 버퍼가 비워질 수 있어서, 같은 태스크 안에서 한 프레임을 다시 그리고 곧바로 복사한다.
-   인코딩은 toBlob 으로 비동기 처리하고, 모바일은 공유 시트를 먼저 시도한 뒤 안 되면 내려받기로 넘어간다 ── */
+/* ── 사진: 지금 화면에 장소·시각 캡션을 얹어 저장한다.
+   WebGL 버퍼는 표시 뒤 비워질 수 있어 같은 태스크 안에서 한 프레임을 다시 그리고 바로 복사한다.
+   모바일은 공유 시트를 먼저 시도하고, 안 되면 내려받기 ── */
 let shooting = false;
 function takePhoto() {
   if (shooting || !ctx.running || ctx.paused || state.mode === 'sleep') return;
@@ -422,7 +429,7 @@ function sceneReady(bg) {
   const W = ctx.W;
   return doneGen === buildGen && !ctx.compiling && !!ctx.scene && !!W.cfg && W.cfg.key === bg && !(settings.reflect && !builtReflect);
 }
-/* 프리뷰 씬을 재사용할 때 게임 시작 상태로 되돌린다 (새로 빌드했을 때와 같은 출발점) */
+/* 프리뷰 씬을 재사용할 때 새로 빌드한 것과 같은 출발점으로 되돌린다 */
 function resetSceneForStart() {
   const W = ctx.W, tm = W.tm;
   W.fireLit = tm.stars > 0.1; W.lanternLit = tm.lantern > 0.5; W.tentLampLit = tm.tentLamp > 0.5;
