@@ -11,12 +11,20 @@ const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 const lathe = (pts, seg) => new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg || 28);
 function sagPlane(w, h, sag, seg = 8) { const g = new THREE.PlaneGeometry(w, h, seg, seg); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const u = p.getX(i) / w + 0.5, v = p.getY(i) / h + 0.5; p.setZ(i, sag * Math.sin(Math.PI * u) * Math.sin(Math.PI * v)); } g.computeVertexNormals(); return g; }
 
-/* ── 모양 도우미: 아이스박스·침낭·베개·배낭이 같이 쓴다 ── */
+/* ── 모양 도우미: 아이스박스·침낭·베개·배낭·차 실내·유목이 같이 쓴다 ── */
 const spow = (v, s) => Math.sign(v) * Math.pow(Math.abs(v), s);
 const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 /* 16진 색 → 정점색. 색 관리가 켜져 있어 sRGB → 선형으로 바뀌므로 화면에서는 적은 그대로의 색으로 보인다 */
 const hexRGB = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
+/* 가장 낮은 점을 y 0 에, 가로 가운데를 원점에 — 바닥에 바로 놓인다 */
+function sitOnGround(g) { g.computeBoundingBox(); const b = g.boundingBox; g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); return g; }
+/* 모서리가 둥근 직사각형 Shape (가운데 원점) */
+function roundRectShape(w, h, r) {
+  const s = new THREE.Shape(), x = -w / 2, y = -h / 2;
+  s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r); s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r); s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y); return s;
+}
 
 /* 둥근 상자: 평평한 면은 완전히 평평하고, 모서리 반지름 r 안에만 정점을 모아 둥글게 깎는다. 원점 = 바닥 가운데.
    노멀은 "안쪽 상자에서 표면까지의 방향"을 그대로 넣어 면과 면 사이에 이음매가 생기지 않는다.
@@ -203,6 +211,25 @@ function makeSleepingBag(M) {
   return g;
 }
 
+/* ── 텐트 입구: 앞을 막지 않는다 — 문 천 두 장을 커튼처럼 바닥부터 꼭대기까지 양옆으로 걷어 모아 끈으로 묶었다.
+   걷어 모은 천은 아래가 두툼하고 위로 갈수록 가늘어져 꼭대기에서 만나며, 주름이 잡혀 있고, 묶은 자리가 잘록하다.
+   M: door(문 천 — 텐트 색을 따른다) · cord(묶은 끈) ── */
+function addTentDoor(g, M, Wd, H, L) {
+  const V3 = THREE.Vector3, zf = -L / 2 - 0.03;
+  [-1, 1].forEach(s => {
+    const a = new V3(s * 1.08, 0.04, zf), b = new V3(s * 0.05, 1.63, zf), T = b.clone().sub(a).normalize(), curve = new THREE.LineCurve3(a, b);
+    const NU = 48, NV = 10, geo = new THREE.TubeGeometry(curve, NU, 1, NV, false), p = geo.attributes.position, P = new V3();
+    for (let i = 0; i <= NU; i++) {
+      const t = i / NU; curve.getPointAt(t, P);
+      const r = (0.075 - 0.045 * t) * (1 + 0.22 * Math.abs(Math.sin(t * Math.PI * 7))) * (1 - 0.45 * Math.exp(-(((t - 0.42) / 0.05) ** 2))) * Math.pow(Math.min(1, t / 0.04, (1 - t) / 0.04), 0.5);
+      for (let j = 0; j <= NV; j++) { const k = i * (NV + 1) + j; p.setXYZ(k, P.x + (p.getX(k) - P.x) * r, P.y + (p.getY(k) - P.y) * r, P.z + (p.getZ(k) - P.z) * r * 0.55); }
+    }
+    geo.computeVertexNormals(); g.add(new THREE.Mesh(geo, M.door));
+    const tp = a.clone().lerp(b, 0.42);
+    g.add(bar(tp.clone().addScaledVector(T, -0.01).toArray(), tp.clone().addScaledVector(T, 0.01).toArray(), 0.045, M.cord, 12));
+  });
+}
+
 export function makeTent() {
   const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
   /* 천 색은 applyGear 가 정한다 (여기서는 흰색으로 만들어 두고 등록만) */
@@ -210,7 +237,7 @@ export function makeTent() {
   const backInM = cloth(0xffffff, 4, { side: THREE.BackSide }), doorM = cloth(0xffffff, 2);
   /* 텐트 랜턴이 켜지면 main.js 가 이 천들의 emissive 를 올린다 */
   W.tentCloth = [clothM, flyM, backM];
-  /* [재질, 원래 주황 대비 밝기 비율(선형)]: 몸체 / 플라이 / 뒷면 / 안감 / 뒷면 안쪽 / 문 테두리 */
+  /* [재질, 원래 주황 대비 밝기 비율(선형)]: 몸체 / 플라이 / 뒷면 / 안감 / 뒷면 안쪽 / 문 천 */
   W.tentMats = [[clothM, 1], [flyM, 0.74], [backM, 0.65], [liningM, 0.79], [backInM, 0.53], [doorM, 0.89]];
   const slab = (m, halfW, h, y0, len, sag, inner) => { const side = Math.hypot(halfW, h), ang = Math.atan2(h, halfW); [-1, 1].forEach(sx => {
     const geo = sagPlane(side, len, -sag, 10); geo.rotateX(-Math.PI / 2); const w = new THREE.Mesh(geo, m); w.position.set(sx * halfW / 2, y0 + h / 2, 0); w.rotation.z = -sx * ang; g.add(w);
@@ -223,7 +250,8 @@ export function makeTent() {
   const backGeo = new THREE.ShapeGeometry(sh);
   const back = new THREE.Mesh(backGeo, backM); back.position.z = L / 2; g.add(back);
   const backIn = new THREE.Mesh(backGeo, backInM); backIn.position.z = L / 2 - 0.035; g.add(backIn); linings.push(backIn);
-  [-1, 1].forEach(sx => g.add(bar([sx * 1.05, 0.22, -L / 2 - 0.03], [sx * 0.38, 1.17, -L / 2 - 0.03], 0.045, doorM, 8)));
+  /* 입구: 양옆으로 걷어 모아 묶은 문 천 (안에서 밖이 훤히 보인다) */
+  addTentDoor(g, { door: doorM, cord }, Wd, H, L);
   /* 바닥은 뒷면 삼각형(z=L/2)보다 3cm 짧게 — 같은 평면에서 만나면 뒤쪽 아래가 깜빡인다 */
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd - 0.04, 0.05, L - 0.06), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
   /* 침낭·베개: 바닥 윗면(y 0.05)에 놓는다. 머리 쪽이 텐트 뒤(+z) */
@@ -291,7 +319,91 @@ export function makeFire() {
   return g;
 }
 
-/* ── 자동차: 왜건 (앞이 -z). 전장 4.63 = 보닛 1.2 / 캐빈 2.73 / 짐칸 0.7. 뒷좌석 무릎 공간 37cm, 짐칸은 루프 아래로 이어진다.
+/* ── 차 실내: 차 기준 좌표(앞 = −z). makeCar 가 차 그룹에 붙인다 ──
+   앞좌석은 방석 가운데 z 0.08 (운전석 시점 z 0.15 는 그대로 — 머리가 머리받침 바로 앞에 오는 자세), 뒷좌석 z 1.3.
+   좌석: 받침 + 방석(양옆 볼스터) + 누빔 패널 + 뒤로 기운 60cm 등받이(볼스터가 앞으로 감쌈) + 머리받침.
+   대시보드: 윗면이 앞유리 쪽으로 보닛 높이(1.14)까지 낮아져 앞유리 밑단과 만난다. 송풍구는 양 끝에 두 개.
+   센터 콘솔: 앞쪽 기어 레버 → 20cm 띄워 뒤로 실제로 파인 컵홀더 두 개 → 팔걸이.
+   지붕 안쪽 가운데에 실내등 — g.userData.dome = { light, lens } 를 main.js 가 W.domeLit 에 맞춰 밝힌다 */
+function makeCarInterior(M) {
+  const g = new THREE.Group(), D = -0.45, P = 0.45, FZ = 0.08;
+  const add = (geo, mat, x, y, z, rx, ry, rz, parent) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, rz || 0); (parent || g).add(m); return m; };
+  const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  const seat = (x, z, w, heads, inserts) => {
+    const hw = w / 2, side = px => Math.pow(Math.min(1, Math.abs(px) / hw), 4);
+    add(B(w - 0.1, 0.1, 0.4), M.frame, x, 0.56, z);
+    add(roundedBox(w, 0.17, 0.5, 0.05, { warp: (px, py, pz, t) => [px, py + (t > 0.5 ? 0.025 * side(px) : 0), pz] }), M.seat, x, 0.6, z);
+    inserts.forEach(ix => add(roundedBox(0.3, 0.02, 0.42, 0.01), M.insert, x + ix, 0.762, z - 0.01));
+    const bk = new THREE.Group(); bk.position.set(x, 0.74, z + 0.28); bk.rotation.x = 0.14; g.add(bk);
+    add(roundedBox(w, 0.6, 0.14, 0.05, { warp: (px, py, pz) => [px, py, pz - 0.03 * side(px)] }), M.seat, 0, 0, 0, 0, 0, 0, bk);
+    inserts.forEach(ix => add(roundedBox(0.3, 0.44, 0.02, 0.01), M.insert, ix, 0.08, -0.072, 0, 0, 0, bk));
+    heads.forEach(hx => {
+      add(roundedBox(0.27, 0.17, 0.1, 0.04), M.seat, hx, 0.65, 0.01, 0, 0, 0, bk);
+      [-0.08, 0.08].forEach(dx => add(new THREE.CylinderGeometry(0.008, 0.008, 0.06, 6), M.chrome, hx + dx, 0.625, 0.01, 0, 0, 0, bk));
+    });
+  };
+  seat(D, FZ, 0.5, [0], [0]); seat(P, FZ, 0.5, [0], [0]); seat(0, 1.3, 1.4, [-0.4, 0.4], [-0.38, 0.38]);
+  /* 바닥 매트: 앞은 발 놓는 곳, 뒤는 앞좌석과 뒷좌석 사이 */
+  [D, P].forEach(x => { add(roundedBox(0.45, 0.012, 0.45, 0.005), M.mat, x, 0.51, -0.42); add(roundedBox(0.45, 0.012, 0.4, 0.005), M.mat, x, 0.51, 0.78); });
+  /* 센터 스택 아랫부분 (대시보드와 콘솔을 잇는다) + 콘솔 받침 */
+  add(roundedBox(0.3, 0.32, 0.26, 0.03), M.trim, 0, 0.5, -0.6);
+  add(roundedBox(0.3, 0.23, 0.95, 0.03), M.trim, 0, 0.51, 0.02);
+  /* 콘솔 윗판(z −0.42 ~ 0.12): 컵홀더 구멍 두 개가 7cm 깊이로 뚫린 판. Shape 의 y 는 −z 방향 (윗판 가운데 z −0.15 기준) */
+  const top = roundRectShape(0.3, 0.54, 0.03);
+  [-0.07, 0.07].forEach(x => { const h = new THREE.Path(); h.absarc(x, -0.17, 0.045, 0, Math.PI * 2, true); top.holes.push(h); });
+  const plate = new THREE.ExtrudeGeometry(top, { depth: 0.07, bevelEnabled: false, curveSegments: 20 }); plate.rotateX(-Math.PI / 2);
+  add(plate, M.trim, 0, 0.74, -0.15);
+  [-0.07, 0.07].forEach(x => {
+    add(new THREE.CylinderGeometry(0.044, 0.044, 0.004, 24), M.black, x, 0.742, 0.02);                  // 바닥 고무 깔판
+    add(new THREE.TorusGeometry(0.046, 0.004, 6, 28), M.black, x, 0.811, 0.02, Math.PI / 2);            // 가장자리 고무 테
+  });
+  /* 기어 레버와 부츠 (z −0.3 — 컵홀더와 20cm 떨어져 있다) */
+  add(new THREE.CylinderGeometry(0.03, 0.05, 0.04, 12), M.black, 0, 0.83, -0.3);
+  g.add(bar([0, 0.82, -0.3], [0.02, 0.97, -0.36], 0.012, M.chrome, 8)); add(new THREE.SphereGeometry(0.032, 12, 10), M.black, 0.02, 0.98, -0.36);
+  /* 팔걸이 (컵홀더 뒤) */
+  add(roundedBox(0.3, 0.08, 0.36, 0.03), M.seat, 0, 0.74, 0.3);
+  /* 대시보드: 윗면이 앞유리 쪽으로 보닛 높이(1.14)까지 낮아진다 */
+  add(roundedBox(1.8, 0.36, 0.42, 0.06, { warp: (x, y, z, t) => [x, y - (t > 0.5 ? 0.04 * Math.max(0, -z) / 0.21 : 0), z] }), M.dark, 0, 0.82, -0.9);
+  /* 운전석 계기판 + 게이지 두 개 */
+  add(roundedBox(0.42, 0.15, 0.02, 0.01), M.black, D, 0.99, -0.69);
+  [D - 0.1, D + 0.1].forEach(x => add(new THREE.CylinderGeometry(0.052, 0.052, 0.01, 24), M.ivory, x, 1.065, -0.678, Math.PI / 2));
+  /* 가운데 내비 */
+  add(roundedBox(0.47, 0.27, 0.025, 0.012), M.black, 0, 0.86, -0.69);
+  add(new THREE.PlaneGeometry(0.42, 0.22), M.navi, 0, 0.995, -0.676);
+  /* 송풍구: 양 끝에 하나씩 (날개 세 줄) */
+  [-0.78, 0.78].forEach(x => {
+    add(roundedBox(0.1, 0.05, 0.02, 0.01), M.black, x, 1.08, -0.69);
+    [1.093, 1.105, 1.117].forEach(y => add(B(0.088, 0.004, 0.006), M.trim, x, y, -0.68));
+  });
+  /* 조수석 글로브박스: 내비와 송풍구 사이 */
+  add(roundedBox(0.38, 0.15, 0.02, 0.012), M.trim, 0.52, 0.86, -0.69);
+  add(roundedBox(0.08, 0.015, 0.012, 0.005), M.chrome, 0.52, 0.985, -0.678);
+  /* 핸들: 기둥, 림, 가운데 허브, 살 세 개 + 페달 */
+  g.add(bar([D, 0.98, -0.7], [D, 1.05, -0.45], 0.03, M.dark, 8));
+  add(new THREE.TorusGeometry(0.18, 0.022, 10, 32), M.dark, D, 1.05, -0.45, -0.45);
+  add(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 16), M.dark, D, 1.05, -0.45, Math.PI / 2 - 0.45);
+  [[D - 0.18, 1.05, -0.45], [D + 0.18, 1.05, -0.45], [D, 0.888, -0.372]].forEach(p => g.add(bar([D, 1.05, -0.45], p, 0.012, M.dark, 6)));
+  [D - 0.1, D + 0.1].forEach(x => add(B(0.08, 0.12, 0.02), M.black, x, 0.6, -0.85, -0.5));
+  /* 햇빛 가리개 두 장, 룸미러 */
+  [D, P].forEach(x => add(roundedBox(0.4, 0.025, 0.18, 0.01), M.trim, x, 1.775, -0.55));
+  g.add(bar([0, 1.805, -0.58], [0, 1.71, -0.58], 0.008, M.black, 6));
+  add(roundedBox(0.26, 0.07, 0.03, 0.015), M.black, 0, 1.64, -0.57);
+  /* 문 안쪽: 팔걸이(앞·뒤), 문 손잡이 */
+  [-1, 1].forEach(s => {
+    [[0.15, 0.55], [1.15, 0.5]].forEach(([z, l]) => add(roundedBox(0.09, 0.05, l, 0.02), M.trim, s * 0.8, 0.995, z));
+    add(roundedBox(0.03, 0.03, 0.12, 0.01), M.chrome, s * 0.78, 1.105, -0.2);
+  });
+  /* 조수석에 접어 둔 담요 */
+  add(roundedBox(0.36, 0.05, 0.32, 0.02), M.blanket, P, 0.775, FZ - 0.02, 0, 0.2);
+  /* 실내등: 지붕 안쪽(헤드라이너 아랫면 y 1.805) 가운데. 빛 닿는 거리 3.2m — 차 안과 바로 주변만 비춘다. 그림자는 만들지 않는다 */
+  add(roundedBox(0.24, 0.025, 0.13, 0.012), M.trim, 0, 1.78, 0.32);
+  const lens = add(roundedBox(0.17, 0.012, 0.08, 0.006), M.lens, 0, 1.772, 0.32);
+  const light = new THREE.PointLight(0xffe8c8, 0, 3.2, 2); light.position.set(0, 1.68, 0.32); g.add(light);
+  g.userData.dome = { light, lens };
+  return g;
+}
+
+/* ── 자동차: 왜건 (앞이 -z). 전장 4.63 = 보닛 1.2 / 캐빈 2.73 / 짐칸 0.7. 뒷좌석 무릎 공간은 앞좌석이 앞으로 와서 넉넉하다.
    겹치는 박스는 5mm 이상 어긋나게 두어 같은 평면이 생기지 않게 한다 ── */
 export function makeCar() {
   const W = ctx.W, g = new THREE.Group();
@@ -361,40 +473,16 @@ export function makeCar() {
     add(new THREE.TorusGeometry(0.42, 0.05, 6, 16, Math.PI), dark, x * 0.97, 0.36, z, 0, Math.PI / 2, 0);
   });
 
-  /* ── 실내 (앞좌석 z 0.3, 뒷좌석 z 1.3) ── */
-  const D = -0.45, P = 0.45;
-  const trim = std(0x2e3036, { roughness: 0.85 }), seatM = cloth(0x3a3f47, 2), carpet = cloth(0x1e2024, 4), ivory = std(0xd8dfe8, { roughness: 0.6 }), black = std(0x141416, { roughness: 0.5 });
-  [D, P].forEach(x => {
-    add(B(0.45, 0.01, 0.55), carpet, x, 0.515, -0.35);
-    add(B(0.5, 0.35, 0.5), seatM, x, 0.68, 0.3); add(B(0.5, 0.75, 0.15), seatM, x, 1.2, 0.6);
-    add(B(0.26, 0.15, 0.1), seatM, x, 1.7, 0.61);
-    [-0.1, 0.1].forEach(dx => g.add(bar([x + dx, 1.57, 0.61], [x + dx, 1.63, 0.61], 0.008, chrome, 6)));
-    add(B(0.4, 0.02, 0.18), trim, x, 1.78, -0.55);
-    add(B(0.45, 0.01, 0.45), carpet, x, 0.515, 0.95);
+  /* ── 실내: 좌석·대시보드·콘솔·핸들·실내등 (makeCarInterior).
+     둥근 부품이 많아 면이 각지지 않도록 flatShading 이 없는 재질(smoothM)을 쓴다 ── */
+  const trim = smoothM(0x2e3036, { roughness: 0.85 }), carpet = cloth(0x1e2024, 4);
+  const inner = makeCarInterior({
+    seat: cloth(0x3d4249, 2), insert: cloth(0x2e3238, 2), frame: smoothM(0x1c1d21, { roughness: 0.8 }), trim,
+    dark: smoothM(0x24252a, { roughness: 0.8 }), black: smoothM(0x141416, { roughness: 0.5 }), chrome: smoothM(0xb8bcc2, { metalness: 0.85, roughness: 0.45 }),
+    ivory: smoothM(0xd8dfe8, { roughness: 0.6 }), mat: cloth(0x17181b, 4), blanket: cloth(0x4b5a3f, 3), navi: new THREE.MeshBasicMaterial({ map: naviTex }),
+    lens: smoothM(0xf2ede4, { roughness: 0.3, emissive: 0xfff0d8, emissiveIntensity: 0 }),
   });
-  /* 뒷좌석: 방석·등받이·머리받침 높이를 앞좌석과 맞춘다 */
-  add(B(1.4, 0.35, 0.5), seatM, 0, 0.68, 1.3); add(B(1.4, 0.75, 0.15), seatM, 0, 1.2, 1.6);
-  [-0.4, 0.4].forEach(x => { add(B(0.26, 0.15, 0.1), seatM, x, 1.7, 1.61); [-0.1, 0.1].forEach(dx => g.add(bar([x + dx, 1.57, 1.61], [x + dx, 1.63, 1.61], 0.008, chrome, 6))); });
-  add(B(0.34, 0.3, 0.9), trim, 0, 0.66, 0.15);
-  add(B(0.3, 0.05, 0.3), seatM, 0, 0.835, 0.47);
-  [-0.08, 0.08].forEach(x => add(new THREE.CylinderGeometry(0.04, 0.04, 0.02, 12), black, x, 0.815, 0.05));
-  g.add(bar([0, 0.8, -0.05], [0.02, 0.98, -0.12], 0.012, chrome, 8)); add(new THREE.SphereGeometry(0.035, 10, 8), black, 0.02, 0.99, -0.12);
-  /* 대시보드 (앞유리 아래, 보닛 안으로 나가지 않게 z -1.1 ~ -0.7) */
-  add(B(1.8, 0.32, 0.4), dark, 0, 0.98, -0.9);
-  add(B(0.55, 0.16, 0.02), trim, P, 0.95, -0.685);
-  add(B(0.46, 0.26, 0.02), black, 0, 0.97, -0.685);
-  add(new THREE.PlaneGeometry(0.42, 0.22), new THREE.MeshBasicMaterial({ map: naviTex }), 0, 0.97, -0.672);
-  [-0.3, 0.3].forEach(x => add(B(0.06, 0.05, 0.02), black, x, 1.115, -0.685));
-  add(B(0.5, 0.18, 0.03), black, D, 1.06, -0.675);
-  [D - 0.1, D + 0.1].forEach(x => add(new THREE.CylinderGeometry(0.055, 0.055, 0.01, 16), ivory, x, 1.06, -0.652, Math.PI / 2));
-  g.add(bar([D, 0.98, -0.7], [D, 1.05, -0.45], 0.03, dark, 8));
-  add(new THREE.TorusGeometry(0.18, 0.025, 8, 24), dark, D, 1.05, -0.45, -0.45);
-  add(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 12), dark, D, 1.05, -0.45, Math.PI / 2 - 0.45);
-  [[D - 0.18, 1.05, -0.45], [D + 0.18, 1.05, -0.45], [D, 0.888, -0.372]].forEach(p => g.add(bar([D, 1.05, -0.45], p, 0.012, dark, 6)));
-  [D - 0.1, D + 0.1].forEach(x => add(B(0.08, 0.12, 0.02), black, x, 0.6, -0.85, -0.5));
-  add(B(0.3, 0.08, 0.03), dark, 0, 1.66, -0.55);
-  [-1, 1].forEach(s => { add(B(0.1, 0.06, 0.55), trim, s * 0.8, 1.02, 0.15); add(B(0.03, 0.03, 0.12), chrome, s * 0.78, 1.12, -0.2); add(B(0.1, 0.06, 0.5), trim, s * 0.8, 1.02, 1.15); });
-  add(B(0.36, 0.06, 0.32), cloth(0x4b5a3f, 3), P, 0.885, 0.27, 0, 0.2);
+  g.add(inner); W.dome = inner.userData.dome;
   /* 짐칸: 바닥·옆 트림·쿨러·가방 */
   add(B(1.6, 0.02, 0.68), carpet, 0, 0.925, 1.99);
   [-1, 1].forEach(s => add(B(0.06, 0.3, 0.66), trim, s * 0.85, 1.07, 1.99));
@@ -546,19 +634,68 @@ export function makeProps() {
   for (let i = 0; i < 6; i++) { const x = rnd(1.5, 2.5), z = rnd(-2.95, -2.15), a = rnd(0, 6.3), L = rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], rnd(0.008, 0.014), bark, 6))); }
   for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(rnd(0.06, 0.12), 0.012, rnd(0.03, 0.06)), bark); c.position.set(rnd(1.6, 2.6), 0.008, rnd(-2.9, -2.1)); c.rotation.set(rnd(-0.2, 0.2), rnd(0, 6.3), 0); scene.add(shadowed(c)); }
 }
-export function makeDock() {
-  const W = ctx.W, g = new THREE.Group(), rail = wood(0x7a5636, 6, 1), post = smoothM(0x55402e, Object.assign({ roughness: 0.9 }, tex('bark', 1, 2, 0.5))), rope = smoothM(0xc9b48a, { roughness: 1 });
-  for (let i = 0; i < 13; i++) { const p = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.8), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.88, 1.08)), 2, 1)); p.position.set(5.7, 0.33, -8.3 - i * 0.87); g.add(p); }
-  for (let i = 0; i < 5; i++) [4.98, 6.42].forEach(x => { const po = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.6, 9), post); po.position.set(x, -0.4, -8.5 - i * 2.6); g.add(po); });
-  g.add(bar([6.42, 0.95, -8.2], [6.42, 0.95, -19.0], 0.025, rail, 6));
-  for (let i = 0; i < 5; i++) g.add(bar([6.42, 0.36, -8.5 - i * 2.6], [6.42, 0.95, -8.5 - i * 2.6], 0.025, rail, 6));
-  g.add(bar([6.42, 0.36, -19.1], [6.42, 1.55, -19.1], 0.03, post, 7));
-  const lamp = makeLantern(W.tm.lantern > 0.5); lamp.scale.setScalar(0.8); lamp.position.set(6.42, 1.57, -19.1); g.add(lamp); W.dockLampObj = lamp;
-  W.dockLight = new THREE.PointLight(0xffc07a, W.tm.lantern * 0.8, 8, 2); W.dockLight.position.set(6.42, 1.7, -19.1); g.add(W.dockLight);
-  const coil = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.04, 6, 16), rope); coil.rotation.x = Math.PI / 2; coil.position.set(5.15, 0.4, -18.6); g.add(coil);
-  const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.05, 0.06), METAL()); cleat.position.set(5.05, 0.39, -12.0); g.add(cleat);
-  return shadowed(g);
+
+/* ── 해변 유목: 원점 = 바닥 가운데, 길이 방향 = x. scene.js 가 모래 위에 3개 놓는다 ──
+   단면이 찌그러지고, 결을 따라 꼬인 깊은 갈라짐 여섯 줄, 뿌리 쪽이 굵게 퍼지고 반대쪽으로 가늘어진다.
+   색: 빛바랜 회갈색 바탕에 크고 불규칙한 얼룩, 갈라진 틈은 어둡게.
+   양끝: 부러지고 닳은 단면이 안쪽으로 오목하게 파여 있다 — 가장자리는 들쭉날쭉, 가운데로 갈수록 어두운 속살.
+   옆에 부러진 곁가지 하나. seed(0..1)가 같으면 같은 모양 */
+function driftwoodGeo(len, seed) {
+  const V3 = THREE.Vector3;
+  let st = Math.floor(seed * 1e6) % 2147483646 + 1; const rand = () => (st = st * 16807 % 2147483647) / 2147483647;
+  const BASE = hexRGB(0xa89e8f), BASE2 = hexRGB(0x8c8174), GROOVE = hexRGB(0x564e44), CUT = hexRGB(0xb39d7e), CORE = hexRGB(0x6e5d48);
+  const pos = [], col = [], uv = [], idx = [];
+  const limb = (pts, r0, ph, flare) => {
+    const curve = new THREE.CatmullRomCurve3(pts), NU = 40, NV = 14, fr = curve.computeFrenetFrames(NU, false), P = new V3(), o = pos.length / 3;
+    const knotT = 0.25 + rand() * 0.5, knotA = rand() * Math.PI * 2, ph2 = rand() * 6;
+    for (let i = 0; i <= NU; i++) {
+      const t = i / NU; curve.getPointAt(t, P);
+      const N = fr.normals[i], Bn = fr.binormals[i];
+      const body = (1.1 - 0.35 * t) * (1 + 0.07 * Math.sin(t * 9 + ph)) * (1 + flare * Math.pow(Math.max(0, 1 - t / 0.14), 2));
+      const brk = t < 0.04 || t > 0.96;
+      for (let j = 0; j <= NV; j++) {
+        const a = j / NV * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        const shape = 1 + 0.13 * Math.sin(2 * a + ph + t * 2) + 0.07 * Math.sin(3 * a + ph * 2);
+        const groove = Math.pow(0.5 + 0.5 * Math.sin(a * 6 + t * 5 + ph), 5);
+        const da = Math.abs(((a - knotA) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+        const knot = Math.exp(-(((t - knotT) / 0.04) ** 2) - (da / 0.5) ** 2);
+        let r = r0 * body * shape * (1 - 0.13 * groove + 0.22 * knot);
+        if (brk) r *= 0.82 + 0.28 * (0.5 + 0.5 * Math.sin(a * 5 + ph * 3 + i * 1.7));      // 부러진 끝의 들쭉날쭉한 테두리
+        pos.push(P.x + r * (ca * N.x + sa * Bn.x), P.y + r * (ca * N.y + sa * Bn.y), P.z + r * (ca * N.z + sa * Bn.z));
+        /* 얼룩: 길이·둘레 방향으로 아주 느리게 바뀌는 두 물결을 곱해 크고 불규칙한 반점만 남긴다 */
+        const blot = sstep(0.1, 0.7, 0.5 + 0.5 * Math.sin(t * 5.3 + ph2) * Math.cos(a * 1.3 + t * 2.7 + ph));
+        col.push(...mix3(mix3(BASE, BASE2, blot), GROOVE, Math.min(1, groove * 0.85 + knot * 0.4))); uv.push(t * 4, j / NV);
+      }
+    }
+    for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) { const a = o + i * (NV + 1) + j, b = a + NV + 1; idx.push(a, a + 1, b, b, a + 1, b + 1); }
+    /* 양끝: 안쪽으로 오목하게 파인 단면 — 테두리 → 중간 고리(60% 지름, 조금 들어감) → 가운데(가장 깊음) */
+    [[0, -1], [NU, 1]].forEach(([i, sgn]) => {
+      curve.getPointAt(i / NU, P); const Tn = fr.tangents[i], dep = r0 * (0.3 + 0.2 * rand()), ring = o + i * (NV + 1), inner = pos.length / 3;
+      for (let j = 0; j <= NV; j++) {
+        const q = ring + j;
+        pos.push(P.x + (pos[q * 3] - P.x) * 0.6 - Tn.x * sgn * dep * 0.55, P.y + (pos[q * 3 + 1] - P.y) * 0.6 - Tn.y * sgn * dep * 0.55, P.z + (pos[q * 3 + 2] - P.z) * 0.6 - Tn.z * sgn * dep * 0.55);
+        col.push(...CUT); uv.push(0.5, 0.5);
+      }
+      const cI = pos.length / 3; pos.push(P.x - Tn.x * sgn * dep, P.y - Tn.y * sgn * dep, P.z - Tn.z * sgn * dep); col.push(...CORE); uv.push(0.5, 0.5);
+      for (let j = 0; j < NV; j++) {
+        const r0i = ring + j, r1i = ring + j + 1, i0 = inner + j, i1 = inner + j + 1;
+        if (sgn > 0) idx.push(i0, r0i, r1i, i0, r1i, i1, cI, i0, i1); else idx.push(i0, r1i, r0i, i0, i1, r1i, cI, i1, i0);
+      }
+    });
+  };
+  const r0 = 0.09 + rand() * 0.04, p1 = rand() * 6, p2 = rand() * 6, pts = [];
+  for (let i = 0; i <= 5; i++) { const t = i / 5; pts.push(new V3(-len / 2 + len * t, r0 + 0.04 * Math.sin(t * 4 + p1), 0.07 * len * Math.sin(t * 2.4 + p2))); }
+  limb(pts, r0, rand() * 6, 0.3);
+  const bp = new THREE.CatmullRomCurve3(pts).getPointAt(0.3 + rand() * 0.4), side = rand() < 0.5 ? -1 : 1, bl = len * (0.18 + rand() * 0.12);
+  limb([bp.clone(), bp.clone().add(new V3(bl * 0.3, r0 * 0.5, side * bl * 0.5)), bp.clone().add(new V3(bl * 0.55, r0 * 0.7, side * bl))], r0 * 0.45, rand() * 6, 0);
+  const g = new THREE.BufferGeometry(); g.setIndex(idx);
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.computeVertexNormals(); return sitOnGround(g);
 }
+export function makeDriftwood(len, seed) {
+  return shadowed(new THREE.Mesh(driftwoodGeo(len, seed), smoothM(0xffffff, { roughness: 0.95, vertexColors: true })));
+}
+
 
 /* ── 등대: 바위섬 위 콘크리트 기초, 흰 탑에 빨간 띠, 난간·등롱·빨간 지붕, 관리사. 밤에만 켜지고 광선 두 줄기가 돈다 ── */
 const beamTex = canvasTex(256, 32, (g, w, h) => {

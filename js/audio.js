@@ -30,7 +30,7 @@ const SIP_FOCUS = 0.3;
 let AC = null, master, comp, worldLP, worldGain, bedBus, bedLP, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
 let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false, focusOn = false;
-let fire = null, water = null, lamps = null, spark = null, engine = null, engineDone = false;
+let fire = null, water = null, spark = null, engine = null, engineDone = false;
 let windAcc = 0, lastWind = 0, lastGust = -99;
 const flockAudio = new Map();
 const _f = new THREE.Vector3(), _u = new THREE.Vector3();
@@ -444,10 +444,6 @@ function makeWaterSrc(type, z) {
     const lap = () => { if (water !== src) return; burst(pan, 'brown', 'lowpass', rnd(500, 900), 1, 0.08, rnd(0.03, 0.06), 0.5, AC.currentTime, rnd(250, 400), 0.5); sched(t, lap, rnd(1800, 5200)); }; lap();
   }
 }
-function makeHiss(x, y, z) {
-  const pan = panner(x, y, z, 0.5, 8, 2.2), g = gainN(0), s = noise('white', true), f = filt('bandpass', 3000, 1.5), ig = gainN(0.006);
-  chain(s, f, ig, g, pan); s.start(0, off()); return { gain: g, nodes: [s, f, ig, g, pan, ...lfo(8, 0.0015, ig.gain)] };
-}
 /* 방금 도착한 차: 2분 남짓 엔진이 식으며 틱틱 */
 function startEngine() {
   if (engine || engineDone) return;
@@ -458,17 +454,17 @@ function startEngine() {
   sched(t, tick, rnd(1500, 3000));
 }
 function killEngine() { if (!engine) return; killT(engine.t); kill(engine.nodes); engine = null; }
+/* 랜턴은 켜고 끌 때만 소리가 난다 (sfx 의 lampOn·lampOff). 켜져 있는 동안 계속 나는 소리는 없다 */
 function buildSpatial() {
   const cfg = ctx.W.cfg; killSpatial();
   makeFireSrc();
   if (cfg.water) makeWaterSrc(cfg.key === 'beach' ? 'waves' : 'lake', cfg.water.z - 3);
-  lamps = { lantern: makeHiss(0.65, 0.75, 0.5), tentLamp: makeHiss(-2.35, 0.4, 2.1) };
   sceneKey = cfg.key; engineDone = false;
 }
 function killSpatial() {
-  if (fire) { killT(fire.t); kill(fire.nodes); } if (water) { killT(water.t); kill(water.nodes); } if (lamps) { kill(lamps.lantern.nodes); kill(lamps.tentLamp.nodes); }
+  if (fire) { killT(fire.t); kill(fire.nodes); } if (water) { killT(water.t); kill(water.nodes); }
   killEngine(); flockAudio.forEach(a => { killT(a.t); kill(a.nodes); }); flockAudio.clear();
-  fire = water = lamps = null; sceneKey = null;
+  fire = water = null; sceneKey = null;
 }
 
 /* ── 스파클라: 부드러운 치익 + 잔 크랙 ── */
@@ -489,20 +485,37 @@ export function sparklerLevel(v) { if (spark) spark.gain.gain.setTargetAtTime(v,
 
 /* ── 배경 베드 ── */
 /* 가까운 귀뚜라미 한 마리: 캠프 주변 풀숲(4~9m)에 자리를 잡고, 자기 음색·주기로 운다.
+   계속 울지 않고 4~10초 울다가 3~9초 쉰다 (마리마다 따로). 먼 합창이 쉬는 동안(quiet)에는 같이 멈춰 진짜 빈틈이 생긴다.
    플레이어가 3m 안으로 다가오면 6~12초 동안 울음을 멈춘다 */
-function cricketNear(nodes, timers) {
+function cricketNear(nodes, timers, quiet) {
   const a = rnd(0, 6.283), r = rnd(4, 9), x = Math.cos(a) * r, z = 0.3 + Math.sin(a) * r;
   const p = panner(x, 0.15, z, 1.5, 40, 1.0), lp = filt('lowpass', 7500); lp.connect(p); nodes.push(lp, p);
   const trill = Math.random() < 0.3, key = trill ? 'cricketTrill' : 'cricketChirp', voice = Math.floor(Math.random() * 8);
   const rate = rnd(0.94, 1.06), per = trill ? rnd(3, 6) : rnd(0.75, 1.3), gain = FOLEY_GAIN[key] * rnd(0.8, 1.1);
-  let hush = 0;
+  let hush = 0, restEnd = 0, boutEnd = AC.currentTime + rnd(4, 10);
   const sing = () => {
     const now = AC.currentTime, cam = ctx.camera.position;
     if (Math.hypot(cam.x - x, cam.z - z) < 3) hush = now + rnd(6, 12);
-    if (now >= hush) { const list = getBank(key); playBuf(list[voice % list.length], lp, gain, rate, now); }
+    /* 한 바탕 울고 나면 쉰다 */
+    if (now >= boutEnd) { restEnd = now + rnd(3, 9); boutEnd = restEnd + rnd(4, 10); }
+    const resting = now < restEnd || (now >= quiet.from && now < quiet.to);
+    if (now >= hush && !resting) { const list = getBank(key); playBuf(list[voice % list.length], lp, gain, rate, now); }
     sched(timers, sing, (Math.random() < 0.1 ? rnd(3, 8) : per * rnd(0.92, 1.08)) * 1000);
   };
   sched(timers, sing, rnd(300, 3000));
+}
+/* 먼 합창의 숨: 10~24초 울다가 2~4초에 걸쳐 잦아들고, 5~14초 쉰 뒤 다시 살아난다. 다시 울 때마다 크기도 조금 다르다.
+   쉬는 구간을 quiet 에 적어 두어 가까운 귀뚜라미도 그동안 같이 멈춘다 */
+function chorusBreath(gainParam, timers, quiet) {
+  const cycle = () => {
+    const now = AC.currentTime, on = rnd(10, 24), fade = rnd(2, 4), rest = rnd(5, 14), lv = 0.012 * rnd(0.7, 1);
+    holdParam(gainParam, now);
+    gainParam.setTargetAtTime(lv, now, fade / 3);
+    gainParam.setTargetAtTime(0.0001, now + on, fade / 3);
+    quiet.from = now + on + fade * 0.6; quiet.to = now + on + fade + rest;
+    sched(timers, cycle, (on + fade + rest) * 1000);
+  };
+  cycle();
 }
 /* 바람 베드의 크기·음색과 잎 스침은 updateAudio 가 W.wind 를 따라 움직인다 (예전의 고정 LFO 대신).
    베드는 bedBus 로 나간다 — 한 모금 하는 동안 이 버스만 살짝 물러난다 */
@@ -516,9 +529,11 @@ function makeBed(type, timeKey) {
     bed.wind = wind(340, 0.045, 90);
     const lv = noise('pink', true), lf = filt('bandpass', 3000, 0.7), lg = gainN(0.006); chain(lv, lf, lg, out); lv.start(0, off()); nodes.push(lv, lf, lg); bed.leaves = lg.gain;
     if (timeKey === 'night') {
-      /* 귀뚜라미: 먼 합창 루프 + 가까운 개체 3마리 (예전의 계속 도는 사인파 오실레이터 10개 대신) */
-      const cs = AC.createBufferSource(), cg = gainN(0.012); cs.buffer = getChorus(); cs.loop = true; chain(cs, cg, out); cs.start(0, rnd(0, 7.9)); nodes.push(cs, cg);
-      for (let i = 0; i < 3; i++) cricketNear(nodes, timers);
+      /* 귀뚜라미: 먼 합창 루프(울다 쉬다) + 가까운 개체 3마리. 합창이 쉬는 구간에는 가까운 개체도 같이 쉰다 */
+      const quiet = { from: 0, to: 0 };
+      const cs = AC.createBufferSource(), cg = gainN(0.0001); cs.buffer = getChorus(); cs.loop = true; chain(cs, cg, out); cs.start(0, rnd(0, 7.9)); nodes.push(cs, cg);
+      chorusBreath(cg.gain, timers, quiet);
+      for (let i = 0; i < 3; i++) cricketNear(nodes, timers, quiet);
     }
     else { const s = noise('brown', true), f = filt('lowpass', 900), g = gainN(0.015); chain(s, f, g, out); s.start(0, off()); nodes.push(s, f, g, ...lfo(0.17, 0.008, g.gain)); }
   }
@@ -592,7 +607,7 @@ function snowSlide() { const t = AC.currentTime, out = farSrc(rnd(40, 120), 1.5,
 function creak() { const t = AC.currentTime, pan = spanner(rnd(-0.4, 0.4)); burst(pan, false, 'lowpass', 350, 1, 0.08, 0.035, 0.3, t); tone(pan, 95, 70, 0.08, 0.02, 0.3, t); setTimeout(() => kill([pan]), 1000); }
 function ropeCreak() { const t = AC.currentTime, p = panner(5.2, 0.4, -18.6, 1, 12, 1.5); tone(p, rnd(150, 200), rnd(110, 140), 0.12, 0.025, 0.35, t); burst(p, 'brown', 'lowpass', 600, 1, 0.1, 0.03, 0.4, t); setTimeout(() => kill([p]), 1200); }
 
-/* ── 매 프레임: 리스너, 불·랜턴 게인, 물 위치, 바람, 새떼 ── */
+/* ── 매 프레임: 리스너, 불 게인, 물 위치, 바람, 새떼 ── */
 const GUST_K = { waves: 0.35, forest: 0.3, wind: 0.7 };
 export function updateAudio(dt) {
   if (!AC || !ctx.camera) return; const cam = ctx.camera, L = AC.listener, W = ctx.W, t = AC.currentTime;
@@ -602,7 +617,6 @@ export function updateAudio(dt) {
   /* 불소리는 화면의 불꽃 크기(fireK)를 그대로 따라 커지고 작아진다 */
   if (fire) fire.gain.gain.setTargetAtTime((W.fireK || 0) * 0.85, t, 0.1);
   if (water) setPos(water.pan, cam.position.x, 0, water.z);
-  if (lamps) { lamps.lantern.gain.gain.setTargetAtTime(W.lanternLit ? 1 : 0, t, 0.4); lamps.tentLamp.gain.gain.setTargetAtTime(W.tentLampLit ? 1 : 0, t, 0.4); }
   /* 바람: 0.1초마다 베드를 갱신하고, 바람이 0.7 을 위로 넘는 순간 돌풍 소리를 낸다 (최소 8초 간격) */
   if (bed && W.wind) {
     windAcc += dt;
@@ -764,18 +778,28 @@ export function sfx(type, arg) {
     case 'logLift': playBank('woodLand', sfxBus, 0.05, rnd(0.8, 0.9), t, -0.3); burst(B, 'pink', 'bandpass', 1800, 0.8, 0.02, 0.01, 0.12, t); return;
     case 'logPlace': playBank('logPlace', sfxBus, FOLEY_GAIN.logPlace * rnd(0.85, 1), rnd(0.95, 1.05), t, 0); return;
     case 'woodLand': { const o = arg || {}; playBank('woodLand', sfxBus, FOLEY_GAIN.woodLand * (o.k || 1) * rnd(0.8, 1), rnd(0.9, 1.1), t + rnd(0, 0.02), o.pan || 0); return; }
-    /* 불·랜턴 */
+    /* 불·랜턴 (랜턴은 켜고 끌 때만 소리가 난다) */
     case 'fireOn': sfx('lighter'); burst(B, true, 'lowpass', 300, 1, 0.06, 0.16, 0.7, t + 0.25, 140, 0.7); return;
     case 'fireOff': burst(B, true, 'lowpass', 700, 1, 0.02, 0.1, 0.25, t); burst(B, false, 'bandpass', 3000, 0.8, 0.1, 0.045, 1.4, t + 0.1, 1500, 1.4); for (let i = 0; i < 3; i++) burst(B, false, 'highpass', 2500 * rnd(0.9, 1.2), 1, 0.002, 0.02, 0.03, t + 0.3 + Math.random() * 0.6); return;
     case 'lampOn': tone(B, 1600 * pv, 1200, 0.002, 0.03, 0.04, t); sfx('lighter'); return;
     case 'lampOff': tone(B, 1600 * pv, 1200, 0.002, 0.03, 0.04, t); burst(B, false, 'bandpass', 3000, 1.5, 0.02, 0.02, 0.5, t, 1800, 0.5); return;
     case 'sparkOn': burst(B, false, 'bandpass', 5000, 0.8, 0.03, 0.14, 0.45, t); for (let i = 0; i < 6; i++) burst(B, false, 'bandpass', rnd(4500, 8000), 2, 0.002, rnd(0.04, 0.08), 0.02, t + Math.random() * 0.3); return;
     case 'sparkOff': burst(B, false, 'bandpass', 4500, 0.8, 0.02, 0.04, 0.5, t, 2500, 0.5); return;
+    /* 낚시: 낚싯대 들기 · 던지기(휙 + 줄 풀리는 소리) · 찌 착수 · 헛입질 톡 · 입질 쑥 · 릴 틱틱 · 물보라 · 물 밖으로 · 줄 풀림 */
+    case 'rodUp': fabric(B, t, 0.03, 0.25); return;
+    case 'cast': burst(B, 'pink', 'bandpass', 600 * pv, 1, 0.05, 0.1, 0.3, t, 2400, 0.3); burst(B, false, 'highpass', 3500, 1, 0.01, 0.025, 0.5, t + 0.15, 6000, 0.5); return;
+    case 'plop': tone(B, 700 * pv, 240, 0.002, 0.12, 0.08, t); burst(B, 'pink', 'lowpass', 1500, 1, 0.002, 0.08, 0.15, t); return;
+    case 'nibble': tone(B, 900 * pv, 600, 0.001, 0.03, 0.03, t); return;
+    case 'bite': tone(B, 420 * pv, 180, 0.002, 0.14, 0.12, t); burst(B, 'pink', 'lowpass', 900, 1, 0.002, 0.12, 0.2, t); return;
+    case 'reel': for (let i = 0; i < 5; i++) burst(B, false, 'highpass', 3200, 1, 0.001, 0.05, 0.015, t + i * 0.035); return;
+    case 'splash': burst(B, 'pink', 'lowpass', 1500, 0.6, 0.01, 0.2 * (arg || 1), 0.45, t, 500, 0.45); return;
+    case 'fishOut': burst(B, 'pink', 'lowpass', 1900, 0.6, 0.01, 0.25, 0.6, t, 400, 0.6); return;
+    case 'snap': burst(B, false, 'highpass', 4000, 1, 0.001, 0.15, 0.06, t); tone(B, 1200, 300, 0.001, 0.06, 0.12, t); return;
     /* UI (컴프레서 우회, 실내 필터 무관) */
     case 'ui': tone(U, 880 * pv, 0, 0.004, 0.025, 0.08, t); tone(U, 1320 * pv, 0, 0.004, 0.01, 0.06, t); return;
     case 'uiGo': tone(U, 392, 0, 0.01, 0.035, 0.3, t); tone(U, 523, 0, 0.01, 0.035, 0.4, t + 0.16); return;
     case 'uiOpen': tone(U, 520, 660, 0.01, 0.03, 0.12, t); return;
     case 'uiClose': tone(U, 660, 520, 0.01, 0.03, 0.12, t); return;
-    case 'shutter': burst(U, false, 'highpass', 5000, 1, 0.001, 0.1, 0.012, t); tone(U, 1400, 900, 0.002, 0.035, 0.03, t); burst(U, false, 'lowpass', 900, 1, 0.002, 0.09, 0.03, t + 0.06); tone(U, 260, 180, 0.003, 0.045, 0.05, t + 0.06); return;
+    case 'shutter': burst(U, false, 'highpass', 5000, 1, 0.001, 0.1, 0.012, t); tone(U, 1400, 900, 0.002, 0.035, 0.03, t); burst(U, false, 'lowpass', 900, 1, 0.002, 0.09, 0.03, t + 0.03); tone(U, 260, 180, 0.003, 0.045, 0.05, t + 0.06); return;
   }
 }

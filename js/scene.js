@@ -4,7 +4,9 @@ import { BG, ITEMS } from './data.js';
 import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
-import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeDock, makeSnowCaps, makeLighthouse, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints } from './props.js';
+import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeSnowCaps, makeLighthouse, makeDriftwood, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints } from './props.js';
+import { makeDock } from './dock.js';
+import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 
@@ -247,6 +249,8 @@ export function buildScene(bgKey) {
   const cfg = BG[bgKey], cur = paramsAt(state.clock);
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
   const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
+    /* 차 실내등: dome = { light, lens } (makeCar 가 채운다), domeLit = 켜짐 여부 (game.js 가 바꾸고 main.js 가 밝힌다), domeK = 부드럽게 따라가는 밝기 */
+    dome: null, domeLit: false, domeK: 0,
     /* 바람(0..1): main.js 가 매 프레임 계산, 풀·나무 셰이더와 오디오가 같이 읽는다 */
     wind: { value: 0.4 },
     /* 모닥불: fireBase = 부드럽게 따라가는 기본 밝기, firePop = 오디오 파칙이 올려 주는 순간 밝기, fireBurst = 큰 파칙 → 불티 */
@@ -286,15 +290,17 @@ export function buildScene(bgKey) {
   const ground = makeGround(cfg, W.uTime, W.shoreTex); scene.add(ground); W.groundMat = ground.material;
   if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime, W.heightTex, waterEdge(cfg)); scene.add(W.water); }
   makeVegetation(cfg);
-  if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [5.0, 6.4], z: [-19.5, -8.0], y: 0.36 }); }
+  if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [4.95, 6.45], z: [-19.15, -7.9], y: 0.36 }); }
+  buildFish();
   if (cfg.key === 'beach') {
     const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
-    /* 유목 3개: 누운 길이의 절반만큼 자리를 차지한다 (vegetation.js 가 만든 W.space 격자 — 야자수·조개와 겹치지 않게) */
+    /* 유목 3개: 누운 길이의 절반만큼 자리를 차지한다 (vegetation.js 가 만든 W.space 격자 — 야자수·조개와 겹치지 않게).
+       모양은 makeDriftwood 가 매번 조금씩 다르게 만들고, 바닥이 3cm 모래에 묻히게 놓는다 */
     for (let i = 0, n = 0; i < 40 && n < 3; i++) {
       const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3), h = terrainH(x, z, cfg); if (h < 0.1) continue;
       const len = rnd(1.5, 2.6), r = len * 0.5; if (!W.space.fits(x, z, r)) continue;
       W.space.add(x, z, r, r);
-      const d = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, len, 6), std(0x9a8a72)); d.position.set(x, h + 0.1, z); d.rotation.set(0.1, rnd(0, 3), Math.PI / 2 - 0.1); shadowed(d); scene.add(d); W.trees.push([x, z, 0.9]); n++;
+      const d = makeDriftwood(len, Math.random()); d.position.set(x, h - 0.03, z); d.rotation.y = rnd(0, Math.PI * 2); scene.add(d); W.trees.push([x, z, 0.9]); n++;
     }
   }
 
@@ -350,8 +356,10 @@ export function buildScene(bgKey) {
     { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
     { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기' },
     { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기' },
+    /* 차 실내등: 운전석에서 위를 올려다보면 (지붕 안쪽 가운데, 차 기준 z 0.32 → 월드 z 8.32) */
+    { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.4, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기' },
   ];
-  if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.6], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉기' });
+  if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.4], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉아 낚시하기' });
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();
 }

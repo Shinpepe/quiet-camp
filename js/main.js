@@ -9,6 +9,7 @@ import { WATER_Y } from './terrain.js';
 import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience, setSipFocus } from './audio.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep, buildWithLoading } from './game.js';
 import { updateChop, chopCamera } from './chop.js';
+import { updateFish } from './fish.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -127,6 +128,7 @@ function loop(now) {
   /* 장작 패기 카메라 효과(흔들림·시선 반동·시야 펀치). 패는 중이 아니면 남은 효과만 가라앉힌다 */
   chopCamera(camera, dt, cam.t >= 1);
   camera.updateMatrixWorld();
+  updateFish(ctx.paused ? 0 : dt);
   applyTime();
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
@@ -145,6 +147,11 @@ function loop(now) {
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
+  /* 차 실내등: 켜고 끌 때 0.1초 남짓 부드럽게. 빛은 항상 장면에 있고 세기만 바뀌어 재컴파일이 없다 */
+  if (W.dome) {
+    W.domeK += ((W.domeLit ? 1 : 0) - W.domeK) * Math.min(1, dt * 10);
+    W.dome.light.intensity = 3 * W.domeK; W.dome.lens.material.emissiveIntensity = 1.6 * W.domeK;
+  }
   /* 텐트 랜턴이 켜지면 밖에서 천이 은은하게 빛난다.
      빛 색은 랜턴의 따뜻한 주황과 천 색을 반씩 섞고(스카이 텐트가 주황으로 빛나지 않게), 어두운 천일수록 빛이 덜 샌다(블랙은 거의 비치지 않는다).
      점광원의 빠른 떨림(flick)은 천에 곱하지 않는다 — 큰 면이 13Hz 로 깜빡이면 지직거림으로 보인다 */

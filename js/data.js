@@ -14,14 +14,17 @@ export const ICON = {
   sparkler: svg('<path d="M6 21l7-9"/><path d="M13 12l-4-2M13 12l4-2M13 12l-2-5M13 12l2-5M13 12l5 1M13 12l-5 1M13 12l1 6M13 12l4 4"/>'),
   /* 도끼: 거의 세로인 자루 위쪽 한편에 머리, 바깥으로 휘어 벌어진 날 (자루와 같은 축에 날이 붙으면 삽처럼 보인다) */
   axe:      svg('<path d="M10.6 2.8c-.3 6-1 12-2.2 18.4"/><path d="M9.4 4.2h5l4.2-2.2c1.6 3 1.6 6.2 0 9.2l-4.2-2.2h-5z"/>'),
+  /* 낚싯대: 비스듬한 대, 늘어진 줄 끝의 찌, 손잡이 쪽 릴 */
+  rod:      svg('<path d="M4 20L19 4"/><path d="M19 4c1.6 3.5 1.6 7.5.4 11"/><circle cx="19.4" cy="16.6" r="1.3"/><circle cx="7.2" cy="15.2" r="1.7"/>'),
 };
 
-/* haze: 장소별 안개 배율. 시간대의 fogDen 에 곱한다 — 해변은 바다 습기로 조금 더, 설산은 맑은 고산 공기라 조금 덜 */
+/* haze: 장소별 안개 배율. 시간대의 fogDen 에 곱한다 — 해변은 바다 습기로 조금 더, 설산은 맑은 고산 공기라 조금 덜
+   호수 숲: 활엽수 420 · 덤불 240 (예전 260 · 90). 소나무 총 개수는 그대로 두고 vegetation.js 가 가까운 숲(10~50m)에 60% 를 모은다 */
 export const BG = {
   beach: { key: 'beach', name: '바다가 보이는 모래사장', ic: ICON.beach, ground: 0xead9ad, rock: 0x8a7a66, amp: 0.7, mtAmp: 120, mtBase: 6, bloomMul: 0.45, haze: 1.3,
     water: { deep: 0x1c6d9c, shallow: 0x62c3d9, z: -9, size: 1200, wave: 1.0, wobble: 5 }, grass: { n: 2600, color: 0xbdaa6c, zmin: -4 }, palms: 16, bushes: 14, bushZmin: 6, rocks: 0, pines: 0, leafs: 0, birds: true, snow: false, fireflies: false, ambience: 'waves' },
   lake:  { key: 'lake', name: '호수가 보이는 숲속', ic: ICON.lake, ground: 0x4b8038, rock: 0x5c5a55, amp: 2.4, mtAmp: 300, mtBase: 25, bloomMul: 1.0, haze: 1.0,
-    water: { deep: 0x173f52, shallow: 0x3c8a8c, z: -9, size: 600, wave: 0.28, wobble: 9 }, grass: { n: 9000, color: 0x58a03c, zmin: -8 }, palms: 0, bushes: 90, rocks: 14, pines: 1400, leafs: 260, birds: true, snow: false, fireflies: true, dock: true, ambience: 'forest' },
+    water: { deep: 0x173f52, shallow: 0x3c8a8c, z: -9, size: 600, wave: 0.28, wobble: 9 }, grass: { n: 9000, color: 0x58a03c, zmin: -8 }, palms: 0, bushes: 240, rocks: 14, pines: 1400, leafs: 420, birds: true, snow: false, fireflies: true, dock: true, ambience: 'forest' },
   snow:  { key: 'snow', name: '경치가 좋은 설산', ic: ICON.snow, ground: 0xf3f6fb, rock: 0x7d8792, amp: 6, mtAmp: 420, mtBase: 70, bloomMul: 0.35, haze: 0.7,
     water: null, grass: null, palms: 0, bushes: 0, rocks: 12, pines: 480, leafs: 0, birds: false, snow: true, fireflies: false, ambience: 'wind' },
 };
@@ -51,12 +54,13 @@ export const ITEMS = {
   smoke:    { name: '담배', ic: ICON.smoke, act: '한 모금', hold: true, ds: '연기가 바람에 흩어진다' },
   sparkler: { name: '스파클라', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
 };
+/* 부두 끝 자리는 dock.js 의 DOCK(끝 z −19.2, 윗면 0.36)에 맞춘다: 끝 판자 가장자리에 걸터앉은 눈높이 */
 export const SEAT = {
   car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },
   chair: { pos: [1.5, 1.05, 0.95], stand: [1.5, -0.1], name: '의자', up: '일어나기' },
   tent:  { pos: [-1.6, 0.72, 1.85], stand: [-1.6, -1.3], name: '텐트 안', up: '텐트에서 나가기' },
   bed:   { pos: [-1.1, 0.45, 1.95], yaw: Math.PI, pitch: 1.15, stand: [-1.6, -1.3], name: '침낭', up: '일어나기' },
-  dock:  { pos: [5.7, 1.05, -19.4], stand: [5.7, -18.0], name: '부두 끝', up: '일어나기' },
+  dock:  { pos: [5.7, 1.12, -18.95], stand: [5.7, -17.8], name: '부두 끝', up: '일어나기' },
 };
 /* 걷기 충돌 박스: 차, 텐트, 의자, 테이블, 모닥불, 쿨러+배낭, 장작더미, 그루터기 */
 export const BLOCKS = [
@@ -70,6 +74,14 @@ export const WAKE = 7 / 24;
 /* 장작 패기: 그루터기 위치, 서는 거리(그루터기에서 플레이어 쪽으로 1.2m — 방향은 E 를 누른 자리에서 정한다),
    다음 장작을 집어 오는 장작더미, 내려다보는 각도, 시선 허용 범위(좌우·상하 rad) */
 export const CHOP = { stump: [2.55, -1.95], dist: 1.2, pile: [1.85, -2.55], pitch: -0.64, look: [0.32, 0.22] };
+/* 장작 패기 게이지: 삼각형 속도(초당 막대 비율), 성공·대성공 구간 폭, 쪼개는 데 필요한 성공 횟수 */
+export const CHOP_GAUGE = { speed: 1.15, ok: 0.34, great: 0.08, hits: 3 };
+/* 부두 낚시
+   biteWin: 입질 후 챔질 가능 시간(초) · wait: 던진 뒤 입질까지(초) · nibbles: 헛입질 횟수 범위
+   cast: 던지는 거리(m) — 시선이 낮으면 가까이, 수평선 근처면 멀리
+   yaw: 물 쪽(정면 −z)에서 좌우로 돌아볼 수 있는 각도 · pitch: 내려볼 수 있는 한계(낚싯대가 물·부두에 닿지 않게)와 올려볼 수 있는 한계
+   fails: 이만큼 실패하면 줄이 풀려 도망간다 */
+export const FISHING = { biteWin: 2.0, wait: [3, 7], nibbles: [1, 3], cast: [6, 18], yaw: Math.PI / 2, pitch: [-0.35, 1.3], fails: 3 };
 
 /* 캠핑 장비 색: 차와 텐트가 같은 이름의 색을 공유한다.
    car 는 도장이라 조금 깊고 차분하게, tent 는 천이라 조금 밝고 부드럽게. 메뉴 견본도 줄마다 각자의 값을 쓴다
