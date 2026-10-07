@@ -50,7 +50,6 @@ const P = { x: 0, z: 0, yaw: 0 };
 let R = null;
 const _w = new V(), _d = new THREE.Object3D();
 
-function say(msg) { if (chopHooks.toast) chopHooks.toast(msg); }
 function dust(x, y, z, n, op) {
   const W = ctx.W; if (!W.smoke) return;
   for (let i = 0; i < n; i++) { R.rig.localToWorld(_w.set(x + rnd(-0.06, 0.06), y, z + rnd(-0.06, 0.06))); W.smoke.spawn(_w, { x: rnd(-0.15, 0.15), y: rnd(0.1, 0.3), z: rnd(-0.15, 0.15) }, 0.05, rnd(1, 1.6), 0.1, 0.04, 0.3, op); }
@@ -277,8 +276,7 @@ function split(fly) {
   spawnChips(fly > 1 ? 22 : 12, fly > 1 ? 1.15 : 0.85); dust(0, LOG_TOP, 0, 3, 0.12);
   C.hits = 0; R.logG.visible = false; R.crackD.visible = R.crackL.visible = false; C.log = null; C.nextLogT = 0.85;
   spawnHalves(fly); C.st = 'follow';
-  const n = ++ctx.W.splitCount;
-  if ([5, 10, 20, 30, 50].includes(n)) say(`쪼갠 장작 ${n}개`);
+  ctx.W.splitCount++;
   if (chopHooks.hud) chopHooks.hud();
 }
 

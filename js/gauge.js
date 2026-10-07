@@ -1,12 +1,14 @@
 import { ctx } from './state.js';
 
 /* ── 공통 타이밍 게이지 (장작 패기·낚시) + 화면 가운데 문구 + 결과 카드 ──
-   세로 막대: 실패(빨강)가 성공(초록)을 감싸고, 성공이 대성공(금색)을 감싼다. 삼각형이 아래위로 오가고, 누른 순간의 위치로 판정한다.
+   생김새: HUD 의 아이템 상자와 같은 반투명 유리 막대.
+   빈 트랙 = 빗나감, 밝은 띠 = 성공, 금색 = 대성공, 흰 점 = 지금 위치. 누른 순간의 점 위치로 판정한다.
+   판정 문구는 점 높이에서 막대 왼쪽에 세리프 글씨로 잠깐 뜬다.
    도구(도끼·낚싯대) 오른쪽 옆에 작게. 모바일 버튼(#mobile .b)과 겹치면 버튼 왼쪽으로 비켜 선다.
    일시정지 중에는 숨는다.
    한 번 판정하면 0.5초 쉬었다가 성공 구간이 새 자리로 옮겨 간다 (같은 자리만 노리는 방식이 통하지 않게).
    요소는 처음 쓸 때 #hud 안에 만든다 */
-const POS = { right: '13%', top: '44%', h: 'min(26vh, 200px)' };   // 기본 위치(화면 오른쪽에서, 세로 가운데)·길이
+const POS = { right: '13%', top: '44%', h: 'min(24vh, 180px)' };   // 기본 위치(화면 오른쪽에서, 세로 가운데)·길이
 let el = null;
 
 /* 기본 자리에 둔 뒤, 화면에 보이는 모바일 버튼과 겹치면 그 버튼 왼쪽으로 옮긴다 */
@@ -22,13 +24,17 @@ function fit(e) {
 function ensure() {
   if (el && el.root.isConnected) return el;
   const hud = document.querySelector('#hud'); if (!hud) return null;
+  /* 유리 테두리(root) 안에 트랙(tr). 성공 띠·대성공 띠·점·판정 문구는 트랙 기준 % 로 놓인다 */
   const root = document.createElement('div');
-  root.style.cssText = 'position:absolute;width:12px;transform:translateY(-50%);opacity:0;transition:opacity .2s;pointer-events:none;z-index:5';
+  root.style.cssText = 'position:absolute;width:20px;padding:6px;border-radius:10px;background:rgba(10,12,18,.45);border:1px solid var(--line);' +
+    'backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transform:translateY(-50%);opacity:0;transition:opacity .2s;pointer-events:none;z-index:5';
   root.innerHTML =
-    '<div style="position:absolute;inset:0;border-radius:6px;background:#b9655a;overflow:hidden;box-shadow:0 0 0 1.5px rgba(0,0,0,.35)">' +
-    '<div data-k="ok" style="position:absolute;left:0;right:0;background:#6aa85a"></div><div data-k="gr" style="position:absolute;left:0;right:0;background:#f0c24f"></div></div>' +
-    '<div data-k="mk" style="position:absolute;left:-15px;width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-left:11px solid #fff;margin-bottom:-7px"></div>' +
-    '<div data-k="fb" style="position:absolute;right:24px;transform:translateY(50%);font-size:15px;font-weight:500;white-space:nowrap;padding:2px 8px;border-radius:8px;background:rgba(0,0,0,.4);opacity:0;transition:opacity .15s"></div>';
+    '<div data-k="tr" style="position:relative;width:100%;height:100%;border-radius:4px;background:rgba(255,255,255,.1)">' +
+    '<div data-k="ok" style="position:absolute;left:0;right:0;border-radius:4px;background:rgba(255,255,255,.3)"></div>' +
+    '<div data-k="gr" style="position:absolute;left:0;right:0;border-radius:3px;background:var(--accent)"></div>' +
+    '<div data-k="mk" style="position:absolute;left:50%;width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.25);transform:translate(-50%,50%)"></div>' +
+    '<div data-k="fb" style="position:absolute;right:24px;transform:translateY(50%);font-family:var(--serif);font-size:15px;letter-spacing:.06em;white-space:nowrap;text-shadow:0 1px 6px #000;opacity:0;transition:opacity .15s"></div>' +
+    '</div>';
   const ban = document.createElement('div');
   ban.style.cssText = 'position:absolute;left:0;right:0;top:17%;text-align:center;font-size:28px;font-weight:500;color:#f3d27a;opacity:0;transition:opacity .25s;pointer-events:none;text-shadow:0 1px 6px rgba(0,0,0,.45);z-index:5';
   /* 결과 카드: 화면 위쪽 (들어 올린 물고기를 가리지 않게) */
@@ -56,15 +62,16 @@ export function gaugeJudge(G) {
   const d = Math.abs(G.p - G.c), r = d < G.great / 2 ? 'great' : d < G.ok / 2 ? 'ok' : 'fail';
   G.flash = r; G.ft = 0.8; G.pause = 0.5; return r;
 }
-const FB = { great: ['대성공!', '#f3d27a'], ok: ['성공', '#a8e08c'], fail: ['실패', '#f0a090'] };
-/* p 0 = 막대 아래, 1 = 위. 판정 문구는 삼각형 높이에서 막대 왼쪽에 뜬다 */
+/* 판정 문구: 실패는 "빗나감"으로 부드럽게 */
+const FB = { great: ['대성공', '#f3d27a'], ok: ['성공', '#cfe8c0'], fail: ['빗나감', '#e8b4a8'] };
+/* p 0 = 막대 아래, 1 = 위. 대성공 띠는 아주 좁아도 4px 은 보이게 */
 export function gaugeShow(G) {
   const e = ensure(); if (!e) return;
   if (ctx.paused) { e.root.style.opacity = 0; return; }
   if (e.dirty) fit(e);
   e.root.style.opacity = 1;
   e.ok.style.bottom = (G.c - G.ok / 2) * 100 + '%'; e.ok.style.height = G.ok * 100 + '%';
-  e.gr.style.bottom = (G.c - G.great / 2) * 100 + '%'; e.gr.style.height = G.great * 100 + '%';
+  e.gr.style.bottom = (G.c - G.great / 2) * 100 + '%'; e.gr.style.height = `max(4px, ${G.great * 100}%)`;
   e.mk.style.bottom = G.p * 100 + '%';
   if (G.ft > 0) { const m = FB[G.flash]; e.fb.textContent = m[0]; e.fb.style.color = m[1]; e.fb.style.bottom = G.p * 100 + '%'; e.fb.style.opacity = Math.min(1, G.ft / 0.3); }
   else e.fb.style.opacity = 0;
