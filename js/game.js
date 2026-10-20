@@ -68,9 +68,12 @@ export function bindInput() {
   chopHooks.stop = endChop; chopHooks.hud = updateHUD;
   fishHooks.hud = updateHUD;
   journalHooks.close = closeJournal;
-  /* 첫 입력에서 오디오를 켠다. 씬이 아직 없으면 main.js 의 빌드 완료 콜백이 메뉴 배경음을 시작한다 */
-  const boot = () => { initAudio(); resumeAudio(); if (!ctx.running) menuAmbience(state.bg); };
-  addEventListener('pointerdown', boot, { once: true }); addEventListener('keydown', boot, { once: true });
+  /* 첫 입력에서 오디오를 켠다. 터치는 손을 뗄 때(pointerup)부터 소리를 켤 수 있어 둘 다 듣는다.
+     모바일은 전화·앱 전환으로 오디오가 멈출 수 있어, 손을 댈 때마다 다시 깨운다 (켜져 있으면 아무 일도 없다).
+     메뉴 배경음은 처음 한 번만 시작한다. 씬이 아직 없으면 main.js 의 빌드 완료 콜백이 시작한다 */
+  let booted = false;
+  const boot = () => { initAudio(); resumeAudio(); if (booted) return; booted = true; if (!ctx.running) menuAmbience(state.bg); };
+  addEventListener('pointerdown', boot); addEventListener('pointerup', boot); addEventListener('keydown', boot, { once: true });
 
   addEventListener('keydown', e => {
     keys[e.code] = true;
@@ -89,6 +92,8 @@ export function bindInput() {
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; hideJoy(); });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
   document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (!inModal()) showPause(); });
+  /* 모바일: 앱을 내리거나 화면이 꺼지면 일시정지 (PC 는 포인터 잠금이 풀리며 이미 멈춘다) */
+  document.addEventListener('visibilitychange', () => { if (document.hidden && ctx.running && isTouch && !ctx.paused && !inModal() && state.mode !== 'sleep') showPause(); });
   canvas().addEventListener('click', () => { if (ctx.running && !isTouch && !locked()) canvas().requestPointerLock(); });
   addEventListener('mousedown', e => { if (e.button !== 0 || !ctx.running || isTouch || !locked()) return; useItem(); });
   addEventListener('mouseup', e => { if (e.button === 0) endSip(); });
@@ -158,7 +163,9 @@ function look(dx, dy, s) {
 }
 function resume() { hidePause(); lock(); }
 
-/* ── 조준: 조준점이 물체의 실루엣 안에 있는 것 ── */
+/* ── 조준: 조준점이 물체의 실루엣 안에 있는 것 ──
+   r = 상호작용 점까지의 바닥 기준 수평 거리 (눈높이 때문에 낮은 물건이 손해 보지 않게).
+   실루엣 크기(hit)는 실제 거리로 잰 각도라 3D 거리를 쓴다 */
 const fwd = new THREE.Vector3(), toT = new THREE.Vector3();
 export function currentTarget() {
   if (cam.t < 1 || inModal() || state.mode === 'sleep' || state.mode === 'chop') return null;
@@ -166,8 +173,10 @@ export function currentTarget() {
   ctx.camera.getWorldDirection(fwd); let best = null, bs = 9;
   for (const it of ctx.W.interact) {
     if (!(it.from || ['walk']).includes(from)) continue;
-    toT.set(it.pos[0], it.pos[1], it.pos[2]).sub(ctx.camera.position); const d = toT.length(); if (d > it.r) continue;
-    toT.normalize(); const ang = Math.acos(clamp(toT.dot(fwd), -1, 1)), edge = Math.atan((it.hit || 0.5) / Math.max(d, 0.2)), s = ang - edge;
+    toT.set(it.pos[0], it.pos[1], it.pos[2]).sub(ctx.camera.position);
+    if (Math.hypot(toT.x, toT.z) > it.r) continue;
+    const d = toT.length(); toT.normalize();
+    const ang = Math.acos(clamp(toT.dot(fwd), -1, 1)), edge = Math.atan((it.hit || 0.5) / Math.max(d, 0.2)), s = ang - edge;
     if (s > 0.1) continue;
     if (s < bs) { bs = s; best = it; }
   }
@@ -497,8 +506,14 @@ export function startGame() {
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }
 function surfaceAt(x, z) { const cfg = ctx.W.cfg; if (onPlatform(x, z)) return 'wood'; if (cfg.water && z - cfg.water.z - shoreOff(x, cfg) < -1.2) return 'wet'; return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass'; }
+/* 걷기 충돌: 몸(반지름 PR)이 네모나 원에 닿으면 막힌다.
+   네모는 "가장 가까운 점까지의 거리"로 재서 모서리를 둥글게 돌아 나간다 (예전엔 네모를 PR 만큼 키워 모서리에서 더 일찍 막혔다) */
 function blockedAt(x, z) {
-  for (const b of BLOCKS) if (x > b.x[0] - PR && x < b.x[1] + PR && z > b.z[0] - PR && z < b.z[1] + PR) return true;
+  for (const b of BLOCKS) {
+    if (b.round) { const r = (b.x[1] - b.x[0]) / 2; if (Math.hypot(x - b.x[0] - r, z - b.z[0] - r) < r + PR) return true; continue; }
+    const dx = Math.max(b.x[0] - x, 0, x - b.x[1]), dz = Math.max(b.z[0] - z, 0, z - b.z[1]);
+    if (dx * dx + dz * dz < PR * PR) return true;
+  }
   for (const t of ctx.W.trees) if (Math.hypot(x - t[0], z - t[1]) < t[2] + PR) return true;
   if (onPlatform(x, z)) return false;
   if (terrainH(x, z, ctx.W.cfg) < -0.35) return true;

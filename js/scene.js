@@ -292,7 +292,11 @@ export function buildScene(bgKey) {
   const ground = makeGround(cfg, W.uTime, W.shoreTex); scene.add(ground); W.groundMat = ground.material;
   if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime, W.heightTex, waterEdge(cfg)); scene.add(W.water); }
   makeVegetation(cfg);
-  if (cfg.dock) { scene.add(makeDock()); W.platforms.push({ x: [4.95, 6.45], z: [-19.15, -7.9], y: 0.36 }); }
+  if (cfg.dock) {
+    scene.add(makeDock()); W.platforms.push({ x: [4.95, 6.45], z: [-19.15, -7.9], y: 0.36 });
+    /* 태클 상자(노트가 놓인 상자)는 원으로 막는다. 미끼 통은 막지 않는다 — 둘 사이가 좁아 둘 다 막으면 부두 끝으로 가는 길이 닫힌다 */
+    W.trees.push([JOURNAL.x, JOURNAL.z, 0.18]);
+  }
   buildFish();
   if (cfg.key === 'beach') {
     const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
@@ -347,26 +351,27 @@ export function buildScene(bgKey) {
   scene.traverse(o => { if (o.userData.noRefl) W.noRefl.push(o); });
 
   /* 상호작용: 바라보고 E 를 누르면 act 를 부른다 (game.js 의 함수). act 가 없으면 그 id 의 자리(SEAT)에 앉는다.
+     r: 바닥 기준 수평 거리. 기준은 "사물 표면에서 약 1.5m 안" — 크기가 있는 사물은 r 에 중심~표면 거리를 더하고,
+        트렁크·텐트·운전석처럼 한 면으로 다가가는 것은 점을 그 면 위에 두고 r 1.5.
      from: 어디서 볼 때 보이는지 ('walk' = 서 있을 때, 그 밖에는 앉은 자리 이름)
      tap: 모바일 행동 버튼에 쓸 짧은 이름 (없으면 label 을 그대로 쓴다) */
   W.interact = [
-    { id: 'trunk',    pos: [0, 1.0, 10.9],      r: 2.6, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기', act: openTrunk },
-    { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 2.2, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기', act: () => sitDown('chair') },
-    { id: 'tent',     pos: [-1.6, 0.7, 0.0],    r: 2.3, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기', act: () => sitDown('tent') },
-    { id: 'car',      pos: [-1.35, 1.0, 8.1],   r: 2.0, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기', act: () => sitDown('car') },
-    { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.4, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },
-    { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 2.3, hit: 0.32, from: ['walk'],          label: () => '장작 패기', act: beginChop },
+    { id: 'trunk',    pos: [0, 1.0, 10.45],     r: 1.5, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기', act: openTrunk },
+    { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 1.8, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기', act: () => sitDown('chair') },
+    { id: 'tent',     pos: [-1.6, 0.7, -0.13],  r: 1.5, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기', act: () => sitDown('tent') },
+    { id: 'car',      pos: [-0.97, 1.0, 8.1],   r: 1.5, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기', act: () => sitDown('car') },
+    { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.2, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },
+    { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 1.7, hit: 0.32, from: ['walk'],          label: () => '장작 패기', act: beginChop },
     { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
-    { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
-    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },
-    { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.4, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
+    { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 1.8, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
+    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 1.8, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },
+    { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.0, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
   ];
   /* 부두 끝: 앉아서 낚시하기 + 태클 상자 위의 노트(물고기 도감). 노트는 서서 내려다볼 때만 (낚시 중에는 시선이 물 쪽으로 묶여 있다).
-     낚시하기는 실제 부두 끝 판자 가장자리에, 도감은 태클 상자 전체를 덮게 둔다.
-     예전에는 낚시하기 중심이 상자 바로 옆 허공(반지름 0.6m)이라 노트 오른쪽(연필 쪽)을 보면 낚시하기가 잡혔다 */
+     낚시하기는 부두 끝 판자 가장자리에(앞에 아무것도 없어 1.8m), 도감은 태클 상자 전체를 덮게 둔다 */
   if (cfg.dock) W.interact.push(
-    { id: 'dock',    pos: [DOCK.x, DOCK.top + 0.04, DOCK.z1 + 0.15], r: 2.4, hit: 0.5,  from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', tap: '낚시하기', act: startFishing },
-    { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z], r: 2.3, hit: 0.28, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
+    { id: 'dock',    pos: [DOCK.x, DOCK.top + 0.04, DOCK.z1 + 0.15], r: 1.8, hit: 0.5,  from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', tap: '낚시하기', act: startFishing },
+    { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z],          r: 1.7, hit: 0.28, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
   );
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();

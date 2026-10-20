@@ -58,7 +58,7 @@ export function initAudio() {
   keys.forEach((k, i) => setTimeout(() => getBank(k), i * 25));
   setTimeout(() => { getChorus(); loadFoley(); }, keys.length * 25 + 25);
 }
-export function resumeAudio() { if (AC && AC.state === 'suspended') AC.resume(); }
+export function resumeAudio() { if (AC && AC.state !== 'running') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.setTargetAtTime(v, AC.currentTime, 0.03); }
 /* 한 모금 포커스: 잔이 입에 닿으면 0.6초에 걸쳐 배경이 살짝 물러나고, 떨어지면 1.5초에 걸쳐 숨을 내쉬듯 돌아온다.
    새 소리를 더하지 않고 믹스만 바꾼다. 같은 상태로 다시 불러도 아무 일도 하지 않으므로 매 프레임 불러도 된다 */

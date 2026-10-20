@@ -10,7 +10,7 @@ import { DOCK } from './dock.js';
 /* ══ 부두 낚시 ══
    부두 끝에 앉으면 낚싯대를 든다. 시선은 game.js 가 물 쪽 180°·아래 약 20°로 제한한다.
    던지기: 바라보는 쪽으로, 거리는 시선 높이로 (수평선 근처 = 멀리, 아래 = 가까이).
-   기다리기: 찌가 1~3번 톡톡(헛입질). 이때 누르면 "너무 일렀다" → 찌를 감아 들인다.
+   버튼은 던진 뒤부터 계속 "챔질"이다. 물기 전에 누르면 "너무 일렀다" → 찌를 감아 들인다. 놓친 직후에 누르면 "이미 도망갔다" → 마찬가지로 감아 들인다.
    입질: FISHING.biteWin 안에 눌러야 챔질 → 게이지. 놓치면 다시 기다린다.
    끌어올리기: 성공 needOk 번 또는 대성공 needGr 번이면 잡힌다. 실패 FISHING.fails 번이면 줄이 풀린다.
    잡으면 눈앞에 들어 이름·크기를 보여 주고, 누르면 놓아준다. 잡은 기록은 물고기 도감(journal.js)에 쌓인다.
@@ -187,6 +187,8 @@ function aimPoint(out) {
   const pitch = Math.asin(cl(_fw.y, -1, 1)), d = lerp(FISHING.cast[0], FISHING.cast[1], sst(FISHING.pitch[0] + 0.05, 0.05, pitch)), hl = Math.hypot(_fw.x, _fw.z) || 1;
   out.set(cam.position.x + _fw.x / hl * d, WY, cam.position.z + _fw.z / hl * d);
 }
+/* 물기 전(또는 놓친 직후)에 챔질하면: 문구를 띄우고 찌를 감아 들인 뒤 다시 던질 수 있게 된다 */
+function reelBack(msg) { banner(msg, 1.2, '#ffffff'); F.p0.copy(bob.position); setSt('reelback'); sfx('reel'); }
 
 export const fishActive = () => F.on;
 export const fishCount = () => F.count;
@@ -216,7 +218,8 @@ export function fishPress() {
   if (!F.on) return;
   switch (F.st) {
     case 'idle': if (F.raise < 0.95) return; aimPoint(F.target); F.flying = false; setSt('cast'); break;
-    case 'wait': banner('너무 일렀다', 1.2, '#ffffff'); F.p0.copy(bob.position); setSt('reelback'); sfx('reel'); break;
+    case 'wait': reelBack('너무 일렀다'); break;
+    case 'missed': reelBack('이미 도망갔다'); break;
     case 'bite': {
       const c = F.cur; F.G = makeGauge(0.9 + 1.1 * c.t, 0.36 - 0.1 * c.t, 0.085 - 0.03 * c.t);
       F.oks = F.gr = F.fails = 0; F.thr = 0.4; F.jt = rnd(1.5, 3); F.jump = -1;
@@ -243,12 +246,14 @@ export function fishPress() {
     case 'caught': if (F.t > 0.7) { F.p0.copy(F.model.position); hideCard(); setSt('release'); } break;
   }
 }
-/* HUD 안내 [아이템 상자 둘째 줄, 모바일 버튼]. 끌어올리는 동안에는 게이지만 보면 되므로 안내를 비운다 */
+/* HUD 안내 [아이템 상자 둘째 줄, 모바일 버튼].
+   버튼에는 누를 수 있는 행동만 쓴다: 던진 뒤 기다리는 동안·놓친 직후도 "챔질" (물기 전에 누르면 "너무 일렀다").
+   움직이는 중(던지는 중·감는 중·놓아주는 중)에는 "…". 끌어올리는 동안에는 게이지만 보면 되므로 안내 줄을 비운다 */
 export function fishHint(btn) {
   return ({
     idle: [`${btn} 던지기`, '던지기'], cast: ['던지는 중', '…'],
-    wait: ['찌를 지켜보는 중', '기다리기'], bite: [`${btn} 물었다`, '챔질'],
-    missed: ['놓쳤다. 다시 기다려보자', '기다리기'], reel: ['', '당기기'],
+    wait: ['찌가 쑥 들어가면 챔질', '챔질'], bite: [`${btn} 물었다`, '챔질'],
+    missed: ['놓쳤다. 다시 기다려보자', '챔질'], reel: ['', '당기기'],
     caught: [`${btn} 놓아주기`, '놓아주기'], release: ['물속으로 돌아갔다', '…'], snap: ['줄이 풀렸다', '…'], reelback: ['찌를 감아 들이는 중', '…'],
   })[F.st] || ['', '…'];
 }

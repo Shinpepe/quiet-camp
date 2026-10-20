@@ -11,6 +11,7 @@ import { clockLabel } from './time.js';
    카드를 누르면 아래 칸에 두 줄로 기록이 나온다:
      붕어 / 3마리 잡음 / 최고 31cm(크기 : 15 ~ 40cm)
      처음 잡은 날 : 호수가 보이는 숲속, 14:03   (처음 잡은 곳을 모르는 예전 기록은 이 줄을 뺀다)
+   세로 폰에서는 카드가 2열 4줄이라 아래 칸이 화면 밖일 수 있다 → 카드를 누르면 아래 칸이 보이게 스크롤한다.
    그림: 낚을 때 쓰는 fishModel 을 처음 열 때 한 번씩 렌더해 둔다 (그림 파일 없음, 종을 추가하면 그림도 저절로 생긴다).
      잡았을 때 눈앞에 든 모습과 같게 — 가로로 누운 옆모습, 머리 쪽이 7° 내려가고 등이 살짝 보인다.
      기울인 물고기 전체가 그림의 가로 84%·세로 74% 안에 들어오도록 카메라를 맞추고, 카드의 그림 칸은 넘치는 부분을 자른다.
@@ -109,7 +110,8 @@ function render() {
     c.className = 'jcard' + (open ? ' open' : ' lock') + (i === sel ? ' sel' : '');
     c.innerHTML = `<div class="jpic">${t ? `<img src="${open ? t.img : t.sil}" alt="">` : ''}${open ? '' : '<span class="jq">?</span>'}</div>` +
       `<div class="jnm">${open ? sp.n : '???'}</div><div class="jsz">${open ? '최고 ' + r.best + 'cm' : '—'}</div>`;
-    if (open) c.onclick = () => { sel = i; render(); };
+    /* 아래 칸이 화면 밖이면(세로 폰) 보이는 곳까지 부드럽게 내린다. 이미 보이면 움직이지 않는다 */
+    if (open) c.onclick = () => { sel = i; render(); el.querySelector('[data-k=det]').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
     grid.append(c);
   });
   el.querySelector('[data-k=sub]').textContent = `${caught} / ${FISH_SPECIES.length}`;
