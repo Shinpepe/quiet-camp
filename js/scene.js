@@ -5,10 +5,12 @@ import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, F
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeSnowCaps, makeLighthouse, makeDriftwood, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints } from './props.js';
-import { makeDock } from './dock.js';
+import { makeDock, JOURNAL } from './dock.js';
 import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
+/* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
+import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal } from './game.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -344,19 +346,25 @@ export function buildScene(bgKey) {
   /* 물 반사에서 뺄 것들 (풀·낙엽·자갈·조개·발자국·낚싯줄 등) */
   scene.traverse(o => { if (o.userData.noRefl) W.noRefl.push(o); });
 
+  /* 상호작용: 바라보고 E 를 누르면 act 를 부른다 (game.js 의 함수). act 가 없으면 그 id 의 자리(SEAT)에 앉는다.
+     from: 어디서 볼 때 보이는지 ('walk' = 서 있을 때, 그 밖에는 앉은 자리 이름) */
   W.interact = [
-    { id: 'trunk',    pos: [0, 1.0, 10.9],      r: 2.6, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기' },
-    { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 2.2, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기' },
-    { id: 'tent',     pos: [-1.6, 0.7, 0.0],    r: 2.3, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기' },
-    { id: 'car',      pos: [-1.35, 1.0, 8.1],   r: 2.0, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기' },
-    { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.4, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기' },
-    { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 2.3, hit: 0.32, from: ['walk'],          label: () => '장작 패기' },
-    { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기' },
-    { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기' },
-    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기' },
-    { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.4, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기' },
+    { id: 'trunk',    pos: [0, 1.0, 10.9],      r: 2.6, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기', act: openTrunk },
+    { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 2.2, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기', act: () => sitDown('chair') },
+    { id: 'tent',     pos: [-1.6, 0.7, 0.0],    r: 2.3, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기', act: () => sitDown('tent') },
+    { id: 'car',      pos: [-1.35, 1.0, 8.1],   r: 2.0, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기', act: () => sitDown('car') },
+    { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.4, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },
+    { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 2.3, hit: 0.32, from: ['walk'],          label: () => '장작 패기', act: beginChop },
+    { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
+    { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 2.0, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
+    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },
+    { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.4, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
   ];
-  if (cfg.dock) W.interact.push({ id: 'dock', pos: [5.7, 0.7, -18.4], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉아 낚시하기' });
+  /* 부두 끝: 앉아서 낚시하기 + 태클 상자 위의 노트(물고기 도감). 노트는 서서 내려다볼 때만 (낚시 중에는 시선이 물 쪽으로 묶여 있다) */
+  if (cfg.dock) W.interact.push(
+    { id: 'dock',    pos: [5.7, 0.7, -18.4], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', act: startFishing },
+    { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z], r: 2.3, hit: 0.2, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
+  );
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();
 }

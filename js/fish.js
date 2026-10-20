@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ctx, records, saveSettings } from './state.js';
+import { ctx, state, records, saveSettings } from './state.js';
 import { FISHING } from './data.js';
 import { rnd, smoothM } from './util.js';
 import { WATER_Y } from './terrain.js';
@@ -13,7 +13,8 @@ import { DOCK } from './dock.js';
    기다리기: 찌가 1~3번 톡톡(헛입질). 이때 누르면 "너무 일렀다" → 찌를 감아 들인다.
    입질: FISHING.biteWin 안에 눌러야 챔질 → 게이지. 놓치면 다시 기다린다.
    끌어올리기: 성공 needOk 번 또는 대성공 needGr 번이면 잡힌다. 실패 FISHING.fails 번이면 줄이 풀린다.
-   잡으면 눈앞에 들어 이름·크기를 보여 주고, 누르면 놓아준다.
+   잡으면 눈앞에 들어 이름·크기를 보여 주고, 누르면 놓아준다. 잡은 기록은 물고기 도감(journal.js)에 쌓인다.
+   끌어올리는 동안과 들어 올린 동안에는 E(일어나기)가 막힌다 (fishBusy).
    줄은 수면을 지나는 지점에서 끊어 그리고, 끌어올릴 때의 물결도 그 지점에서 퍼진다 */
 
 const V = THREE.Vector3, WY = WATER_Y;
@@ -28,8 +29,8 @@ function n3(x, y, z) {
 }
 const hx = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; }, mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
 
-/* game.js 가 연결한다 */
-export const fishHooks = { toast: null, hud: null };
+/* game.js 가 연결한다: hud = 낚시 상태가 바뀔 때마다 안내 갱신 */
+export const fishHooks = { hud: null };
 
 /* ── 물고기 8종: 몸 비율·색·무늬·지느러미. s = 크기 범위(cm) ── */
 export const FISH_SPECIES = [
@@ -126,7 +127,7 @@ function ensureRod() {
 }
 const ROD_BASE = -1.05;
 
-/* ── 상태. count = 이번 캠핑에서 잡은 수 (종별 최고 기록은 state.js 의 records 에 저장) ── */
+/* ── 상태. count = 이번 캠핑에서 잡은 수 (종별 기록은 state.js 의 records.fish 에 저장) ── */
 const F = {
   ok: false, on: false, st: 'idle', t: 0, raise: 0, wait: 0, nibs: [], nibHit: new Set(), G: null, cur: null, oks: 0, gr: 0, fails: 0,
   target: new V(), hook: new V(), p0: new V(), entry: new V(), bend: 0, bendV: 0, thr: 0, jt: 0, jump: -1, model: null, flying: false, count: 0,
@@ -173,7 +174,8 @@ function setLine(a, b, sag) {
   lineGeo.setDrawRange(0, cut < 0 ? LN : cut + 1); p.needsUpdate = true;
 }
 function setSt(s) { F.st = s; F.t = 0; if (fishHooks.hud) fishHooks.hud(); }
-function newFish() { const sp = FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)], size = Math.round(rnd(sp.s[0], sp.s[1])), t = cl((size - 8) / 85, 0, 1); return { sp, size, t, needOk: 3 + Math.round(2 * t), needGr: t > 0.55 ? 2 : 1 }; }
+/* 크기는 작은 쪽이 흔하고 큰 개체는 드물다 (제곱 분포: 범위 위쪽 절반이 약 29%, 위쪽 10% 가 약 5%) */
+function newFish() { const sp = FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)], size = Math.round(sp.s[0] + (sp.s[1] - sp.s[0]) * Math.random() ** 2), t = cl((size - 8) / 85, 0, 1); return { sp, size, t, needOk: 3 + Math.round(2 * t), needGr: t > 0.55 ? 2 : 1 }; }
 function startWait() {
   setSt('wait'); F.wait = rnd(FISHING.wait[0], FISHING.wait[1]); F.nibs = []; F.nibHit.clear();
   const n = FISHING.nibbles[0] + Math.floor(Math.random() * (FISHING.nibbles[1] - FISHING.nibbles[0] + 1));
@@ -188,15 +190,25 @@ function aimPoint(out) {
 
 export const fishActive = () => F.on;
 export const fishCount = () => F.count;
+/* 물고기와 씨름하거나 들어 올린 동안이면 E(일어나기)를 막을 이유를 돌려준다. 아니면 null */
+export function fishBusy() {
+  if (!F.on) return null;
+  if (F.st === 'reel') return '물고기와 씨름하는 중이다';
+  if (F.st === 'caught') return '먼저 물고기를 놓아주자';
+  return null;
+}
 export function beginFish() { if (!F.ok) return false; ensureRod(); F.on = true; setSt('idle'); sfx('rodUp'); return true; }
 export function stopFish() { if (!F.on) return; disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; gaugeHide(); hideCard(); if (fishHooks.hud) fishHooks.hud(); }
 export function resetFish() { disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; F.raise = 0; F.count = 0; if (rodRoot) rodRoot.visible = false; gaugeHide(); hideCard(); }
 
-/* 잡은 물고기 카드: 처음 잡은 종 / 기록 경신 / 기록 이하를 구분해 보여 준다 */
+/* 잡은 물고기 카드 + 도감 기록: 처음 잡은 종 / 기록 경신 / 기록 이하를 구분해 보여 준다.
+   처음 잡은 종은 그 자리의 장소와 게임 속 시각을 함께 남긴다 (도감의 "처음 잡은 날") */
 function catchCard(c) {
-  const prev = records.fish[c.sp.n], rec = !prev || c.size > prev;
-  if (rec) { records.fish[c.sp.n] = c.size; saveSettings(); }
-  const note = !prev ? '처음 잡았다' : rec ? `새 기록 · 이전 ${prev}cm` : `최고 ${prev}cm`;
+  const r = records.fish[c.sp.n], prev = r ? r.best : 0, rec = !r || c.size > prev;
+  if (!r) records.fish[c.sp.n] = { best: c.size, count: 1, first: { bg: ctx.W.cfg.key, clock: state.clock } };
+  else { r.count++; if (rec) r.best = c.size; }
+  saveSettings();
+  const note = !r ? '처음 잡았다. 도감에 기록했다' : rec ? `새 기록, 이전 ${prev}cm` : `최고 ${prev}cm`;
   showCard(`<div style="font-size:19px;font-weight:500">${c.sp.n} ${c.size}cm</div><div style="font-size:12px;color:${rec ? '#c98a10' : '#6a7578'};margin-top:2px">${note}</div>`);
 }
 

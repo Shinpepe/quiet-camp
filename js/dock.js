@@ -10,9 +10,11 @@ import { makeLantern } from './props.js';
    판자는 짙은 나무색으로, 길이·색·높이·기울기를 조금씩 다르게, 양끝 들보 위에 못 자국.
    기둥은 물 높이에 젖은 띠, 둘레에 잔물결 고리(fish.js 가 일렁이게 한다).
    난간은 없애 앉아서 던질 때 시야를 트고, 랜턴은 물가 쪽 첫 기둥 위로. 물가에는 디딤판.
-   끝자락: 미끼 통·태클 상자.
+   끝자락: 미끼 통·태클 상자, 태클 상자 위에 낚시 노트(물고기 도감)와 연필.
    DOCK 은 fish.js·scene.js·data.js(SEAT.dock)와 맞춘다 */
 export const DOCK = { x: 5.7, top: 0.36, z0: -8.2, z1: -19.2, half: 0.78 };
+/* 태클 상자(와 그 위 노트)의 자리. scene.js 의 도감 상호작용도 이 값을 쓴다 (y = 노트 윗면 근처) */
+export const JOURNAL = { x: DOCK.x - 0.5, y: DOCK.top + 0.18, z: DOCK.z1 + 0.75 };
 
 export function makeDock() {
   const W = ctx.W, cfg = W.cfg, g = new THREE.Group(), X = DOCK.x, TOP = DOCK.top;
@@ -72,7 +74,18 @@ export function makeDock() {
   const tb = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.2), smoothM(0x3f6a4a, { roughness: 0.5 })); tb.position.y = 0.07; tackle.add(tb);
   const tl = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.03, 0.21), smoothM(0x35593e, { roughness: 0.5 })); tl.position.y = 0.155; tackle.add(tl);
   const lt = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.01), smoothM(0xc0c0c0, { metalness: 0.8 })); lt.position.set(0, 0.14, 0.105); tackle.add(lt);
-  tackle.position.set(X - 0.5, TOP, tz + 0.15); tackle.rotation.y = 0.3; g.add(tackle);
+  /* 태클 상자 위의 낚시 노트(물고기 도감): 앞뒤 표지 사이로 종이 단면이 보이고, 고무 밴드 하나. 옆에 연필 한 자루.
+     뚜껑 윗면(y 0.17)에 그대로 얹는다 */
+  const NB = 0.17, cover = smoothM(0x4a3426, { roughness: 0.8 }), paper = smoothM(0xe8e0cc, { roughness: 0.95 }), bandM = smoothM(0x1e1e1e, { roughness: 0.6 });
+  const note = new THREE.Group(); note.position.y = NB; note.rotation.y = -0.08; tackle.add(note);
+  const part = (w, h, dd, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), m); b.position.set(x, y, z); note.add(b); return b; };
+  part(0.14, 0.003, 0.18, cover, 0, 0.0015, 0);
+  part(0.134, 0.01, 0.174, paper, 0, 0.008, 0);
+  part(0.14, 0.003, 0.18, cover, 0, 0.0145, 0);
+  part(0.006, 0.0165, 0.182, bandM, 0.052, 0.008, 0);
+  const pencil = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.12, 6), smoothM(0xd9a63a, { roughness: 0.6 })); pencil.rotation.x = Math.PI / 2; pencil.position.set(0.115, NB + 0.0035, -0.01); tackle.add(pencil);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.0035, 0.014, 6), smoothM(0xc9a97c, { roughness: 0.8 })); tip.rotation.x = Math.PI / 2; tip.position.set(0.115, NB + 0.0035, 0.057); tackle.add(tip);
+  tackle.position.set(JOURNAL.x, TOP, JOURNAL.z); tackle.rotation.y = 0.3; g.add(tackle);
 
   shadowed(g);
   W.dockRings.forEach(r => { r.castShadow = false; r.receiveShadow = false; });

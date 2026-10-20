@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ctx, state, settings, saveSettings } from './state.js';
+import { ctx, state, settings, saveSettings, DAY_LEN } from './state.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
@@ -8,11 +8,14 @@ import { buildScene, precompileScene, rebakeEnv, compileReflection } from './sce
 import { clockLabel } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
-import { beginFish, stopFish, resetFish, fishPress, fishActive, fishHint, fishHooks, fishCount } from './fish.js';
+import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHint, fishHooks, fishCount } from './fish.js';
+import { showJournal, hideJournal, journalHooks } from './journal.js';
 import { hideAllFx, gaugeHide } from './gauge.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
-   장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다 ── */
+   장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
+   무엇을 바라보면 무엇이 일어나는지는 scene.js 의 W.interact 에 act 로 적는다 (act 가 없으면 그 id 의 자리에 앉는다).
+   트렁크·도감처럼 화면을 덮는 창이 열린 동안에는 걷기·마시기·E 안내가 멈추고, E 나 ESC 로 닫는다 ── */
 
 const FINE = matchMedia('(pointer:fine)').matches;
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
@@ -20,10 +23,14 @@ export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, y
 /* 마시기: mouth = 잔이 입에 닿았는지, leftLips = 입술에서 떨어졌는지, lastGulp·nextSwallow = '꿀꺽' 시각 */
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null };
 const keys = {}; let toastT = null, tMove = null, tLook = null;
+/* 낚시하는 동안 맡겨 둔 손의 물건 { type, amount }. 부두에서 일어나면 돌려준다 */
+let stashed = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
 export const isNightClock = c => c < 0.22 || c > 0.8;
 const NITEMS = Object.keys(ITEMS).length;
+/* 화면을 덮는 창(트렁크·도감)이 열려 있는지 */
+const inModal = () => state.mode === 'trunk' || state.mode === 'journal';
 
 /* 지오메트리·재질을 GPU 에서 해제한다. 텍스처(softTex 등)는 여러 곳이 공유하므로 건드리지 않는다 */
 function disposeTree(root) {
@@ -56,8 +63,9 @@ const timingMode = () => state.mode === 'chop' || fishActive();
 function timingPress() { if (cam.t < 1 || ctx.paused) return; if (state.mode === 'chop') chopPress(); else if (fishActive()) fishPress(); }
 
 export function bindInput() {
-  chopHooks.stop = endChop; chopHooks.toast = showToast; chopHooks.hud = updateHUD;
-  fishHooks.toast = showToast; fishHooks.hud = updateHUD;
+  chopHooks.stop = endChop; chopHooks.hud = updateHUD;
+  fishHooks.hud = updateHUD;
+  journalHooks.close = closeJournal;
   /* 첫 입력에서 오디오를 켠다. 씬이 아직 없으면 main.js 의 빌드 완료 콜백이 메뉴 배경음을 시작한다 */
   const boot = () => { initAudio(); resumeAudio(); if (!ctx.running) menuAmbience(state.bg); };
   addEventListener('pointerdown', boot, { once: true }); addEventListener('keydown', boot, { once: true });
@@ -69,8 +77,8 @@ export function bindInput() {
     if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) { e.preventDefault(); startGame(); } return; }
     if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape' || e.code === 'Space') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
-    /* 트렁크가 열려 있으면 포인터 잠금이 풀려 있어 ESC 가 일시정지로 이어지지 않는다 */
-    if (e.code === 'Escape' && state.mode === 'trunk') { closeTrunk(); return; }
+    /* 트렁크·도감이 열려 있으면 포인터 잠금이 풀려 있어 ESC 가 일시정지로 이어지지 않는다 → 여기서 닫는다 */
+    if (e.code === 'Escape' && inModal()) { if (state.mode === 'trunk') closeTrunk(); else closeJournal(); return; }
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyP') takePhoto();
     if (state.mode === 'trunk' && /^Digit[1-9]$/.test(e.code)) trunkKey(+e.code[5]);
@@ -78,7 +86,7 @@ export function bindInput() {
   addEventListener('keyup', e => { keys[e.code] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; hideJoy(); });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
-  document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (state.mode !== 'trunk') showPause(); });
+  document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (!inModal()) showPause(); });
   canvas().addEventListener('click', () => { if (ctx.running && !isTouch && !locked()) canvas().requestPointerLock(); });
   addEventListener('mousedown', e => { if (e.button !== 0 || !ctx.running || isTouch || !locked()) return; useItem(); });
   addEventListener('mouseup', e => { if (e.button === 0) endSip(); });
@@ -92,9 +100,9 @@ export function bindInput() {
   $('#pause').addEventListener('click', e => { if (e.target === $('#pause')) resume(); });
   $('#pausebtn').style.display = isTouch ? '' : 'none';
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
-  /* 메뉴로 나가기: 잠자기 페이드·꽂아 둔 스파클라·장작 패기·낚시를 정리하고, 자리는 운전석으로 되돌린다
-     (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다) */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
+  /* 메뉴로 나가기: 잠자기 페이드·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
+     (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   $('#mAct').onclick = interact;
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다 */
@@ -102,15 +110,20 @@ export function bindInput() {
   ms.onpointerdown = e => { e.preventDefault(); try { ms.setPointerCapture(e.pointerId); } catch (_) {} useItem(); };
   ms.onpointerup = ms.onpointercancel = endSip; ms.oncontextmenu = e => e.preventDefault();
   $('#start').onclick = startGame;
-  /* 슬라이더: 같은 키의 메뉴·일시정지 슬라이더를 함께 움직이고 저장한다 */
-  const bindRange = (id, key, fmt, apply) => {
-    const el = $('#' + id); el.dataset.k = key; el.value = settings[key];
+  /* 슬라이더: 같은 키의 메뉴·일시정지 슬라이더를 함께 움직이고 저장한다.
+     map 을 주면 슬라이더 값과 설정 값을 서로 바꿔 준다 (하루 길이: 단계 번호 0..3 ↔ 30·60·120·240분) */
+  const bindRange = (id, key, fmt, apply, map) => {
+    const el = $('#' + id), toUI = map ? map.toUI : v => v, fromUI = map ? map.fromUI : v => v;
+    el.dataset.k = key; el.value = toUI(settings[key]);
     const paint = () => document.querySelectorAll('[id^=' + key + 'V]').forEach(l => { l.textContent = fmt(settings[key]); });
     paint();
-    el.oninput = () => { settings[key] = +el.value; document.querySelectorAll('input[data-k=' + key + ']').forEach(o => { o.value = el.value; }); paint(); apply && apply(settings[key]); saveSettings(); };
+    el.oninput = () => { settings[key] = fromUI(+el.value); document.querySelectorAll('input[data-k=' + key + ']').forEach(o => { o.value = el.value; }); paint(); apply && apply(settings[key]); saveSettings(); };
   };
   bindRange('vol', 'vol', v => Math.round(v * 100) + '%', setVolume); bindRange('vol2', 'vol', v => Math.round(v * 100) + '%', setVolume);
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
+  /* 하루 길이: 바꾸는 즉시 시간이 흐르는 속도만 달라진다 (지금 시각은 그대로) */
+  const dayMap = { toUI: v => Math.max(0, DAY_LEN.indexOf(v)), fromUI: i => DAY_LEN[i] }, dayFmt = m => m < 60 ? m + '분' : m / 60 + '시간';
+  bindRange('day', 'dayMin', dayFmt, null, dayMap); bindRange('day2', 'dayMin', dayFmt, null, dayMap);
   bindToggle('flow', 'flow', () => {});
   bindToggle('shadow', 'shadow', on => {
     ctx.renderer.shadowMap.enabled = on; ctx.renderer.shadowMap.needsUpdate = true;
@@ -146,7 +159,7 @@ function resume() { hidePause(); lock(); }
 /* ── 조준: 조준점이 물체의 실루엣 안에 있는 것 ── */
 const fwd = new THREE.Vector3(), toT = new THREE.Vector3();
 export function currentTarget() {
-  if (cam.t < 1 || state.mode === 'trunk' || state.mode === 'sleep' || state.mode === 'chop') return null;
+  if (cam.t < 1 || inModal() || state.mode === 'sleep' || state.mode === 'chop') return null;
   const from = state.mode === 'walk' ? 'walk' : state.seat;
   ctx.camera.getWorldDirection(fwd); let best = null, bs = 9;
   for (const it of ctx.W.interact) {
@@ -159,7 +172,7 @@ export function currentTarget() {
   return best;
 }
 function startMove(to, yawTo, pitchTo) { cam.from.copy(ctx.camera.position); cam.to.copy(to); cam.t = 0; cam.yawFrom = wrapPI(player.yaw); cam.yawTo = yawTo; cam.pitchFrom = player.pitch; cam.pitchTo = pitchTo === undefined ? player.pitch : pitchTo; }
-function sitDown(id, quiet) {
+export function sitDown(id, quiet) {
   const st = SEAT[id]; state.mode = 'seated'; state.seat = id;
   /* 부두 끝: 물 쪽(정면)을 보고 앉는다 */
   const yawTo = id === 'dock' ? 0 : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : undefined;
@@ -172,41 +185,42 @@ function standUp() {
   if (state.seat === 'dock') stopFish();
   if (state.seat === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (state.seat === 'tent') sfx('zipper', 'close'); else sfx('stand');
   player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); setIndoor(false);
+  restoreStashed();
 }
-/* 부두 끝에 앉으면 손에 든 것을 내려놓고 낚싯대를 든다. 타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙) */
-function startFishing() {
+/* 부두 끝에 앉으면 손에 든 것을 맡겨 두고 낚싯대를 든다 (일어날 때 남은 양 그대로 돌려준다).
+   타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙) */
+export function startFishing() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
-  if (state.item) putBack(); sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다');
+  if (state.item && ctx.W.item) { stashed = { type: state.item, amount: ctx.W.item.userData.amount }; putBack(); }
+  sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다');
 }
-function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx(W.fireLit ? 'fireOn' : 'fireOff'); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); }
+/* 맡겨 둔 물건을 다시 손에 든다. 트렁크에서 꺼낼 때와 달리 붓는 소리·얼음 소리는 내지 않는다 */
+function restoreStashed() {
+  const s = stashed; stashed = null; if (!s) return;
+  const it = makeItem(s.type), ud = it.userData;
+  ud.amount = s.amount; ud.setAmount(s.amount);
+  state.item = s.type; ctx.hand.add(it); ctx.W.item = it; resetHand();
+  showToast(josa(ITEMS[s.type].name, '을', '를') + ' 다시 들었다');
+}
+export function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx(W.fireLit ? 'fireOn' : 'fireOff'); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); }
 const LAMP = { lantern: { flag: 'lanternLit', name: '랜턴' }, tentLamp: { flag: 'tentLampLit', name: '텐트 랜턴' }, dome: { flag: 'domeLit', name: '실내등' } };
-function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx(k === 'dome' ? 'ui' : ctx.W[L.flag] ? 'lampOn' : 'lampOff'); showToast(josa(L.name, '을', '를') + (ctx.W[L.flag] ? ' 켰다' : ' 껐다')); }
+export function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx(k === 'dome' ? 'ui' : ctx.W[L.flag] ? 'lampOn' : 'lampOff'); showToast(josa(L.name, '을', '를') + (ctx.W[L.flag] ? ' 켰다' : ' 껐다')); }
 
 export function interact() {
   if (cam.t < 1 || ctx.paused || state.mode === 'sleep') return;
   if (state.mode === 'trunk') { closeTrunk(); return; }
+  if (state.mode === 'journal') { closeJournal(); return; }
   if (state.mode === 'chop') { requestChopStop(); return; }
+  /* 물고기와 씨름하거나 들어 올린 동안에는 일어나지 않는다 */
+  const busy = fishBusy(); if (busy) { showToast(busy); return; }
   const t = currentTarget();
-  if (t) act(t.id);
+  if (t) { if (t.act) t.act(); else sitDown(t.id); }
   else if (state.mode === 'seated') { if (state.seat === 'bed') sitDown('tent', true); else standUp(); }
   updateHUD(); anim.lastTargetId = undefined;
 }
-function act(id) {
-  switch (id) {
-    case 'trunk': openTrunk(); break;
-    case 'fire': toggleFire(); break;
-    case 'lantern': toggleLamp('lantern'); break;
-    case 'tentLamp': toggleLamp('tentLamp'); break;
-    case 'dome': toggleLamp('dome'); break;
-    case 'bed': startSleep(); break;
-    case 'stump': beginChop(); break;
-    case 'dock': startFishing(); break;
-    default: sitDown(id);
-  }
-}
 
 /* ── 장작 패기: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ── */
-function beginChop() {
+export function beginChop() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
   if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('장작을 팰 자리가 없다'); return; }
   anim.sipT = null; anim.holding = false; anim.mouth = false; if (state.item) resetHand(); ctx.hand.visible = false;
@@ -219,8 +233,11 @@ function endChop() {
   startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); updateHUD();
 }
 
-function openTrunk() { state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunkOpen'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD(); }
+export function openTrunk() { state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunkOpen'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD(); }
 function closeTrunk() { if (state.mode !== 'trunk') return; state.mode = 'walk'; $('#trunk').classList.remove('on'); sfx('trunkClose'); lock(); updateHUD(); }
+/* ── 물고기 도감: 부두 끝 태클 상자 위의 노트. 열고 닫을 때 종이가 스치는 부드러운 소리(천 스침 소리를 함께 쓴다) ── */
+export function openJournal() { state.mode = 'journal'; anim.holding = false; showJournal(); sfx('rodUp'); if (!isTouch) document.exitPointerLock(); updateHUD(); }
+function closeJournal() { if (state.mode !== 'journal') return; state.mode = 'walk'; hideJournal(); sfx('rodUp'); lock(); updateHUD(); }
 function trunkKey(n) { sfx('ui'); const ks = Object.keys(ITEMS); if (n <= ks.length) { pickItem(ks[n - 1]); closeTrunk(); } else if (n === ks.length + 1 && state.item) { putBack(); closeTrunk(); } }
 function renderTrunk() {
   const box = $('#trunkItems'); box.innerHTML = '';
@@ -248,7 +265,7 @@ export function resetHand() {
    장작 패기·낚시 중이면 클릭이 타이밍 입력. 마시는 소리('꿀꺽')는 main.js 가 잔의 움직임에 맞춰 낸다 ── */
 function useItem() {
   if (timingMode()) { timingPress(); return; }
-  if (!state.item || !ctx.W.item || state.mode === 'trunk' || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
+  if (!state.item || !ctx.W.item || inModal() || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
   if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
   if (anim.sipT !== null) return;
   if (ctx.W.item.userData.amount <= 0) { showToast(state.item === 'smoke' ? '다 피웠다' : '잔이 비었다'); return; }
@@ -289,7 +306,7 @@ export function itemEmptied() {
 
 /* ── 잠자기: 언제 잠들든 다음 아침 7시(WAKE)에 깬다 ── */
 const sleep = { on: false, phase: '', t: 0, from: 0, to: 0 };
-function startSleep() {
+export function startSleep() {
   sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
   $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('bag');
@@ -329,7 +346,8 @@ export function updateCaption() { $('#capText').textContent = BG[state.bg].name 
 export function updateHUD() {
   updateCaption();
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
-  ib.classList.toggle('on', chop || fish || (!!state.item && state.mode !== 'trunk' && state.mode !== 'sleep'));
+  const covered = inModal() || state.mode === 'sleep';
+  ib.classList.toggle('on', chop || fish || (!!state.item && !covered));
   /* 기록은 이름 줄 안에 넣는다 — .hn 은 모바일 세로에서 숨겨진다 */
   const sub = t => `<span style="display:block;font-size:.82em;opacity:.8;margin-top:2px">${t}</span>`;
   if (chop) {
@@ -347,12 +365,14 @@ export function updateHUD() {
     ib.querySelector('.hn').textContent = empty ? '비었다. 트렁크에서 새로 꺼내기' : ud && ud.lit ? btn + ' 땅에 꽂기 (타는 중)' : btn + ' ' + def.act + (def.hold ? ', 길게 누르면 계속' : '');
     $('#mSip').textContent = ud && ud.lit ? '땅에 꽂기' : def.act;
   }
-  $('#mSip').style.display = chop || fish || (state.item && state.mode !== 'trunk' && state.mode !== 'sleep') ? '' : 'none';
+  $('#mSip').style.display = chop || fish || (state.item && !covered) ? '' : 'none';
   anim.lastTargetId = undefined; updatePrompt();
 }
 export function updatePrompt() {
   const p = $('#prompt');
-  if (state.mode === 'trunk' || state.mode === 'sleep') { p.classList.remove('on'); $('#cross').classList.remove('hot'); anim.lastTargetId = null; return; }
+  if (inModal() || state.mode === 'sleep') { p.classList.remove('on'); $('#cross').classList.remove('hot'); anim.lastTargetId = null; return; }
+  /* 물고기와 씨름하거나 들어 올린 동안에는 E 가 막혀 있으므로 안내도 숨긴다 */
+  if (fishBusy()) { if (anim.lastTargetId !== 'fishBusy') { anim.lastTargetId = 'fishBusy'; p.classList.remove('on'); $('#cross').classList.remove('hot'); } return; }
   const chop = state.mode === 'chop', t = currentTarget(), id = t ? t.id : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
   if (id === anim.lastTargetId) return; anim.lastTargetId = id;
   const label = t ? t.label() : state.mode === 'seated' ? SEAT[state.seat].up : chop ? '그만하기' : null;
@@ -442,7 +462,7 @@ export function startGame() {
   initAudio(); resumeAudio(); sfx('uiGo');
   const fade = $('#fade'); fade.style.opacity = 1; $('#menu').classList.add('hidden');
   const begin = () => {
-    putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false; anim.exhale = 0;
+    stashed = null; putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false; anim.exhale = 0;
     ctx.camera.position.set(...SEAT.car.pos); ctx.camera.rotation.set(0, 0, 0);
     const night = isNightClock(state.clock);
     ctx.W.wasNight = night;
