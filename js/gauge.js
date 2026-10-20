@@ -100,6 +100,8 @@ export function banner(text, dur = 1.4, color = '#f3d27a') {
   e.ban.textContent = text; e.ban.style.color = color; e.ban.style.opacity = 1;
   clearTimeout(e.banT); e.banT = setTimeout(() => { e.ban.style.opacity = 0; }, dur * 1000);
 }
+/* 신호를 바로 거둔다 — 입질에 챔질했을 때처럼, 반응하고 나면 더 띄워 둘 이유가 없을 때 */
+export function hideBanner() { if (!el) return; clearTimeout(el.banT); el.ban.style.opacity = 0; }
 export function showCard(html) { const e = ensure(); if (!e) return; e.card.innerHTML = html; e.card.style.opacity = 1; }
 export function hideCard() { if (el) el.card.style.opacity = 0; }
 export function hideAllFx() { if (!el) return; el.root.style.opacity = 0; el.card.style.opacity = 0; el.ban.style.opacity = 0; clearTimeout(el.banT); }

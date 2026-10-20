@@ -4,7 +4,7 @@ import { FISHING } from './data.js';
 import { rnd, smoothM } from './util.js';
 import { WATER_Y } from './terrain.js';
 import { sfx } from './audio.js';
-import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner, toast, showCard, hideCard } from './gauge.js';
+import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner, hideBanner, toast, showCard, hideCard } from './gauge.js';
 import { DOCK } from './dock.js';
 
 /* ══ 부두 낚시 ══
@@ -201,7 +201,7 @@ export function fishBusy() {
   return null;
 }
 export function beginFish() { if (!F.ok) return false; ensureRod(); F.on = true; setSt('idle'); sfx('rodUp'); return true; }
-export function stopFish() { if (!F.on) return; disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; gaugeHide(); hideCard(); if (fishHooks.hud) fishHooks.hud(); }
+export function stopFish() { if (!F.on) return; disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; gaugeHide(); hideCard(); hideBanner(); if (fishHooks.hud) fishHooks.hud(); }
 export function resetFish() { disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; F.raise = 0; F.count = 0; if (rodRoot) rodRoot.visible = false; gaugeHide(); hideCard(); }
 
 /* 잡은 물고기 카드 + 도감 기록: 처음 잡은 종 / 기록 경신 / 기록 이하를 구분해 보여 준다.
@@ -226,7 +226,7 @@ export function fishPress() {
       F.oks = F.gr = F.fails = 0; F.thr = 0.4; F.jt = rnd(1.5, 3); F.jump = -1;
       F.hook.copy(F.target).setY(WY - 0.25);
       disposeModel(F.model); F.model = fishModel(c.sp); F.model.scale.setScalar(c.size / 100); F.model.visible = false; ctx.scene.add(F.model);
-      toast(c.t < 0.35 ? '가볍다' : c.t < 0.65 ? '묵직하다' : '아주 묵직하다');
+      hideBanner(); toast(c.t < 0.35 ? '가볍다' : c.t < 0.65 ? '묵직하다' : '아주 묵직하다');
       F.bendV += 0.25; sfx('reel'); setSt('reel'); break;
     }
     case 'reel': {
