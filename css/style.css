@@ -58,8 +58,12 @@ h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:.12em;
 .legend{margin-top:14px;font-size:11px;color:var(--mute);line-height:2.1}
 .legend b{color:var(--ink);font-weight:500;margin-right:4px}
 .preview-tag{position:absolute;right:calc(26px + var(--sar));bottom:calc(22px + var(--sab));font-size:11px;letter-spacing:.25em;color:var(--mute);text-shadow:0 1px 6px #000}
-.settings{display:grid;grid-template-columns:auto 1fr auto;gap:8px 12px;align-items:center;font-size:12px;color:var(--mute)}
+/* 설정 칸: 이름 / 조절 / 값. 셋째 칸(값 글자)은 폭을 고정한다.
+   auto 로 두면 "30분"↔"1시간"처럼 글자 폭이 바뀔 때마다 칸이 늘었다 줄며 모든 줄의 슬라이더 길이가 함께 움직인다.
+   3.4em = 가장 긴 값("100%", "4시간")보다 조금 넉넉한 폭. 숫자는 같은 너비로 그려 감도·음량 값이 떨리지 않게 */
+.settings{display:grid;grid-template-columns:auto 1fr 3.4em;gap:8px 12px;align-items:center;font-size:12px;color:var(--mute)}
 .settings>span:nth-child(3n+1){white-space:nowrap}
+.settings>span:nth-child(3n){white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 .settings input[type=range]{width:100%;accent-color:var(--accent)}
 .toggle{width:38px;height:22px;border-radius:99px;background:rgba(255,255,255,.15);position:relative;cursor:pointer;transition:.2s}
 .toggle::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s}

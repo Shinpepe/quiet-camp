@@ -5,7 +5,7 @@ import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, F
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeSnowCaps, makeLighthouse, makeDriftwood, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints } from './props.js';
-import { makeDock, JOURNAL } from './dock.js';
+import { makeDock, DOCK, JOURNAL } from './dock.js';
 import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
@@ -360,10 +360,12 @@ export function buildScene(bgKey) {
     { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 2.0, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },
     { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.4, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
   ];
-  /* 부두 끝: 앉아서 낚시하기 + 태클 상자 위의 노트(물고기 도감). 노트는 서서 내려다볼 때만 (낚시 중에는 시선이 물 쪽으로 묶여 있다) */
+  /* 부두 끝: 앉아서 낚시하기 + 태클 상자 위의 노트(물고기 도감). 노트는 서서 내려다볼 때만 (낚시 중에는 시선이 물 쪽으로 묶여 있다).
+     낚시하기는 실제 부두 끝 판자 가장자리에, 도감은 태클 상자 전체를 덮게 둔다.
+     예전에는 낚시하기 중심이 상자 바로 옆 허공(반지름 0.6m)이라 노트 오른쪽(연필 쪽)을 보면 낚시하기가 잡혔다 */
   if (cfg.dock) W.interact.push(
-    { id: 'dock',    pos: [5.7, 0.7, -18.4], r: 2.0, hit: 0.6, from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', act: startFishing },
-    { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z], r: 2.3, hit: 0.2, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
+    { id: 'dock',    pos: [DOCK.x, DOCK.top + 0.04, DOCK.z1 + 0.15], r: 2.4, hit: 0.5,  from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', act: startFishing },
+    { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z], r: 2.3, hit: 0.28, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
   );
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();

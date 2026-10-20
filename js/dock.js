@@ -13,8 +13,9 @@ import { makeLantern } from './props.js';
    끝자락: 미끼 통·태클 상자, 태클 상자 위에 낚시 노트(물고기 도감)와 연필.
    DOCK 은 fish.js·scene.js·data.js(SEAT.dock)와 맞춘다 */
 export const DOCK = { x: 5.7, top: 0.36, z0: -8.2, z1: -19.2, half: 0.78 };
-/* 태클 상자(와 그 위 노트)의 자리. scene.js 의 도감 상호작용도 이 값을 쓴다 (y = 노트 윗면 근처) */
-export const JOURNAL = { x: DOCK.x - 0.5, y: DOCK.top + 0.18, z: DOCK.z1 + 0.75 };
+/* 태클 상자(와 그 위 노트)의 자리. scene.js 의 도감 상호작용도 이 값을 쓴다.
+   y 는 상자 한가운데 높이 (상자 바닥 0 ~ 노트 윗면 0.19 의 중간) → 상호작용 반지름이 상자·노트·연필을 고르게 덮는다 */
+export const JOURNAL = { x: DOCK.x - 0.5, y: DOCK.top + 0.1, z: DOCK.z1 + 0.75 };
 
 export function makeDock() {
   const W = ctx.W, cfg = W.cfg, g = new THREE.Group(), X = DOCK.x, TOP = DOCK.top;
