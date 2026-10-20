@@ -347,7 +347,8 @@ export function buildScene(bgKey) {
   scene.traverse(o => { if (o.userData.noRefl) W.noRefl.push(o); });
 
   /* 상호작용: 바라보고 E 를 누르면 act 를 부른다 (game.js 의 함수). act 가 없으면 그 id 의 자리(SEAT)에 앉는다.
-     from: 어디서 볼 때 보이는지 ('walk' = 서 있을 때, 그 밖에는 앉은 자리 이름) */
+     from: 어디서 볼 때 보이는지 ('walk' = 서 있을 때, 그 밖에는 앉은 자리 이름)
+     tap: 모바일 행동 버튼에 쓸 짧은 이름 (없으면 label 을 그대로 쓴다) */
   W.interact = [
     { id: 'trunk',    pos: [0, 1.0, 10.9],      r: 2.6, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기', act: openTrunk },
     { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 2.2, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기', act: () => sitDown('chair') },
@@ -364,7 +365,7 @@ export function buildScene(bgKey) {
      낚시하기는 실제 부두 끝 판자 가장자리에, 도감은 태클 상자 전체를 덮게 둔다.
      예전에는 낚시하기 중심이 상자 바로 옆 허공(반지름 0.6m)이라 노트 오른쪽(연필 쪽)을 보면 낚시하기가 잡혔다 */
   if (cfg.dock) W.interact.push(
-    { id: 'dock',    pos: [DOCK.x, DOCK.top + 0.04, DOCK.z1 + 0.15], r: 2.4, hit: 0.5,  from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', act: startFishing },
+    { id: 'dock',    pos: [DOCK.x, DOCK.top + 0.04, DOCK.z1 + 0.15], r: 2.4, hit: 0.5,  from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', tap: '낚시하기', act: startFishing },
     { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z], r: 2.3, hit: 0.28, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
   );
   if (ctx.post) ctx.post.setScene(scene);

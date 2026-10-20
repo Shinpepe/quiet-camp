@@ -63,6 +63,8 @@ const timingMode = () => state.mode === 'chop' || fishActive();
 function timingPress() { if (cam.t < 1 || ctx.paused) return; if (state.mode === 'chop') chopPress(); else if (fishActive()) fishPress(); }
 
 export function bindInput() {
+  /* 모바일이면 body 에 touch 를 단다 → style.css 가 키 표시(E·숫자)를 숨긴다 */
+  document.body.classList.toggle('touch', isTouch);
   chopHooks.stop = endChop; chopHooks.hud = updateHUD;
   fishHooks.hud = updateHUD;
   journalHooks.close = closeJournal;
@@ -368,16 +370,30 @@ export function updateHUD() {
   $('#mSip').style.display = chop || fish || (state.item && !covered) ? '' : 'none';
   anim.lastTargetId = undefined; updatePrompt();
 }
+/* 모바일 행동 버튼: 지금 할 수 있는 행동 이름을 그대로 버튼에 쓴다 (E 안내 대신).
+   할 것이 없으면 숨긴다 — 자리는 그대로 두어(visibility) 옆 버튼이 움직이지 않게.
+   글자가 바뀌면 살짝 튀어 올라 눈에 띄게 한다 (style.css 의 .pop) */
+function setAct(text) {
+  const b = $('#mAct');
+  if (!text) { b.style.visibility = 'hidden'; return; }
+  if (b.textContent !== text || b.style.visibility === 'hidden') {
+    b.textContent = text; b.style.visibility = '';
+    b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
+  }
+}
+/* 안내: PC 는 화면 가운데 "E 행동", 모바일은 행동 버튼의 글자. 조준 표시(가운데 동그라미)는 둘 다 같다 */
 export function updatePrompt() {
-  const p = $('#prompt');
-  if (inModal() || state.mode === 'sleep') { p.classList.remove('on'); $('#cross').classList.remove('hot'); anim.lastTargetId = null; return; }
-  /* 물고기와 씨름하거나 들어 올린 동안에는 E 가 막혀 있으므로 안내도 숨긴다 */
-  if (fishBusy()) { if (anim.lastTargetId !== 'fishBusy') { anim.lastTargetId = 'fishBusy'; p.classList.remove('on'); $('#cross').classList.remove('hot'); } return; }
+  const p = $('#prompt'), cross = $('#cross');
+  const off = () => { p.classList.remove('on'); cross.classList.remove('hot'); if (isTouch) setAct(null); };
+  if (inModal() || state.mode === 'sleep') { off(); anim.lastTargetId = null; return; }
+  /* 물고기와 씨름하거나 들어 올린 동안에는 E 가 막혀 있으므로 안내도(모바일은 버튼도) 숨긴다 */
+  if (fishBusy()) { if (anim.lastTargetId !== 'fishBusy') { anim.lastTargetId = 'fishBusy'; off(); } return; }
   const chop = state.mode === 'chop', t = currentTarget(), id = t ? t.id : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
   if (id === anim.lastTargetId) return; anim.lastTargetId = id;
   const label = t ? t.label() : state.mode === 'seated' ? SEAT[state.seat].up : chop ? '그만하기' : null;
+  cross.classList.toggle('hot', !!t);
+  if (isTouch) { p.classList.remove('on'); setAct((t && t.tap) || label); return; }
   if (label) { p.innerHTML = `<kbd class="a">E</kbd>${label}`; p.classList.add('on'); } else p.classList.remove('on');
-  $('#cross').classList.toggle('hot', !!t);
 }
 function showPause() { if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock); }
 function hidePause() { if (ctx.paused) sfx('uiClose'); ctx.paused = false; $('#pause').classList.remove('on'); }
