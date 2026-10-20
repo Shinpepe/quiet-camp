@@ -4,13 +4,14 @@ import { FISHING } from './data.js';
 import { rnd, smoothM } from './util.js';
 import { WATER_Y } from './terrain.js';
 import { sfx } from './audio.js';
-import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner, showCard, hideCard } from './gauge.js';
+import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner, toast, showCard, hideCard } from './gauge.js';
 import { DOCK } from './dock.js';
 
 /* ══ 부두 낚시 ══
    부두 끝에 앉으면 낚싯대를 든다. 시선은 game.js 가 물 쪽 180°·아래 약 20°로 제한한다.
    던지기: 바라보는 쪽으로, 거리는 시선 높이로 (수평선 근처 = 멀리, 아래 = 가까이).
-   버튼은 던진 뒤부터 계속 "챔질"이다. 물기 전에 누르면 "너무 일렀다" → 찌를 감아 들인다. 놓친 직후에 누르면 "이미 도망갔다" → 마찬가지로 감아 들인다.
+   버튼은 던진 뒤부터 계속 "챔질"이다. 물기 전에 누르면 "너무 일렀다" → 찌를 감아 들인다. 놓친 직후에 누르면 "물고기가 달아났다" → 마찬가지로 감아 들인다.
+   문구: 입질 "!"만 화면 가운데(신호), 무게·실패는 위쪽 소식, 잡은 물고기는 기록 카드 (gauge.js 머리 주석 참고).
    입질: FISHING.biteWin 안에 눌러야 챔질 → 게이지. 놓치면 다시 기다린다.
    끌어올리기: 성공 needOk 번 또는 대성공 needGr 번이면 잡힌다. 실패 FISHING.fails 번이면 줄이 풀린다.
    잡으면 눈앞에 들어 이름·크기를 보여 주고, 누르면 놓아준다. 잡은 기록은 물고기 도감(journal.js)에 쌓인다.
@@ -188,14 +189,14 @@ function aimPoint(out) {
   out.set(cam.position.x + _fw.x / hl * d, WY, cam.position.z + _fw.z / hl * d);
 }
 /* 물기 전(또는 놓친 직후)에 챔질하면: 문구를 띄우고 찌를 감아 들인 뒤 다시 던질 수 있게 된다 */
-function reelBack(msg) { banner(msg, 1.2, '#ffffff'); F.p0.copy(bob.position); setSt('reelback'); sfx('reel'); }
+function reelBack(msg) { toast(msg); F.p0.copy(bob.position); setSt('reelback'); sfx('reel'); }
 
 export const fishActive = () => F.on;
 export const fishCount = () => F.count;
 /* 물고기와 씨름하거나 들어 올린 동안이면 E(일어나기)를 막을 이유를 돌려준다. 아니면 null */
 export function fishBusy() {
   if (!F.on) return null;
-  if (F.st === 'reel') return '물고기와 씨름하는 중이다';
+  if (F.st === 'reel') return '먼저 물고기를 끌어올리자';
   if (F.st === 'caught') return '먼저 물고기를 놓아주자';
   return null;
 }
@@ -211,7 +212,7 @@ function catchCard(c) {
   else { r.count++; if (rec) r.best = c.size; }
   saveSettings();
   const note = !r ? '처음 잡았다. 도감에 기록했다' : rec ? `새 기록, 이전 ${prev}cm` : `최고 ${prev}cm`;
-  showCard(`<div style="font-size:19px;font-weight:500">${c.sp.n} ${c.size}cm</div><div style="font-size:12px;color:${rec ? '#c98a10' : '#6a7578'};margin-top:2px">${note}</div>`);
+  showCard(`<div style="font-family:var(--serif);font-size:18px;letter-spacing:.04em">${c.sp.n} ${c.size}cm</div><div style="font-size:12px;color:${rec ? 'var(--accent)' : 'var(--mute)'};margin-top:3px">${note}</div>`);
 }
 
 export function fishPress() {
@@ -219,13 +220,13 @@ export function fishPress() {
   switch (F.st) {
     case 'idle': if (F.raise < 0.95) return; aimPoint(F.target); F.flying = false; setSt('cast'); break;
     case 'wait': reelBack('너무 일렀다'); break;
-    case 'missed': reelBack('이미 도망갔다'); break;
+    case 'missed': reelBack('물고기가 달아났다'); break;
     case 'bite': {
       const c = F.cur; F.G = makeGauge(0.9 + 1.1 * c.t, 0.36 - 0.1 * c.t, 0.085 - 0.03 * c.t);
       F.oks = F.gr = F.fails = 0; F.thr = 0.4; F.jt = rnd(1.5, 3); F.jump = -1;
       F.hook.copy(F.target).setY(WY - 0.25);
       disposeModel(F.model); F.model = fishModel(c.sp); F.model.scale.setScalar(c.size / 100); F.model.visible = false; ctx.scene.add(F.model);
-      banner(c.t < 0.35 ? '작은 입질' : c.t < 0.65 ? '묵직하다' : '엄청 무겁다', 1.2, '#ffffff');
+      toast(c.t < 0.35 ? '가볍다' : c.t < 0.65 ? '묵직하다' : '아주 묵직하다');
       F.bendV += 0.25; sfx('reel'); setSt('reel'); break;
     }
     case 'reel': {
@@ -239,7 +240,7 @@ export function fishPress() {
         ring(F.entry.x, F.entry.z, 0.9, 1.2); sfx('fishOut'); gaugeHide(); setSt('caught');
         catchCard(c);
       } else if (F.fails >= FISHING.fails) {
-        banner('줄이 풀려 도망갔다', 1.8, '#ffffff'); sfx('snap'); disposeModel(F.model); F.model = null; gaugeHide(); setSt('snap');
+        toast('줄이 풀렸다'); sfx('snap'); disposeModel(F.model); F.model = null; gaugeHide(); setSt('snap');
       }
       break;
     }
@@ -293,7 +294,7 @@ export function updateFish(dt) {
     }
     case 'bite':
       bob.position.set(F.target.x, lerp(WY + 0.02, WY - 0.18, Math.min(1, F.t / 0.15)), F.target.z); sag = 0.06; bend = 0.32 + 0.06 * Math.sin(T * 24);
-      if (F.t > FISHING.biteWin) { banner('물고기가 도망갔다', 1.6, '#ffffff'); setSt('missed'); }
+      if (F.t > FISHING.biteWin) { toast('물고기가 달아났다'); setSt('missed'); }
       break;
     case 'missed':
       bob.position.set(F.target.x, lerp(WY - 0.18, WY + 0.02, Math.min(1, F.t / 0.4)), F.target.z); sag = 0.4;

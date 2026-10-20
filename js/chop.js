@@ -6,7 +6,7 @@ import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 import { sfx } from './audio.js';
 import { makeAxe, AXE_EDGE } from './props.js';
-import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner } from './gauge.js';
+import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide } from './gauge.js';
 
 /* ══ 장작 패기 ══
    타이밍 게이지: 성공 CHOP_GAUGE.hits 번이면 쪼개지고, 대성공은 한 번에 쪼개진다. 실패는 벌점 없이 튕기기만 한다.
@@ -179,6 +179,8 @@ export function startChop(px, pz, free) {
 export function chopPress() {
   if (!C.on || C.st !== 'ready' || !C.log || !C.log.landed) return;
   const r = gaugeJudge(C.G); if (!r) return;
+  /* 연속 대성공은 게이지 옆 판정 글자로 (예전엔 화면 가운데 배너였다) */
+  if (r === 'great' && C.combo >= 1) C.G.label = `${C.combo + 1}연속 대성공`;
   C.res = r; C.st = 'raise'; C.t = 0; C.from = C.a;
   sfx('chopWhoosh', { p: r === 'great' ? 1 : r === 'ok' ? 0.5 : 0.2, d: T_STRIKE + T_RAISE * 0.5 });
 }
@@ -260,7 +262,6 @@ function impact() {
   if (great) {
     C.combo++;
     if (C.combo > records.chopBest) { records.chopBest = C.combo; saveSettings(); }
-    if (C.combo >= 2) banner(`대성공 ${C.combo}연속`, 1.5);
     if (navigator.vibrate) navigator.vibrate(30);
     split(1.3); return;
   }

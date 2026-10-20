@@ -10,7 +10,7 @@ import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, se
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
 import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHint, fishHooks, fishCount } from './fish.js';
 import { showJournal, hideJournal, journalHooks } from './journal.js';
-import { hideAllFx, gaugeHide } from './gauge.js';
+import { hideAllFx, gaugeHide, toast } from './gauge.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -22,7 +22,7 @@ export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false }
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
 /* 마시기: mouth = 잔이 입에 닿았는지, leftLips = 입술에서 떨어졌는지, lastGulp·nextSwallow = '꿀꺽' 시각 */
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null };
-const keys = {}; let toastT = null, tMove = null, tLook = null;
+const keys = {}; let tMove = null, tLook = null;
 /* 낚시하는 동안 맡겨 둔 손의 물건 { type, amount }. 부두에서 일어나면 돌려준다 */
 let stashed = null;
 const canvas = () => ctx.renderer.domElement;
@@ -233,7 +233,7 @@ export function interact() {
 /* ── 장작 패기: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ── */
 export function beginChop() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
-  if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('장작을 팰 자리가 없다'); return; }
+  if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('조금 비켜서 다시 해 보자'); return; }
   anim.sipT = null; anim.holding = false; anim.mouth = false; if (state.item) resetHand(); ctx.hand.visible = false;
   const eye = chopEye();
   state.mode = 'chop'; state.seat = null; player.x = eye.x; player.z = eye.z;
@@ -294,7 +294,7 @@ function igniteSparkler() {
 const _UP = new THREE.Vector3(0, 1, 0), _nrm = new THREE.Vector3();
 function plantSparkler() {
   const it = ctx.W.item, ud = it.userData; if (!ud.lit) return;
-  if (state.mode !== 'walk') { showToast('서 있을 때 꽂을 수 있다'); return; }
+  if (state.mode !== 'walk') { showToast('일어서서 꽂자'); return; }
   const s = Math.sin(player.yaw), c = Math.cos(player.yaw);
   let px = player.x - s * 0.75, pz = player.z - c * 0.75;
   if (blockedAt(px, pz)) { px = player.x + c * 0.4; pz = player.z - s * 0.4; }
@@ -351,7 +351,8 @@ export function updateSleep(dt) {
   }
 }
 
-export function showToast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
+/* 소식(위쪽 토스트)은 gauge.js 가 띄운다 — 낚시·장작 패기도 같은 곳을 쓰도록 한 곳에 모았다 */
+export const showToast = toast;
 export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
 /* 아이템 상자: 첫 줄 = 이름(+ 기록), 둘째 줄 = 조작 안내 */
 export function updateHUD() {
