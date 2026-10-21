@@ -188,8 +188,8 @@ function loop(now) {
   W.shT += dt; if (W.shT >= (ctx.running && state.mode === 'chop' ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
-  /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 살짝 들린다 */
-  if (W.coolerLid) { W.coolerT = Math.max(0, (W.coolerT || 0) - dt); const tgt = W.coolerT > 0 ? -0.75 : 0; W.coolerLid.rotation.x += (tgt - W.coolerLid.rotation.x) * Math.min(1, dt * 9); }
+  /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 80° 까지 열렸다가 바로 닫힌다 */
+  if (W.coolerLid) { W.coolerT = Math.max(0, (W.coolerT || 0) - dt); const tgt = W.coolerT > 0 ? -1.4 : 0; W.coolerLid.rotation.x += (tgt - W.coolerLid.rotation.x) * Math.min(1, dt * 6); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
   if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = (0.45 + 0.4 * Math.sin(T * 1.7)) * Math.min(1, W.tm.stars * 2.5); }
   if (W.cfg.birds && W.sunUp) { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }

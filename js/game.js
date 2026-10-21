@@ -283,10 +283,10 @@ function refreshGuide() {
 }
 
 /* ── 아이스박스: 바라보고 E. 꼬치가 없으면 마시멜로 꼬치를 꺼내고, 들고 있으면(빈 꼬치 포함) 넣는다.
-   꺼낼 때 들고 있던 다른 물건은 트렁크에서 고를 때처럼 내려놓는다. 뚜껑이 살짝 들렸다 닫힌다 (main.js 가 W.coolerT 동안 연다) ── */
+   꺼낼 때 들고 있던 다른 물건은 트렁크에서 고를 때처럼 내려놓는다. 뚜껑이 열렸다 닫힌다 (main.js 가 W.coolerT 동안 연다) ── */
 export function useCooler() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
-  ctx.W.coolerT = 0.75; sfx('cooler'); setTimeout(() => sfx('cooler', 'close'), 800);
+  ctx.W.coolerT = 0.7; sfx('cooler'); setTimeout(() => sfx('cooler', 'close'), 1100);
   if (state.item === 'marsh') { putBack(); showToast('꼬치를 넣었다'); } else pickItem('marsh');
 }
 

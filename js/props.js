@@ -534,7 +534,7 @@ function makeCooler(M) {
   /* 안쪽: 뚜껑이 들릴 때 보이는 어두운 바닥 (닫혀 있으면 뚜껑 속에 묻힌다) */
   add(new THREE.ShapeGeometry(roundRectShape(0.49, 0.32, 0.02)).rotateX(-Math.PI / 2), M.dark, 0, 0.3805, 0);
   /* 뚜껑: 뒤쪽 경첩(z −0.2)을 축으로 열린다. 가운데가 8mm 부풀어 있고, 걸쇠 윗부분이 함께 움직인다.
-     g.userData.lid 를 main.js 가 돌린다 (아이스박스에서 꼬치를 꺼내거나 넣을 때 살짝 들렸다 닫힌다) */
+     g.userData.lid 를 main.js 가 돌린다 (아이스박스에서 꼬치를 꺼내거나 넣을 때 열렸다 닫힌다) */
   const lid = new THREE.Group(); lid.position.set(0, 0.38, -0.2); g.add(lid); g.userData.lid = lid;
   const lidPart = (geo, x, y, z) => { const m = new THREE.Mesh(geo, M.lid); m.position.set(x, y - 0.38, z + 0.2); lid.add(m); return m; };
   lidPart(roundedBox(0.57, 0.07, 0.4, 0.025, { dome: 0.008 }), 0, 0.38, 0);
@@ -852,9 +852,8 @@ function makeMarsh() {
   /* 손잡이 쪽 껍질: 벗긴 나무보다 1.2mm 두껍고, 끝자락이 살짝 들쭉날쭉하게 벗겨졌다 */
   const bp = []; for (let i = 0; i <= 6; i++) bp.push(path.getPointAt(0.3 * i / 6));
   g.add(new THREE.Mesh(tube(new THREE.CatmullRomCurve3(bp), 16, t => (radius(t * 0.3) + 0.0012) * (t > 0.92 ? 0.97 : 1)), barkM));
-  /* 곁가지를 쳐낸 자국 + 손잡이 끝의 잘린 단면 */
-  const knot = new THREE.Mesh(new THREE.ConeGeometry(0.0032, 0.01, 6), barkM); knot.position.copy(path.getPointAt(0.5)).add(new V3(0.0055, 0.002, 0)); knot.rotation.z = -1.2; g.add(knot);
-  const cut = new THREE.Mesh(new THREE.CircleGeometry(radius(0) + 0.0012, 12), smoothM(0xc9a97c, { roughness: 0.85, map: T.wood.map })); cut.position.set(0, 0, 0.06); g.add(cut);
+  /* 손잡이 끝의 잘린 단면: 곡선 시작점에 붙인다 (꼬치 길이를 바꿔도 따라간다) */
+  const cut = new THREE.Mesh(new THREE.CircleGeometry(radius(0) + 0.0012, 12), smoothM(0xc9a97c, { roughness: 0.85, map: T.wood.map })); cut.position.copy(path.getPointAt(0)); g.add(cut);
   /* 마시멜로 */
   const mm = new THREE.Mesh(marshGeo(), marshMat()); mm.position.set(0, 0, -MARSH_AT); g.add(mm);
   const core = new THREE.Object3D(); core.position.copy(mm.position); g.add(core);
