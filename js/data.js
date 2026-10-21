@@ -54,6 +54,22 @@ export const ITEMS = {
   smoke:    { name: '담배', ic: ICON.smoke, act: '한 모금', hold: true, ds: '연기가 바람에 흩어진다' },
   sparkler: { name: '스파클라', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
 };
+
+/* 캠핑 메모(조수석 담요 위의 줄노트)에 적힌 할 일
+   key: 읽음 기록(state.js 의 records.memoRead)에 남는 이름표 — 한 번 정하면 바꾸지 않는다
+   only: 이 장소에서만 메모에 적힌다 (없으면 모든 장소)
+   새 콘텐츠를 넣을 때 여기에 한 줄 더하면, 그 장소 메모에 안 읽은 줄이 생겨 "조수석 메모를 보자" 안내가 다시 뜬다 */
+export const MEMO = [
+  { key: 'trunk', text: '차 트렁크를 열어 짐 꺼내기' },
+  { key: 'chop',  text: '모닥불 옆 장작 패기' },
+  { key: 'fire',  text: '모닥불 피우기' },
+  { key: 'chair', text: '의자에 앉아 한숨 돌리기' },
+  { key: 'fish',  text: '부두 끝에서 낚시하기', only: ['lake'] },
+  { key: 'sleep', text: '텐트 안 침낭에서 하룻밤 자기' },
+];
+/* 이 장소의 메모에 적힐 줄 */
+export const memoFor = bg => MEMO.filter(m => !m.only || m.only.includes(bg));
+
 /* 부두 끝 자리는 dock.js 의 DOCK(끝 z −19.2, 윗면 0.36)에 맞춘다: 끝 판자 가장자리에 걸터앉은 눈높이 */
 export const SEAT = {
   car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },

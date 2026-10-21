@@ -109,6 +109,20 @@ const naviTex = canvasTex(256, 128, (g, w, h) => {
 });
 naviTex.colorSpace = THREE.SRGBColorSpace;
 
+/* 조수석의 캠핑 메모: 크림색 줄노트에 손글씨 자국 몇 줄 (읽을 수 있는 글자는 memo.js 의 창에 있다) */
+const memoTex = canvasTex(256, 360, (g, w, h) => {
+  g.fillStyle = '#efe6d1'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(70,104,150,.4)'; g.lineWidth = 1.5;
+  for (let y = 56; y < h - 10; y += 26) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  g.strokeStyle = 'rgba(200,96,84,.5)'; g.beginPath(); g.moveTo(34, 0); g.lineTo(34, h); g.stroke();
+  /* 손글씨: 물결치는 짧은 선으로 제목 한 줄 + 번호와 할 일 여섯 줄 */
+  g.strokeStyle = 'rgba(58,50,40,.7)'; g.lineCap = 'round';
+  const scribble = (x, y, len, lw) => { g.lineWidth = lw; g.beginPath(); g.moveTo(x, y); for (let t = 0; t <= len; t += 4) g.lineTo(x + t, y + Math.sin(t * 0.55) * 2.2 + Math.sin(t * 0.13) * 1.2); g.stroke(); };
+  scribble(48, 44, 96, 3);
+  [150, 118, 92, 140, 128, 166].forEach((len, i) => { const y = 76 + i * 26; scribble(42, y, 6, 2.2); scribble(56, y, len, 2.2); });
+});
+memoTex.colorSpace = THREE.SRGBColorSpace;
+
 export function contactShadow(x, z, sx, sz, op) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, opacity: op || 0.9, depthWrite: false }));
   m.rotation.x = -Math.PI / 2; m.position.set(x, terrainH(x, z, ctx.W.cfg) + 0.02, z); ctx.scene.add(m);
@@ -395,6 +409,9 @@ function makeCarInterior(M) {
   });
   /* 조수석에 접어 둔 담요 */
   add(roundedBox(0.36, 0.05, 0.32, 0.02), M.blanket, P, 0.775, FZ - 0.02, 0, 0.2);
+  /* 담요 위의 캠핑 메모: 살짝 비뚤게 놓인 A5 줄노트 한 장. 담요 윗면(0.825)에서 2mm 띄운다.
+     위쪽(제목)이 앞유리 쪽 — 조수석에 앉은 사람이 읽는 방향. scene.js 의 메모 상호작용이 이 자리를 쓴다 */
+  add(new THREE.PlaneGeometry(0.15, 0.21), smoothM(0xffffff, { map: memoTex, roughness: 0.92 }), P - 0.02, 0.827, FZ - 0.03, -Math.PI / 2, 0, 0.45);
   /* 실내등: 지붕 안쪽(헤드라이너 아랫면 y 1.805) 가운데. 빛 닿는 거리 3.2m — 차 안과 바로 주변만 비춘다. 그림자는 만들지 않는다 */
   add(roundedBox(0.24, 0.025, 0.13, 0.012), M.trim, 0, 1.78, 0.32);
   const lens = add(roundedBox(0.17, 0.012, 0.08, 0.006), M.lens, 0, 1.772, 0.32);

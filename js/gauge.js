@@ -4,6 +4,7 @@ import { ctx } from './state.js';
    신호  banner()  화면 가운데 큰 글씨. 지금 바로 반응해야 하는 것만 (낚시 입질 "!")
    판정  gauge     게이지 옆 세리프 글씨. 대성공·성공·빗나감, 연속이면 "3연속 대성공" (G.label)
    소식  toast()   위쪽 유리 알약. 행동의 결과와 막힌 이유 전부 (불·랜턴·마시기·낚시 실패·무게 등)
+   안내  guide()   소식과 같은 자리에 거둘 때까지 떠 있는 한 줄 (캠핑 메모 안내). 소식이 오면 잠깐 비켜 줬다가 돌아온다
    기록  card      소식 아래 유리 카드. 드물고 남겨 둘 만한 순간 (잡은 물고기)
    말투: 결과는 "~했다", 막혔을 때는 "~하자", 진행 중은 "~하는 중"(아이템 상자 안내 줄), 판정은 두세 글자 명사
 
@@ -16,13 +17,27 @@ import { ctx } from './state.js';
    한 번 판정하면 0.5초 쉬었다가 성공 구간이 새 자리로 옮겨 간다 (같은 자리만 노리는 방식이 통하지 않게).
    요소는 처음 쓸 때 #hud 안에 만든다 (토스트는 index.html 의 #toast) */
 const POS = { right: '13%', top: '44%', h: 'min(24vh, 180px)' };   // 기본 위치(화면 오른쪽에서, 세로 가운데)·길이
-let el = null, toastT = null;
+let el = null, toastT = null, backT = null, guideMsg = null;
+const pill = () => document.getElementById('toast');
+function showPill(t, msg) { t.textContent = msg; t.classList.add('on'); }
 
-/* 소식: 2.2초 보였다가 사라진다. 새 소식이 오면 바로 바꿔 쓴다 */
+/* 소식: 2.2초 보였다가 사라진다. 새 소식이 오면 바로 바꿔 쓴다.
+   안내가 떠 있었다면 소식이 잠깐 그 자리를 덮고, 소식이 사라진 뒤 0.5초 있다 안내가 돌아온다 */
 export function toast(msg) {
-  const t = document.getElementById('toast'); if (!t) return;
-  t.textContent = msg; t.classList.add('on');
-  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200);
+  const t = pill(); if (!t) return;
+  clearTimeout(toastT); clearTimeout(backT); showPill(t, msg);
+  toastT = setTimeout(() => {
+    toastT = null; t.classList.remove('on');
+    if (guideMsg) backT = setTimeout(() => { if (guideMsg && !toastT) showPill(t, guideMsg); }, 500);
+  }, 2200);
+}
+/* 안내: 거둘 때까지(null) 소식 자리에 떠 있는 한 줄. 같은 글이면 아무것도 하지 않는다.
+   소식이 떠 있는 동안 바뀌면 글만 기억해 두고, 소식이 끝난 뒤에 보여 준다 */
+export function guide(msg) {
+  msg = msg || null; if (msg === guideMsg) return; guideMsg = msg;
+  if (toastT) return;
+  const t = pill(); if (!t) return; clearTimeout(backT);
+  if (msg) showPill(t, msg); else t.classList.remove('on');
 }
 
 /* 기본 자리에 둔 뒤, 화면에 보이는 모바일 버튼과 겹치면 그 버튼 왼쪽으로 옮긴다 */

@@ -10,7 +10,7 @@ import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 /* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
-import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal } from './game.js';
+import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo } from './game.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -366,6 +366,7 @@ export function buildScene(bgKey) {
     { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 1.8, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
     { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 1.8, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },
     { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.0, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
+    { id: 'memo',     pos: [0.43, 0.83, 8.05],  r: 1.0, hit: 0.14, from: ['car'],           label: () => '캠핑 메모 보기', tap: '메모 보기', act: openMemo },
   ];
   /* 부두 끝: 앉아서 낚시하기 + 태클 상자 위의 노트(물고기 도감). 노트는 서서 내려다볼 때만 (낚시 중에는 시선이 물 쪽으로 묶여 있다).
      낚시하기는 부두 끝 판자 가장자리에(앞에 아무것도 없어 1.8m), 도감은 태클 상자 전체를 덮게 둔다 */

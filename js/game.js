@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { ctx, state, settings, saveSettings, DAY_LEN } from './state.js';
-import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING } from './data.js';
+import { ctx, state, settings, saveSettings, DAY_LEN, records } from './state.js';
+import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
@@ -10,13 +10,13 @@ import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, se
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
 import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHint, fishHooks, fishCount } from './fish.js';
 import { showJournal, hideJournal, journalHooks } from './journal.js';
-import { hideAllFx, gaugeHide, toast } from './gauge.js';
+import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
+import { showMemo, hideMemo, memoHooks } from './memo.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
    무엇을 바라보면 무엇이 일어나는지는 scene.js 의 W.interact 에 act 로 적는다 (act 가 없으면 그 id 의 자리에 앉는다).
-   트렁크·도감처럼 화면을 덮는 창이 열린 동안에는 걷기·마시기·E 안내가 멈추고, E 나 ESC 로 닫는다 ── */
-
+   트렁크·도감·메모처럼 화면을 덮는 창이 열린 동안에는 걷기·마시기·E 안내가 멈추고, E 나 ESC 로 닫는다 ── */
 const FINE = matchMedia('(pointer:fine)').matches;
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
@@ -29,8 +29,8 @@ const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
 export const isNightClock = c => c < 0.22 || c > 0.8;
 const NITEMS = Object.keys(ITEMS).length;
-/* 화면을 덮는 창(트렁크·도감)이 열려 있는지 */
-const inModal = () => state.mode === 'trunk' || state.mode === 'journal';
+/* 화면을 덮는 창(트렁크·도감·메모)이 열려 있는지 */
+const inModal = () => state.mode === 'trunk' || state.mode === 'journal' || state.mode === 'memo';
 
 /* 지오메트리·재질을 GPU 에서 해제한다. 텍스처(softTex 등)는 여러 곳이 공유하므로 건드리지 않는다 */
 function disposeTree(root) {
@@ -68,6 +68,7 @@ export function bindInput() {
   chopHooks.stop = endChop; chopHooks.hud = updateHUD;
   fishHooks.hud = updateHUD;
   journalHooks.close = closeJournal;
+  memoHooks.close = closeMemo;
   /* 첫 입력에서 오디오를 켠다. 터치는 손을 뗄 때(pointerup)부터 소리를 켤 수 있어 둘 다 듣는다.
      모바일은 전화·앱 전환으로 오디오가 멈출 수 있어, 손을 댈 때마다 다시 깨운다 (켜져 있으면 아무 일도 없다).
      메뉴 배경음은 처음 한 번만 시작한다. 씬이 아직 없으면 main.js 의 빌드 완료 콜백이 시작한다 */
@@ -82,8 +83,7 @@ export function bindInput() {
     if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) { e.preventDefault(); startGame(); } return; }
     if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape' || e.code === 'Space') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
-    /* 트렁크·도감이 열려 있으면 포인터 잠금이 풀려 있어 ESC 가 일시정지로 이어지지 않는다 → 여기서 닫는다 */
-    if (e.code === 'Escape' && inModal()) { if (state.mode === 'trunk') closeTrunk(); else closeJournal(); return; }
+    if (e.code === 'Escape' && inModal()) { closeModal(); return; }
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyP') takePhoto();
     if (state.mode === 'trunk' && /^Digit[1-9]$/.test(e.code)) trunkKey(+e.code[5]);
@@ -91,7 +91,7 @@ export function bindInput() {
   addEventListener('keyup', e => { keys[e.code] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; hideJoy(); });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
-  document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; } else if (!inModal()) showPause(); });
+  document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; if (!guideReady) { guideReady = true; refreshGuide(); } } else if (!inModal()) showPause(); });
   /* 모바일: 앱을 내리거나 화면이 꺼지면 일시정지 (PC 는 포인터 잠금이 풀리며 이미 멈춘다) */
   document.addEventListener('visibilitychange', () => { if (document.hidden && ctx.running && isTouch && !ctx.paused && !inModal() && state.mode !== 'sleep') showPause(); });
   canvas().addEventListener('click', () => { if (ctx.running && !isTouch && !locked()) canvas().requestPointerLock(); });
@@ -109,7 +109,7 @@ export function bindInput() {
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
   /* 메뉴로 나가기: 잠자기 페이드·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
      (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   $('#mAct').onclick = interact;
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다 */
@@ -221,6 +221,7 @@ export function interact() {
   if (cam.t < 1 || ctx.paused || state.mode === 'sleep') return;
   if (state.mode === 'trunk') { closeTrunk(); return; }
   if (state.mode === 'journal') { closeJournal(); return; }
+  if (state.mode === 'memo') { closeMemo(); return; }
   if (state.mode === 'chop') { requestChopStop(); return; }
   /* 물고기와 씨름하거나 들어 올린 동안에는 일어나지 않는다 */
   const busy = fishBusy(); if (busy) { showToast(busy); return; }
@@ -249,6 +250,31 @@ function closeTrunk() { if (state.mode !== 'trunk') return; state.mode = 'walk';
 /* ── 물고기 도감: 부두 끝 태클 상자 위의 노트. 열고 닫을 때 종이가 스치는 부드러운 소리(천 스침 소리를 함께 쓴다) ── */
 export function openJournal() { state.mode = 'journal'; anim.holding = false; showJournal(); sfx('rodUp'); if (!isTouch) document.exitPointerLock(); updateHUD(); }
 function closeJournal() { if (state.mode !== 'journal') return; state.mode = 'walk'; hideJournal(); sfx('rodUp'); lock(); updateHUD(); }
+
+/* ── 캠핑 메모: 조수석 담요 위의 줄노트. 운전석에서만 열 수 있고, 닫으면 다시 운전석에 앉은 채로 돌아온다.
+   열면 지금 장소 메모에 적힌 줄의 이름표를 "읽음"으로 남긴다 (state.js records.memoRead) ── */
+export function openMemo() {
+  const list = memoFor(state.bg);
+  state.mode = 'memo'; anim.holding = false; showMemo(list); sfx('rodUp'); if (!isTouch) document.exitPointerLock();
+  let added = false; list.forEach(m => { if (!records.memoRead.includes(m.key)) { records.memoRead.push(m.key); added = true; } });
+  if (added) saveSettings();
+  updateHUD();
+}
+function closeMemo() { if (state.mode !== 'memo') return; state.mode = 'seated'; hideMemo(); sfx('rodUp'); lock(); updateHUD(); }
+/* ESC 로 닫기: 지금 열린 창을 닫는다 */
+function closeModal() { if (state.mode === 'trunk') closeTrunk(); else if (state.mode === 'journal') closeJournal(); else closeMemo(); }
+
+/* ── 메모 안내: 지금 장소의 메모에 아직 안 읽은 줄이 있으면 소식 자리에 계속 띄운다 ──
+   시작 직후에는 띄우지 않는다: PC 는 화면을 클릭해 조작이 시작된 뒤, 모바일은 화면이 밝아진 뒤부터 (guideReady).
+   운전석에 앉아 있으면 "내리기 전에…", 그 밖에서는 "차 조수석의…". 잠자는 동안에는 숨긴다.
+   updateHUD 가 부를 때마다 다시 판단하므로 자리·모드가 바뀌면 문구도 따라 바뀐다 */
+let guideReady = false, guideSess = 0;
+const memoUnread = () => memoFor(state.bg).some(m => !records.memoRead.includes(m.key));
+function refreshGuide() {
+  if (!ctx.running || !guideReady || state.mode === 'sleep' || !memoUnread()) { guide(null); return; }
+  guide(state.mode === 'seated' && state.seat === 'car' ? '내리기 전에 조수석 메모를 보자' : '차 조수석의 메모를 보자');
+}
+
 function trunkKey(n) { sfx('ui'); const ks = Object.keys(ITEMS); if (n <= ks.length) { pickItem(ks[n - 1]); closeTrunk(); } else if (n === ks.length + 1 && state.item) { putBack(); closeTrunk(); } }
 function renderTrunk() {
   const box = $('#trunkItems'); box.innerHTML = '';
@@ -357,6 +383,7 @@ export function updateCaption() { $('#capText').textContent = BG[state.bg].name 
 /* 아이템 상자: 첫 줄 = 이름(+ 기록), 둘째 줄 = 조작 안내 */
 export function updateHUD() {
   updateCaption();
+  refreshGuide();
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
   const covered = inModal() || state.mode === 'sleep';
   ib.classList.toggle('on', chop || fish || (!!state.item && !covered));
@@ -496,7 +523,9 @@ export function startGame() {
     startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
     setIndoor(true);
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
+    guideReady = false; const gs = ++guideSess;
     ctx.running = true; updateHUD(); fade.style.opacity = 0;
+    if (isTouch) setTimeout(() => { if (gs !== guideSess || !ctx.running) return; guideReady = true; refreshGuide(); }, 700);
     $('#lockmsg').style.opacity = isTouch ? 0 : 0.85;
     $('#caption').classList.add('bright'); setTimeout(() => $('#caption').classList.remove('bright'), 5000);
   };

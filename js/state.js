@@ -41,8 +41,9 @@ export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: nul
    fish: 종 이름 → { best: 최고 크기(cm), count: 잡은 수, first: { bg: 장소 key, clock: 게임 속 시각 0..1 } | null }
          물고기 도감(journal.js)이 이 값을 보여 준다.
          예전 저장본은 최고 크기 숫자만 있었다 → 잡은 수 1, 처음 잡은 곳은 모름(null)으로 옮긴다
-   chopBest: 장작 패기 최고 연속 */
-export const records = { fish: {}, chopBest: 0 };
+   chopBest: 장작 패기 최고 연속
+   memoRead: 캠핑 메모에서 읽은 할 일 이름표 (data.js MEMO 의 key). 지금 장소의 메모에 여기 없는 줄이 있으면 안내를 띄운다 */
+export const records = { fish: {}, chopBest: 0, memoRead: [] };
 if (saved.records && typeof saved.records === 'object') {
   const f = saved.records.fish, okSize = v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 500;
   const okClock = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1;
@@ -55,6 +56,9 @@ if (saved.records && typeof saved.records === 'object') {
     records.fish[k] = { best: Math.round(v.best), count, first };
   }
   const c = saved.records.chopBest; if (typeof c === 'number' && Number.isFinite(c) && c >= 0 && c < 1e4) records.chopBest = Math.floor(c);
+  /* 읽은 이름표: 글자만, 중복 없이 */
+  const mr = saved.records.memoRead;
+  if (Array.isArray(mr)) records.memoRead = [...new Set(mr.filter(k => typeof k === 'string' && k.length > 0 && k.length < 40))].slice(0, 500);
 }
 
 /* 슬라이더처럼 연달아 바뀌는 값은 300ms 모아서 한 번에 쓴다. 페이지를 닫을 때는 바로 기록 */
