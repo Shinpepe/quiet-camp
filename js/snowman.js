@@ -291,7 +291,7 @@ function nearBall() {
   for (const b of S.balls) { const g = Math.hypot(b.x - a.x, b.z - a.z) - b.r - a.r; if (g < gap) { gap = g; best = b; } }
   return best;
 }
-/* 눈사람이 이미 두 개면 붙어 있어도 "내려놓기" — 내려놓으면서 이유를 알려 준다 */
+/* 눈사람이 이미 최대 개수면 붙어 있어도 "내려놓기" — 내려놓으면서 이유를 알려 준다 */
 export const rollLabel = () => nearBall() && S.men.length < SNOW.maxMen ? '눈사람 만들기' : '내려놓기';
 /* 굴리는 중 E: 다른 눈덩이에 붙어 있으면 눈사람, 아니면 내려놓기 */
 export function rollAct() {
