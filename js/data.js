@@ -71,6 +71,7 @@ export const MEMO = [
   { key: 'chair', text: '의자에 앉아 한숨 돌리기' },
   { key: 'fish',  text: '부두 끝에서 낚시하기', only: ['lake'] },
   { key: 'snowman', text: '눈덩이를 굴려 눈사람 만들기', only: ['snow'] },
+  { key: 'stars', text: '바닷가 돗자리에 누워 별 보기', only: ['beach'] },
   { key: 'sleep', text: '텐트 안 침낭에서 하룻밤 자기' },
 ];
 /* 이 장소의 메모에 적힐 줄 */
@@ -95,6 +96,16 @@ export const ROAST = {
 };
 export const roastStage = c => c < ROAST.at[0] ? 0 : c < ROAST.at[1] ? 1 : c < ROAST.at[2] ? 2 : 3;
 
+/* 해변 돗자리·파라솔 (beach.js). 호수의 부두처럼 캠프 오른쪽 앞, 해안선(z −9)에서 2.5m 떨어진 자리
+   mat: 가운데·크기 (w 가로, l 길이 — 길이 방향 z, 발 = 바다 쪽)
+   parasol: 기둥 자리 · tilt [x, z] 기울기(바다 쪽, 돗자리 쪽) · yaw 돌린 각
+   head: 누운 머리 자리 · eye: 누운 눈높이(지면 위) · lie: 누울 때 올려다보는 각도
+   look: 누운 동안 시선 [좌우, 아래, 위] (rad) · lantern: 머리맡 랜턴 자리 */
+export const BEACH = {
+  mat: { x: 5.5, z: -5.5, w: 1.3, l: 1.9 }, parasol: { x: 6.2, z: -4.9, tilt: [-0.12, 0.1], yaw: 0.2 },
+  head: [5.5, -4.8], eye: 0.32, lie: 0.9, look: [1.75, -0.1, 1.3], lantern: [4.72, -4.65],
+};
+
 /* 부두 끝 자리는 dock.js 의 DOCK(끝 z −19.2, 윗면 0.36)에 맞춘다: 끝 판자 가장자리에 걸터앉은 눈높이 */
 export const SEAT = {
   car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },
@@ -102,6 +113,8 @@ export const SEAT = {
   tent:  { pos: [-1.6, 0.72, 1.85], stand: [-1.6, -1.3], name: '텐트 안', up: '텐트에서 나가기' },
   bed:   { pos: [-1.1, 0.45, 1.95], yaw: Math.PI, pitch: 1.15, stand: [-1.6, -1.3], name: '침낭', up: '일어나기' },
   dock:  { pos: [5.7, 1.12, -18.95], stand: [5.7, -17.8], name: '부두 끝', up: '일어나기' },
+  /* 해변 돗자리: pos 는 beach.js 가 땅 높이에 맞춰 채운다 */
+  mat:   { pos: [5.5, 0.4, -4.8], stand: [4.6, -5.3], name: '돗자리', up: '일어나기' },
 };
 /* ── 걷기 충돌 ──
    규칙: 모양은 보이는 바닥 윤곽에 약 3cm 를 더한 것, 둥근 물건은 원(circle).

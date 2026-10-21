@@ -10,8 +10,9 @@ import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 /* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
-import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler } from './game.js';
+import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler, lieDown } from './game.js';
 import { buildSnowman } from './snowman.js';
+import { buildBeach, toggleParasol, parasolOpen } from './beach.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -299,6 +300,8 @@ export function buildScene(bgKey) {
     W.trees.push([JOURNAL.x, JOURNAL.z, 0.18]);
   }
   buildFish();
+  /* 해변 돗자리·파라솔: 유목보다 먼저 자리 격자(W.space)에 들어가야 유목이 피한다 */
+  const beach = buildBeach(cfg);
   if (cfg.key === 'beach') {
     const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
     /* 유목 3개: vegetation.js 의 자리 격자(W.space)로 야자수·조개와 겹치지 않게 놓고, 바닥이 3cm 모래에 묻히게 한다 */
@@ -377,6 +380,11 @@ export function buildScene(bgKey) {
   if (cfg.dock) W.interact.push(
     { id: 'dock',    pos: [DOCK.x, DOCK.top + 0.04, DOCK.z1 + 0.15], r: 1.8, hit: 0.5,  from: ['walk'], label: () => '부두 끝에 앉아 낚시하기', tap: '낚시하기', act: startFishing },
     { id: 'journal', pos: [JOURNAL.x, JOURNAL.y, JOURNAL.z],          r: 1.7, hit: 0.28, from: ['walk'], label: () => '물고기 도감 펼치기', act: openJournal },
+  );
+  /* 해변: 돗자리(바닥 가운데)와 파라솔(기둥 중간). 서서 내려다보면 돗자리, 정면을 보면 파라솔 — 높이로 갈린다 */
+  if (beach) W.interact.push(
+    { id: 'mat',     pos: beach.mat,     r: 2.2, hit: 0.6,  from: ['walk'], label: () => '돗자리에 눕기', act: lieDown },
+    { id: 'parasol', pos: beach.parasol, r: 1.8, hit: 0.35, from: ['walk'], label: () => parasolOpen() ? '파라솔 접기' : '파라솔 펴기', act: toggleParasol },
   );
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();

@@ -26,10 +26,12 @@ const FOLEY_GAIN = {
 };
 /* 한 모금 하는 동안 배경 베드가 물러나는 정도 (0 = 끔). 0.3 이면 베드 -3dB, 고역 6kHz 위가 부드럽게 깎인다 */
 const SIP_FOCUS = 0.3;
+/* 돗자리에 누운 동안 배경 베드가 물러나는 정도. 파도(위치 음원)는 그대로라 상대적으로 또렷해진다 */
+const LIE_FOCUS = 0.22;
 
 let AC = null, master, comp, worldLP, worldGain, bedBus, bedLP, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
-let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false, focusOn = false;
+let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false, focusOn = false, lyingOn = false;
 let fire = null, water = null, spark = null;
 let windAcc = 0, lastWind = 0, lastGust = -99;
 const flockAudio = new Map();
@@ -60,13 +62,22 @@ export function initAudio() {
 }
 export function resumeAudio() { if (AC && AC.state !== 'running') AC.resume(); }
 export function setVolume(v) { if (master) master.gain.setTargetAtTime(v, AC.currentTime, 0.03); }
-/* 한 모금 포커스: 잔이 입에 닿으면 0.6초에 걸쳐 배경이 살짝 물러나고, 떨어지면 1.5초에 걸쳐 숨을 내쉬듯 돌아온다.
-   새 소리를 더하지 않고 믹스만 바꾼다. 같은 상태로 다시 불러도 아무 일도 하지 않으므로 매 프레임 불러도 된다 */
-export function setSipFocus(on) {
-  on = !!on; if (!AC || !bedBus || on === focusOn) return; focusOn = on;
-  const t = AC.currentTime, tc = on ? 0.6 : 1.5, k = on ? SIP_FOCUS : 0;
+/* 배경 베드의 크기·고역: 한 모금 포커스와 누운 포커스 중 큰 쪽을 따른다 */
+function applyBed(tc) {
+  const t = AC.currentTime, k = Math.max(focusOn ? SIP_FOCUS : 0, lyingOn ? LIE_FOCUS : 0);
   bedBus.gain.setTargetAtTime(1 - k, t, tc);
   bedLP.frequency.setTargetAtTime(20000 * Math.pow(0.3, k / 0.3), t, tc);
+}
+/* 한 모금 포커스: 잔이 입에 닿으면 0.6초에 걸쳐 배경이 살짝 물러나고, 떨어지면 1.5초에 걸쳐 숨을 내쉬듯 돌아온다.
+   같은 상태로 다시 불러도 아무 일도 하지 않으므로 매 프레임 불러도 된다 */
+export function setSipFocus(on) {
+  on = !!on; if (!AC || !bedBus || on === focusOn) return; focusOn = on;
+  applyBed(on ? 0.6 : 1.5);
+}
+/* 누운 포커스: 돗자리에 누우면 1.2초에 걸쳐 배경이 물러나고, 일어나면 돌아온다 (매 프레임 불러도 된다) */
+export function setLying(on) {
+  on = !!on; if (!AC || !bedBus || on === lyingOn) return; lyingOn = on;
+  applyBed(1.2);
 }
 
 /* ── 공간 잔향: 감쇠하는 저역통과 노이즈로 임펄스 응답을 만든다. 설원은 먼 산에서 되돌아오는 메아리 두 번 ──
@@ -686,7 +697,7 @@ export function updateAudio(dt) {
 
 /* ── 발소리 ──
    모래·흙(숲) 바닥: 폴리 뱅크에서 변형을 골라 재생 (게임 발소리 방식)
-   눈·나무·젖은 바닥: 기존 합성 그대로
+   눈·나무·돗자리·젖은 바닥: 기존 합성 그대로
    위스키를 들었으면 가끔 얼음이 잔에 부딪힌다 */
 let stepIdx = 0;
 function footstep(surface) {
@@ -707,6 +718,10 @@ function footstep(surface) {
       tone(pan, 110, 75, 0.004, 0.16 * v, 0.16, t0); burst(pan, false, 'bandpass', 240, 6, 0.003, 0.08 * v, 0.12, t0); tone(pan, 330, 300, 0.004, 0.03 * v, 0.1, t0);
       burst(pan, false, 'lowpass', 1200, 1, 0.002, 0.05 * v, 0.03, t0); tone(pan, 95, 70, 0.004, 0.06 * v, 0.1, t0 + 0.09);
       if (Math.random() < 0.25) { const o = tone(pan, 190, 150, 0.05, 0.02 * v, 0.25, t0 + 0.04); const w = osc('sine', 11), wg = gainN(9); w.connect(wg); wg.connect(o.frequency); w.start(t0); w.stop(t0 + 0.4); }
+    } else if (surface === 'mat') {
+      /* 돗자리: 천 아래 모래가 눌리는 둔한 소리 + 밀짚이 바스락 */
+      burst(pan, true, 'lowpass', 380, 1, 0.006, 0.07 * v, 0.12, t0);
+      grains(10, 0.1, 'pink', 'bandpass', 2600, 1.5, 0.012, 0.025, t0 + 0.01);
     } else {
       burst(pan, false, 'bandpass', 2800, 0.8, 0.008, 0.07 * v, 0.14, t0, 1400, 0.14); burst(pan, true, 'lowpass', 350, 1, 0.006, 0.06 * v, 0.1, t0);
       grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05); burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
@@ -837,6 +852,13 @@ export function sfx(type, arg) {
     case 'snowLift': burst(B, 'pink', 'bandpass', 600 * pv, 0.8, 0.12, 0.028, 0.32, t, 1000, 0.32); fabric(B, t, 0.025, 0.25); return;
     case 'snowPop': burst(B, 'pink', 'bandpass', rnd(1100, 1700), 2.2, 0.002, 0.02, 0.045, t); return;
     case 'snowBreak': { const k = Math.min(1, (arg || 0.3) / 0.45); burst(B, 'brown', 'lowpass', 380, 1, 0.004, 0.1 + 0.08 * k, 0.2, t); snowCrunch(B, t, 16 + Math.round(16 * k), 0.15, 0.035); burst(B, 'pink', 'bandpass', 2400, 0.7, 0.02, 0.02, 0.6, t + 0.05, 1200, 0.6); return; }
+    /* 파라솔: 펼 때는 천이 '푸스스' 펴지다 슬라이더가 걸리는 '딸깍', 접을 때는 걸쇠를 풀고 천이 모이며 스친다 (음정 없음) */
+    case 'parasolOpen':
+      burst(B, 'pink', 'bandpass', 900 * pv, 0.7, 0.12, 0.035, 0.45, t, 1800, 0.4); fabric(B, t + 0.1, 0.03, 0.5);
+      burst(B, false, 'bandpass', 2600 * pv, 3, 0.001, 0.05, 0.02, t + 0.95); burst(B, true, 'lowpass', 600, 1, 0.002, 0.04, 0.05, t + 0.95); return;
+    case 'parasolClose':
+      burst(B, false, 'bandpass', 2400 * pv, 3, 0.001, 0.04, 0.02, t); fabric(B, t + 0.05, 0.035, 0.7);
+      burst(B, 'pink', 'bandpass', 700 * pv, 0.7, 0.2, 0.025, 0.6, t + 0.1, 400, 0.6); return;
     /* 먹기: 말랑하게 베어 무는 소리 → 씹기 두 번. 완벽(2)·탐(3)은 겉이 바삭하게 부서진다 (입 근처라 잔향 없는 dryBus) */
     case 'eat': {
       const s = arg || 0, D = dryBus;

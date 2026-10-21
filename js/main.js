@@ -6,12 +6,13 @@ import { paramsAt } from './time.js';
 import { createPost } from './post.js';
 import { spawnFlock, updateFlocks, updateLighthouse, MARSH_AT } from './props.js';
 import { WATER_Y } from './terrain.js';
-import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience, setSipFocus, setRoast } from './audio.js';
+import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience, setSipFocus, setRoast, setLying } from './audio.js';
 import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep, buildWithLoading, roastSpot, roastTarget, eatMarsh } from './game.js';
 import { updateChop, chopCamera } from './chop.js';
 import { updateFish } from './fish.js';
 import { ROAST } from './data.js';
 import { updateSnowman, snowMoving } from './snowman.js';
+import { updateBeach, parasolMoving } from './beach.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -185,8 +186,8 @@ function loop(now) {
   applyTime();
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
-  /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리는 동안에는 눈앞의 빠른 움직임이 끊겨 보이지 않게 매 프레임 갱신한다 */
-  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리거나 파라솔을 접고 펴는 동안에는 매 프레임 갱신한다 */
+  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 80° 까지 열렸다가 바로 닫힌다 */
@@ -200,6 +201,8 @@ function loop(now) {
   if (!ctx.paused) updateChop(dt);
   /* 눈사람: 멈춘 동안·메뉴에서는 dt 0 (굴리는 소리도 잦아든다) */
   updateSnowman(ctx.running && !ctx.paused ? dt : 0);
+  /* 해변 파라솔·랜턴 (멈춘 동안에는 움직이지 않는다) */
+  updateBeach(ctx.paused ? 0 : dt);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
@@ -291,6 +294,8 @@ function loop(now) {
   }
   /* 마시는 중이 아니면 포커스를 풀어 둔다 (도중에 끊겨도 남지 않게). 같은 상태면 audio.js 가 아무것도 하지 않는다 */
   if (anim.sipT === null) setSipFocus(false);
+  /* 돗자리에 누워 있는 동안 배경 바람이 살짝 물러나 파도가 또렷해진다 */
+  setLying(ctx.running && state.mode === 'seated' && state.seat === 'mat');
   /* 마시멜로 굽는 소리 (게임 중에만, 멈춘 동안에는 불꽃 소리도 멈춘다) */
   setRoast(ctx.running ? roastLv : 0, ctx.running && !ctx.paused ? burnLv : 0);
   if (anim.exhale > 0 && ctx.running) {

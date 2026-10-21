@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx, state, settings, saveSettings, DAY_LEN, records } from './state.js';
-import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage } from './data.js';
+import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
@@ -13,6 +13,7 @@ import { showJournal, hideJournal, journalHooks } from './journal.js';
 import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
 import { showMemo, hideMemo, memoHooks } from './memo.js';
 import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman } from './snowman.js';
+import { onMat, resetBeach } from './beach.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -27,7 +28,7 @@ export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, y
 export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null,
   roast: false, roastMin: 0, roastK: 0, eatT: null, ate: false, spotPrev: null };
 const keys = {}; let tMove = null, tLook = null;
-/* 낚시하는 동안 맡겨 둔 손의 물건 { type, amount }. 부두에서 일어나면 돌려준다 */
+/* 낚시하거나 돗자리에 누운 동안 맡겨 둔 손의 물건 { type, amount, cook }. 일어나면 돌려준다 */
 let stashed = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
@@ -161,7 +162,7 @@ export function bindInput() {
   });
   renderMenu();
 }
-/* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만 */
+/* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만, 돗자리에 누우면 바다 쪽으로 */
 function look(dx, dy, s) {
   player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3);
   if (state.mode === 'chop' && cam.t >= 1) {
@@ -171,6 +172,10 @@ function look(dx, dy, s) {
   } else if (fishActive() && cam.t >= 1) {
     player.yaw = clamp(wrapPI(player.yaw), -FISHING.yaw, FISHING.yaw);
     player.pitch = clamp(player.pitch, FISHING.pitch[0], FISHING.pitch[1]);
+  } else if (state.mode === 'seated' && state.seat === 'mat' && cam.t >= 1) {
+    /* 돗자리에 누워서: 바다 쪽 좌우 약 100°, 수평선부터 거의 머리 위까지 */
+    player.yaw = clamp(wrapPI(player.yaw), -BEACH.look[0], BEACH.look[0]);
+    player.pitch = clamp(player.pitch, BEACH.look[1], BEACH.look[2]);
   }
 }
 function resume() { hidePause(); lock(); }
@@ -197,8 +202,9 @@ export function currentTarget() {
 function startMove(to, yawTo, pitchTo) { cam.from.copy(ctx.camera.position); cam.to.copy(to); cam.t = 0; cam.yawFrom = wrapPI(player.yaw); cam.yawTo = yawTo; cam.pitchFrom = player.pitch; cam.pitchTo = pitchTo === undefined ? player.pitch : pitchTo; }
 export function sitDown(id, quiet) {
   const st = SEAT[id]; state.mode = 'seated'; state.seat = id;
-  /* 부두 끝: 물 쪽(정면)을 보고 앉는다 */
-  const yawTo = id === 'dock' ? 0 : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : undefined;
+  /* 부두 끝·돗자리: 물 쪽(정면)을 본다. 돗자리는 하늘을 반쯤 올려다보며 눕는다 */
+  const sea = id === 'dock' || id === 'mat';
+  const yawTo = sea ? 0 : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : id === 'mat' ? BEACH.lie : undefined;
   startMove(new THREE.Vector3(...st.pos), yawTo, pitchTo);
   if (!quiet) { if (id === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (id === 'tent') sfx('zipper'); else sfx('sit'); }
   setIndoor(id === 'tent' || id === 'car');
@@ -210,12 +216,22 @@ function standUp() {
   player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); setIndoor(false);
   restoreStashed();
 }
-/* 부두 끝에 앉으면 손에 든 것을 맡겨 두고 낚싯대를 든다 (일어날 때 남은 양 그대로 돌려준다).
-   타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙) */
-export function startFishing() {
-  if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
+/* 앉기 전에 손에 든 것을 맡겨 둔다 (일어날 때 standUp → restoreStashed 가 남은 양 그대로 돌려준다).
+   타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙). 맡길 수 없으면 false */
+function stashHand() {
+  if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return false; }
   if (state.item && ctx.W.item) { const u = ctx.W.item.userData; stashed = { type: state.item, amount: u.amount, cook: u.cook }; putBack(); }
+  return true;
+}
+/* 부두 끝에 앉으면 손에 든 것을 맡겨 두고 낚싯대를 든다 */
+export function startFishing() {
+  if (!stashHand()) return;
   sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다');
+}
+/* 해변 돗자리에 눕는다. 누워서 마시지는 않으므로 손에 든 것은 낚시처럼 맡겨 둔다 */
+export function lieDown() {
+  if (!stashHand()) return;
+  sitDown('mat');
 }
 /* 맡겨 둔 물건을 다시 손에 든다. 트렁크에서 꺼낼 때와 달리 붓는 소리·얼음 소리는 내지 않는다 */
 function restoreStashed() {
@@ -594,7 +610,7 @@ function sceneReady(bg) {
 function resetSceneForStart() {
   const W = ctx.W, tm = W.tm;
   W.fireLit = tm.stars > 0.1; W.lanternLit = tm.lantern > 0.5; W.tentLampLit = tm.tentLamp > 0.5;
-  clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); W.splitCount = 0;
+  clearPlanted(); resetChop(); resetFish(); clearSnowman(); resetBeach(); hideAllFx(); W.splitCount = 0;
 }
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
@@ -624,7 +640,7 @@ export function startGame() {
 
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }
-function surfaceAt(x, z) { const cfg = ctx.W.cfg; if (onPlatform(x, z)) return 'wood'; if (cfg.water && z - cfg.water.z - shoreOff(x, cfg) < -1.2) return 'wet'; return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass'; }
+function surfaceAt(x, z) { const cfg = ctx.W.cfg; if (onPlatform(x, z)) return 'wood'; if (onMat(x, z)) return 'mat'; if (cfg.water && z - cfg.water.z - shoreOff(x, cfg) < -1.2) return 'wet'; return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass'; }
 /* 걷기 충돌: 몸(반지름 PR)이 네모나 원에 닿으면 막힌다.
    네모는 "가장 가까운 점까지의 거리"로 재서 모서리를 둥글게 돌아 나간다 (예전엔 네모를 PR 만큼 키워 모서리에서 더 일찍 막혔다) */
 function blockedAt(x, z) {
