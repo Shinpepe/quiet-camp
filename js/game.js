@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx, state, settings, saveSettings, DAY_LEN, records } from './state.js';
-import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor } from './data.js';
+import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
@@ -20,15 +20,19 @@ import { showMemo, hideMemo, memoHooks } from './memo.js';
 const FINE = matchMedia('(pointer:fine)').matches;
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
-/* 마시기: mouth = 잔이 입에 닿았는지, leftLips = 입술에서 떨어졌는지, lastGulp·nextSwallow = '꿀꺽' 시각 */
-export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null };
+/* 마시기: mouth = 잔이 입에 닿았는지, leftLips = 입술에서 떨어졌는지, lastGulp·nextSwallow = '꿀꺽' 시각
+   마시멜로: roast = 불에 내미는 중, roastMin = 클릭 한 번에 최소로 내밀어 두는 남은 초, roastK = 내민 정도 0..1, eatT = 먹는 동작 0..1 (null = 안 먹는 중), ate = 이번 동작에서 이미 먹었는지, spotPrev = 지난 프레임의 굽기 가능 상태 */
+export const anim = { sipT: null, holding: false, holdT: 0, exhale: 0, exhaleStr: 0, lastSteam: 0, mouth: false, leftLips: false, lastGulp: -9, nextSwallow: 0, lastTargetId: null,
+  roast: false, roastMin: 0, roastK: 0, eatT: null, ate: false, spotPrev: null };
 const keys = {}; let tMove = null, tLook = null;
 /* 낚시하는 동안 맡겨 둔 손의 물건 { type, amount }. 부두에서 일어나면 돌려준다 */
 let stashed = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
 export const isNightClock = c => c < 0.22 || c > 0.8;
-const NITEMS = Object.keys(ITEMS).length;
+/* 트렁크에 들어 있는 물건 (마시멜로 꼬치는 아이스박스에서 꺼낸다 — data.js ITEMS 의 trunk: false) */
+const TRUNK = Object.keys(ITEMS).filter(k => ITEMS[k].trunk !== false), NITEMS = TRUNK.length;
+const inTrunk = k => !!k && ITEMS[k].trunk !== false;
 /* 화면을 덮는 창(트렁크·도감·메모)이 열려 있는지 */
 const inModal = () => state.mode === 'trunk' || state.mode === 'journal' || state.mode === 'memo';
 
@@ -203,14 +207,14 @@ function standUp() {
    타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙) */
 export function startFishing() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
-  if (state.item && ctx.W.item) { stashed = { type: state.item, amount: ctx.W.item.userData.amount }; putBack(); }
+  if (state.item && ctx.W.item) { const u = ctx.W.item.userData; stashed = { type: state.item, amount: u.amount, cook: u.cook }; putBack(); }
   sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다');
 }
 /* 맡겨 둔 물건을 다시 손에 든다. 트렁크에서 꺼낼 때와 달리 붓는 소리·얼음 소리는 내지 않는다 */
 function restoreStashed() {
   const s = stashed; stashed = null; if (!s) return;
   const it = makeItem(s.type), ud = it.userData;
-  ud.amount = s.amount; ud.setAmount(s.amount);
+  ud.amount = s.amount; ud.setAmount(s.amount); if (ud.setCook && s.cook !== undefined) ud.setCook(s.cook);
   state.item = s.type; ctx.hand.add(it); ctx.W.item = it; resetHand();
   showToast(josa(ITEMS[s.type].name, '을', '를') + ' 다시 들었다');
 }
@@ -236,7 +240,9 @@ export function interact() {
 export function beginChop() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
   if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('조금 비켜서 다시 해 보자'); return; }
-  anim.sipT = null; anim.holding = false; anim.mouth = false; if (state.item) resetHand(); ctx.hand.visible = false;
+  anim.sipT = null; anim.holding = false; anim.mouth = false; anim.roast = false; anim.roastK = 0; anim.eatT = null;
+  if (state.item === 'marsh') { const u = ctx.W.item.userData; u.burnT = 0; u.setBurn(0); }
+  if (state.item) resetHand(); ctx.hand.visible = false;
   const eye = chopEye();
   state.mode = 'chop'; state.seat = null; player.x = eye.x; player.z = eye.z;
   startMove(eye.clone(), chopYaw(), CHOP.pitch); updateHUD();
@@ -276,16 +282,59 @@ function refreshGuide() {
   guide(state.mode === 'seated' && state.seat === 'car' ? '내리기 전에 조수석 메모를 보자' : '차 조수석의 메모를 보자');
 }
 
-function trunkKey(n) { sfx('ui'); const ks = Object.keys(ITEMS); if (n <= ks.length) { pickItem(ks[n - 1]); closeTrunk(); } else if (n === ks.length + 1 && state.item) { putBack(); closeTrunk(); } }
+/* ── 아이스박스: 바라보고 E. 꼬치가 없으면 마시멜로 꼬치를 꺼내고, 들고 있으면(빈 꼬치 포함) 넣는다.
+   꺼낼 때 들고 있던 다른 물건은 트렁크에서 고를 때처럼 내려놓는다. 뚜껑이 살짝 들렸다 닫힌다 (main.js 가 W.coolerT 동안 연다) ── */
+export function useCooler() {
+  if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
+  ctx.W.coolerT = 0.75; sfx('cooler'); setTimeout(() => sfx('cooler', 'close'), 800);
+  if (state.item === 'marsh') { putBack(); showToast('꼬치를 넣었다'); } else pickItem('marsh');
+}
+
+/* ── 마시멜로 굽기: 서서 모닥불 가까이(ROAST.near) 불꽃 자리를 바라볼 때만 굽는다 ──
+   roastSpot: 'roast' = 구울 수 있음, 'cold' = 불이 꺼져 있음, null = 굽는 자리가 아님(클릭하면 먹는다) */
+const FIRE = new THREE.Vector3(...ROAST.fire), _rv = new THREE.Vector3(), _rf = new THREE.Vector3();
+/* 꼬치 끝이 닿을 자리: 모닥불 가운데에서 플레이어 쪽으로 12cm, 불꽃 높이 */
+export function roastTarget(out) {
+  const c = ctx.camera.position, dx = c.x - FIRE.x, dz = c.z - FIRE.z, d = Math.hypot(dx, dz) || 1;
+  return out.set(FIRE.x + dx / d * 0.12, FIRE.y, FIRE.z + dz / d * 0.12);
+}
+export function roastSpot() {
+  if (state.item !== 'marsh' || state.mode !== 'walk' || cam.t < 1 || ctx.paused) return null;
+  const ud = ctx.W.item && ctx.W.item.userData; if (!ud || ud.amount <= 0) return null;
+  const c = ctx.camera.position; if (Math.hypot(c.x - FIRE.x, c.z - FIRE.z) > ROAST.near) return null;
+  roastTarget(_rv).sub(c).normalize(); ctx.camera.getWorldDirection(_rf);
+  if (_rv.dot(_rf) < Math.cos(ROAST.aim)) return null;
+  return ctx.W.fireLit ? 'roast' : 'cold';
+}
+/* 클릭: 굽는 자리면 불에 내민다(클릭 = 0.9초 한 번, 길게 = 누르는 동안 계속). 아니면 먹는다 */
+function marshPress() {
+  const ud = ctx.W.item.userData;
+  if (anim.eatT !== null) return;
+  if (ud.amount <= 0) { showToast('빈 꼬치는 아이스박스에 넣자'); return; }
+  const spot = roastSpot();
+  if (spot === 'cold') { showToast('불을 먼저 피우자'); return; }
+  if (spot === 'roast') { anim.roast = true; anim.holding = true; anim.roastMin = 0.9; return; }
+  if (anim.roastK > 0.05) return;
+  anim.eatT = 0; anim.ate = false;
+}
+/* 먹는 동작의 한가운데(마시멜로가 입에 닿을 때) main.js 가 부른다 */
+export function eatMarsh() {
+  const ud = ctx.W.item && ctx.W.item.userData; if (state.item !== 'marsh' || !ud || ud.amount <= 0) return;
+  const s = roastStage(ud.cook);
+  ud.amount = 0; ud.setAmount(0); ud.burnT = 0; ud.setBurn(0);
+  sfx('eat', s); showToast(ROAST.eat[s]); updateHUD();
+}
+
+function trunkKey(n) { sfx('ui'); if (n <= NITEMS) { pickItem(TRUNK[n - 1]); closeTrunk(); } else if (n === NITEMS + 1 && inTrunk(state.item)) { putBack(); closeTrunk(); } }
 function renderTrunk() {
   const box = $('#trunkItems'); box.innerHTML = '';
-  Object.entries(ITEMS).forEach(([k, v], i) => { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
-  if (state.item) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${ICON_BACK}</div><div class="nm">내려놓기</div><div class="ds">${josa(ITEMS[state.item].name, '을', '를')} 다시 넣는다</div><kbd>${NITEMS + 1}</kbd>`; d.onclick = () => trunkKey(NITEMS + 1); box.append(d); }
+  TRUNK.forEach((k, i) => { const v = ITEMS[k], d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${v.ic}</div><div class="nm">${v.name}</div><div class="ds">${v.ds}</div><kbd>${i + 1}</kbd>`; d.onclick = () => trunkKey(i + 1); box.append(d); });
+  if (inTrunk(state.item)) { const d = document.createElement('button'); d.className = 'card'; d.innerHTML = `<div class="ic">${ICON_BACK}</div><div class="nm">내려놓기</div><div class="ds">${josa(ITEMS[state.item].name, '을', '를')} 다시 넣는다</div><kbd>${NITEMS + 1}</kbd>`; d.onclick = () => trunkKey(NITEMS + 1); box.append(d); }
 }
 const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/></svg>';
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); sfx('pick', type); showToast(josa(ITEMS[type].name, '을', '를') + ' 챙겼다'); }
 /* 손에 든 것을 내려놓는다. 떼어 내기 전에 GPU 자원을 해제한다 */
-export function putBack() { state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; anim.mouth = false; }
+export function putBack() { state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; anim.mouth = false; anim.roast = false; anim.roastK = 0; anim.eatT = null; anim.ate = false; }
 /* 땅에 꽂힌 스파클라를 모두 치운다 (메뉴로 나갈 때, 잠들 때, 같은 씬으로 다시 시작할 때) */
 function clearPlanted() {
   const W = ctx.W; if (!W.planted) return;
@@ -294,7 +343,8 @@ function clearPlanted() {
 }
 export function resetHand() {
   const h = ctx.hand;
-  if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); }
+  if (state.item === 'marsh') { h.position.set(0.24, -0.34, -0.2); h.rotation.set(0.6, 0.15, 0); return; }
+  else if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); }
   else if (state.item === 'sparkler') { h.position.set(0.2, -0.28, -0.55); h.rotation.set(-0.2, 0, -0.25); }
   else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); }
 }
@@ -305,6 +355,7 @@ function useItem() {
   if (timingMode()) { timingPress(); return; }
   if (!state.item || !ctx.W.item || inModal() || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
   if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
+  if (state.item === 'marsh') { marshPress(); return; }
   if (anim.sipT !== null) return;
   if (ctx.W.item.userData.amount <= 0) { showToast(state.item === 'smoke' ? '다 피웠다' : '잔이 비었다'); return; }
   anim.sipT = 0; anim.holding = true; anim.holdT = 0; anim.mouth = false; anim.leftLips = false;
@@ -345,7 +396,7 @@ export function itemEmptied() {
 /* ── 잠자기: 언제 잠들든 다음 아침 7시(WAKE)에 깬다 ── */
 const sleep = { on: false, phase: '', t: 0, from: 0, to: 0 };
 export function startSleep() {
-  sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false;
+  sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false; anim.roast = false; anim.eatT = null;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
   $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('bag');
 }
@@ -387,6 +438,7 @@ export function updateHUD() {
   refreshGuide();
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
   const covered = inModal() || state.mode === 'sleep';
+  const mud = state.item === 'marsh' && ctx.W.item && ctx.W.item.userData, marshEmpty = !!mud && mud.amount <= 0;
   ib.classList.toggle('on', chop || fish || (!!state.item && !covered));
   /* 기록은 이름 줄 안에 넣는다 — .hn 은 모바일 세로에서 숨겨진다 */
   const sub = t => `<span style="display:block;font-size:.82em;opacity:.8;margin-top:2px">${t}</span>`;
@@ -399,13 +451,19 @@ export function updateHUD() {
     const n = fishCount(), [hn, act] = fishHint(btn);
     ib.querySelector('.ic').innerHTML = ICON.rod; ib.querySelector('.nm').innerHTML = '낚싯대' + (n ? sub(`잡은 물고기 ${n}`) : '');
     ib.querySelector('.hn').textContent = hn; $('#mSip').textContent = act;
+  } else if (state.item === 'marsh') {
+    /* 익음 단계는 글자로 보여 주지 않는다 — 색으로만 판단하게 */
+    const def = ITEMS.marsh, spot = roastSpot();
+    ib.querySelector('.ic').innerHTML = def.ic; ib.querySelector('.nm').textContent = def.name;
+    ib.querySelector('.hn').textContent = marshEmpty ? '빈 꼬치. 아이스박스에 넣기' : spot === 'roast' ? btn + ' 불에 굽기, 길게 누르면 계속' : spot === 'cold' ? '불을 피우면 구울 수 있다' : btn + ' 먹기';
+    $('#mSip').textContent = spot ? '굽기' : '먹기';
   } else if (state.item) {
     const def = ITEMS[state.item], ud = ctx.W.item && ctx.W.item.userData, empty = ud && ud.amount <= 0;
     ib.querySelector('.ic').innerHTML = def.ic; ib.querySelector('.nm').textContent = def.name;
     ib.querySelector('.hn').textContent = empty ? '비었다. 트렁크에서 새로 꺼내기' : ud && ud.lit ? btn + ' 땅에 꽂기 (타는 중)' : btn + ' ' + def.act + (def.hold ? ', 길게 누르면 계속' : '');
     $('#mSip').textContent = ud && ud.lit ? '땅에 꽂기' : def.act;
   }
-  $('#mSip').style.display = chop || fish || (state.item && !covered) ? '' : 'none';
+  $('#mSip').style.display = chop || fish || (state.item && !covered && !marshEmpty) ? '' : 'none';
   anim.lastTargetId = undefined; updatePrompt();
 }
 /* 모바일 행동 버튼: 지금 할 수 있는 행동 이름을 그대로 버튼에 쓴다 (E 안내 대신).
@@ -574,5 +632,5 @@ export function walk(dt) {
   } else { const r = player.bob % Math.PI; player.bob += (r < Math.PI / 2 ? -r : Math.PI - r) * Math.min(1, dt * 8); }
   const targetY = floorY(player.x, player.z) + EYE + (Math.abs(Math.sin(player.bob)) - 0.5) * 0.04;
   cam3.position.set(player.x, cam3.position.y + (targetY - cam3.position.y) * Math.min(1, dt * 12), player.z);
-  if (ctx.W.item && anim.sipT === null) { const b = state.item === 'smoke' ? [0.2, -0.13] : state.item === 'sparkler' ? [0.2, -0.28] : [0.22, -0.2]; ctx.hand.position.x = b[0] + Math.sin(player.bob * 0.5) * 0.01; ctx.hand.position.y = b[1] + Math.abs(Math.sin(player.bob)) * 0.012; }
+  if (ctx.W.item && anim.sipT === null && state.item !== 'marsh') { const b = state.item === 'smoke' ? [0.2, -0.13] : state.item === 'sparkler' ? [0.2, -0.28] : [0.22, -0.2]; ctx.hand.position.x = b[0] + Math.sin(player.bob * 0.5) * 0.01; ctx.hand.position.y = b[1] + Math.abs(Math.sin(player.bob)) * 0.012; }
 }

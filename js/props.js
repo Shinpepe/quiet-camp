@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { ctx, state } from './state.js';
-import { GEAR, GEAR_DEFAULT } from './data.js';
+import { GEAR, GEAR_DEFAULT, ROAST } from './data.js';
 import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL } from './util.js';
 import { terrainH } from './terrain.js';
-import { tex } from './textures.js';
+import { tex, T } from './textures.js';
 
 const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.25), extra || {}));
 const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.3), extra || {}));
@@ -119,7 +119,7 @@ const memoTex = canvasTex(256, 360, (g, w, h) => {
   g.strokeStyle = 'rgba(58,50,40,.7)'; g.lineCap = 'round';
   const scribble = (x, y, len, lw) => { g.lineWidth = lw; g.beginPath(); g.moveTo(x, y); for (let t = 0; t <= len; t += 4) g.lineTo(x + t, y + Math.sin(t * 0.55) * 2.2 + Math.sin(t * 0.13) * 1.2); g.stroke(); };
   scribble(48, 44, 96, 3);
-  [150, 118, 92, 140, 128, 166].forEach((len, i) => { const y = 76 + i * 26; scribble(42, y, 6, 2.2); scribble(56, y, len, 2.2); });
+  [150, 118, 92, 140, 128, 104, 166].forEach((len, i) => { const y = 76 + i * 26; scribble(42, y, 6, 2.2); scribble(56, y, len, 2.2); });
 });
 memoTex.colorSpace = THREE.SRGBColorSpace;
 
@@ -527,12 +527,17 @@ function makeCooler(M) {
   add(roundedBox(0.55, 0.36, 0.38, 0.03), M.body, 0, 0.02, 0);
   /* 앞면의 살짝 도드라진 판 (사출 성형 느낌) */
   add(roundedBox(0.42, 0.2, 0.014, 0.006), M.body, 0, 0.09, 0.19);
-  /* 뚜껑: 가운데가 8mm 부풀어 있다 */
-  add(roundedBox(0.57, 0.07, 0.4, 0.025, { dome: 0.008 }), M.lid, 0, 0.38, 0);
-  /* 뒤 경첩 두 개, 앞 걸쇠(몸통과 뚜껑의 이음매를 덮고 뚜껑 가장자리를 붙잡는다) */
+  /* 안쪽: 뚜껑이 들릴 때 보이는 어두운 바닥 (닫혀 있으면 뚜껑 속에 묻힌다) */
+   add(new THREE.ShapeGeometry(roundRectShape(0.49, 0.32, 0.02)).rotateX(-Math.PI / 2), M.dark, 0, 0.3805, 0);
+  /* 뚜껑: 뒤쪽 경첩(z −0.2)을 축으로 열린다. 가운데가 8mm 부풀어 있고, 걸쇠 윗부분이 함께 움직인다.
+     g.userData.lid 를 main.js 가 돌린다 (아이스박스에서 꼬치를 꺼내거나 넣을 때 살짝 들렸다 닫힌다) */
+  const lid = new THREE.Group(); lid.position.set(0, 0.38, -0.2); g.add(lid); g.userData.lid = lid;
+  const lidPart = (geo, x, y, z) => { const m = new THREE.Mesh(geo, M.lid); m.position.set(x, y - 0.38, z + 0.2); lid.add(m); return m; };
+  lidPart(roundedBox(0.57, 0.07, 0.4, 0.025, { dome: 0.008 }), 0, 0.38, 0);
+  /* 뒤 경첩 두 개, 앞 걸쇠(몸통 쪽 받침 + 뚜껑 가장자리를 붙잡는 윗부분) */
   [-0.16, 0.16].forEach(x => add(new THREE.CylinderGeometry(0.011, 0.011, 0.07, 10), M.trim, x, 0.378, -0.204, 0, 0, Math.PI / 2));
   add(new THREE.BoxGeometry(0.07, 0.05, 0.018), M.lid, 0, 0.355, 0.196);
-  add(new THREE.BoxGeometry(0.05, 0.012, 0.022), M.lid, 0, 0.393, 0.205);
+  lidPart(new THREE.BoxGeometry(0.05, 0.012, 0.022), 0, 0.393, 0.205);
   /* 양옆 손잡이: 받침 두 개 + 가로 막대 */
   [-1, 1].forEach(s => {
     [-0.085, 0.085].forEach(z => add(new THREE.BoxGeometry(0.03, 0.04, 0.026), M.lid, s * 0.285, 0.3, z));
@@ -616,7 +621,7 @@ export function makeProps() {
     body: smoothM(0x3d6f9e, { roughness: 0.55 }), lid: smoothM(0xdde6ee, { roughness: 0.5 }),
     dark: smoothM(0x2a2c30, { roughness: 0.8 }), trim: smoothM(0x9aa3ab, { roughness: 0.45, metalness: 0.2 }),
   });
-  cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = -1.8; scene.add(shadowed(cooler));
+   cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = -1.8; scene.add(shadowed(cooler)); ctx.W.coolerLid = cooler.userData.lid;
   /* 배낭: 게임 질감(천 노멀)을 입힌 재질로 makeBackpack 을 만들고 1.15배로 키운다 (높이 약 75cm).
      머그가 아이스박스와 붙어 보이지 않게 아이스박스 반대쪽으로 조금 떼어 놓는다 (data.js 의 BLOCKS·scene.js 의 접지 그림자도 이 위치) */
   const pack = makeBackpack({
@@ -763,8 +768,119 @@ export function updateLighthouse(T) {
   L.glow.material.opacity = on * (0.12 + 0.85 * flash); L.glow.scale.setScalar(8 + 22 * flash);
 }
 
+/* ── 마시멜로 꼬치 ──
+   원점 = 손이 쥐는 자리, 꼬치는 −z 로 약 0.85m 뻗는다.
+   손잡이 쪽 30% 는 껍질이 남은 생가지, 나머지는 껍질을 벗긴 밝은 나무, 끝으로 갈수록 불에 그을렸다.
+   마시멜로는 캠핑용 큰 것(지름 5.4cm·길이 4.8cm). 원점에서 MARSH_AT 에 꿰여 있고 꼬치 끝이 1.4cm 삐져나온다.
+   익음(userData.cook = 불에 댄 초)에 따라 셰이더가 흰색 → 크림 → 금빛 → 황갈색 → 검은 그을음으로 물들인다.
+   노이즈를 섞어 한꺼번에 변하지 않고 군데군데·모서리부터 번지며, 금빛일 때 윤기가 돈다.
+   익을수록 조금 부풀고 겉이 쭈글쭈글해지며, 타면 쪼그라들고 갈라진 틈이 보인다. 불이 붙으면(setBurn) 틈이 빨갛게 빛나고 끝에 작은 불꽃이 선다 */
+export const MARSH_AT = 0.812;
+const MR = 0.027, MH = 0.024;
+function marshGeo() {
+  const R = MR, H = MH, F = 0.011, B = 0.0014, D = 0.0018, V2 = THREE.Vector2, pts = [];
+  /* 옆에서 본 윤곽: 아랫면(가운데가 꼬치 자리로 살짝 눌림) → 둥근 모서리 → 살짝 볼록한 옆면 → 둥근 모서리 → 윗면 */
+  for (let i = 0; i <= 5; i++) { const t = i / 5; pts.push(new V2(t * (R - F), -H + D * (1 - t) ** 2)); }
+  for (let i = 1; i <= 8; i++) { const a = -Math.PI / 2 + i / 8 * Math.PI / 2; pts.push(new V2(R - F + F * Math.cos(a), -H + F + F * Math.sin(a))); }
+  for (let i = 1; i < 10; i++) { const u = i / 10; pts.push(new V2(R + B * Math.sin(Math.PI * u), -H + F + u * (2 * H - 2 * F))); }
+  for (let i = 0; i <= 8; i++) { const a = i / 8 * Math.PI / 2; pts.push(new V2(R - F + F * Math.cos(a), H - F + F * Math.sin(a))); }
+  for (let i = 1; i <= 5; i++) { const t = 1 - i / 5; pts.push(new V2(t * (R - F), H - D * (1 - t) ** 2)); }
+  const g = new THREE.LatheGeometry(pts, 40); g.rotateX(Math.PI / 2);
+  /* 손으로 만든 듯 살짝 찌그러뜨린다. 둘레 방향 사인만 써서 이음매(각도 0 = 2π)에서 어긋나지 않는다. 노멀은 선반 노멀 그대로 (변형이 2% 안팎이라 충분) */
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(y, x), k = 1 + 0.02 * Math.sin(3 * a + 1.3) + 0.012 * Math.sin(5 * a + z * 90); p.setXY(i, x * k, y * k); }
+  return g;
+}
+function marshMat() {
+  const u = { uCook: { value: 0 }, uBurn: { value: 0 }, uSeed: { value: Math.random() * 50 } };
+  const m = smoothM(0xffffff, { roughness: 0.9, normalMap: T.foliage.normalMap, normalScale: new THREE.Vector2(0.12, 0.12) });
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = 'varying vec3 vMP;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvMP=position;');
+    sh.fragmentShader = NOISE_GLSL + 'varying vec3 vMP;uniform float uCook,uBurn,uSeed;\n' + sh.fragmentShader
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float mkN=vnoise(vMP.xz*150.0+uSeed)*0.6+vnoise(vMP.yz*150.0-uSeed)*0.4;
+        float mkN2=vnoise(vMP.xz*420.0+uSeed*2.0)*0.5+vnoise(vMP.yz*420.0+7.0)*0.5;
+        float mkA=abs(vMP.z)/${MH.toFixed(4)},mkR=length(vMP.xy)/${MR.toFixed(4)};
+        float mkRim=smoothstep(0.7,1.0,mkA)*smoothstep(0.55,1.0,mkR);
+        float mkC=uCook*(0.78+0.34*mkN+0.2*mkRim)+0.04*(mkN2-0.5)*step(0.05,uCook);
+        vec3 mkCol=vec3(0.96,0.95,0.92);
+        mkCol=mix(mkCol,vec3(0.93,0.8,0.55),smoothstep(0.06,0.4,mkC));
+        mkCol=mix(mkCol,vec3(0.78,0.47,0.17),smoothstep(0.36,0.76,mkC));
+        mkCol=mix(mkCol,vec3(0.45,0.2,0.06),smoothstep(0.72,1.02,mkC));
+        mkCol=mix(mkCol,vec3(0.03,0.022,0.016),smoothstep(0.98,1.12,mkC));
+        float mkCrack=(1.0-smoothstep(0.0,0.05,abs(mkN2-0.5)))*smoothstep(1.0,1.12,mkC);
+        mkCol=mix(mkCol,vec3(0.32,0.14,0.04),mkCrack*0.8);
+        diffuseColor.rgb*=mkCol;`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor=mix(mix(0.92,0.5,smoothstep(0.4,0.85,mkC)),0.9,smoothstep(0.98,1.1,mkC));`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        totalEmissiveRadiance+=vec3(1.0,0.32,0.05)*uBurn*(mkCrack*2.0+0.25*smoothstep(1.0,1.1,mkC));`);
+  };
+  m.customProgramCacheKey = () => 'marsh';
+  m.userData.u = u;
+  return m;
+}
+function makeMarsh() {
+  const g = new THREE.Group(), V3 = THREE.Vector3, ud = g.userData;
+  const path = new THREE.CatmullRomCurve3([[0, 0, 0.06], [0.003, 0.004, -0.22], [0.005, 0.004, -0.5], [0.002, 0.001, -0.74], [0, 0, -0.85]].map(q => new V3(...q)));
+  /* 굵기: 손잡이 8.5mm → 끝 4mm, 마디마다 아주 조금 울퉁불퉁, 마지막 3% 에서 뾰족하게 */
+  const radius = t => (0.0085 - 0.0045 * t) * (0.4 + 0.6 * (1 - sstep(0.97, 1, t))) * (1 + 0.05 * Math.sin(t * 37));
+  /* 곡선을 따라가는 관. uv 를 바꿔 나뭇결이 길이 방향으로 흐르게 한다 (makeAxe 와 같은 방식) */
+  const tube = (curve, seg, rFn, colFn) => {
+    const RAD = 8, geo = new THREE.TubeGeometry(curve, seg, 1, RAD, false), pa = geo.attributes.position, uv = geo.attributes.uv, P = new V3(), col = [];
+    for (let i = 0; i <= seg; i++) {
+      const t = i / seg, r = rFn(t); curve.getPointAt(t, P);
+      for (let j = 0; j <= RAD; j++) {
+        const k = i * (RAD + 1) + j; pa.setXYZ(k, P.x + (pa.getX(k) - P.x) * r, P.y + (pa.getY(k) - P.y) * r, P.z + (pa.getZ(k) - P.z) * r);
+        if (colFn) col.push(...colFn(t, j));
+      }
+    }
+    for (let k = 0; k < uv.count; k++) { const a = uv.getX(k); uv.setXY(k, uv.getY(k), a); }
+    if (colFn) geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.computeVertexNormals(); return geo;
+  };
+  const PEEL = hexRGB(0xdcc7a0), SCORCH = hexRGB(0x8b6440), CHAR = hexRGB(0x2a1d14);
+  const woodM = smoothM(0xffffff, { vertexColors: true, roughness: 0.75, map: T.wood.map });
+  const barkM = smoothM(0x5b4230, { roughness: 0.95, map: T.bark.map, normalMap: T.bark.normalMap, normalScale: new THREE.Vector2(0.5, 0.5) });
+  /* 벗긴 나무: 끝으로 갈수록 그을리고, 둘레를 따라 결이 아주 조금 얼룩진다 */
+  g.add(new THREE.Mesh(tube(path, 48, radius, (t, j) => mix3(mix3(PEEL, SCORCH, sstep(0.78, 0.9, t)), CHAR, sstep(0.9, 0.99, t)).map(c => c * (0.92 + 0.08 * Math.sin(j * 2.3 + t * 40)))), woodM));
+  /* 손잡이 쪽 껍질: 벗긴 나무보다 1.2mm 두껍고, 끝자락이 살짝 들쭉날쭉하게 벗겨졌다 */
+  const bp = []; for (let i = 0; i <= 6; i++) bp.push(path.getPointAt(0.3 * i / 6));
+  g.add(new THREE.Mesh(tube(new THREE.CatmullRomCurve3(bp), 16, t => (radius(t * 0.3) + 0.0012) * (t > 0.92 ? 0.97 : 1)), barkM));
+  /* 곁가지를 쳐낸 자국 + 손잡이 끝의 잘린 단면 */
+  const knot = new THREE.Mesh(new THREE.ConeGeometry(0.0032, 0.01, 6), barkM); knot.position.copy(path.getPointAt(0.5)).add(new V3(0.0055, 0.002, 0)); knot.rotation.z = -1.2; g.add(knot);
+  const cut = new THREE.Mesh(new THREE.CircleGeometry(radius(0) + 0.0012, 12), smoothM(0xc9a97c, { roughness: 0.85, map: T.wood.map })); cut.position.set(0, 0, 0.06); g.add(cut);
+  /* 마시멜로 */
+  const mm = new THREE.Mesh(marshGeo(), marshMat()); mm.position.set(0, 0, -MARSH_AT); g.add(mm);
+  const core = new THREE.Object3D(); core.position.copy(mm.position); g.add(core);
+  /* 불붙은 마시멜로의 작은 불꽃: 바깥 주황 + 안쪽 노랑. 바닥 쪽을 기준점으로 세워 위로 타오르게 (main.js 가 월드 위쪽으로 자리를 맞춘다) */
+  const flame = new THREE.Group(); flame.position.copy(mm.position); flame.visible = false; g.add(flame);
+  const fm = c => new THREE.SpriteMaterial({ map: softTex, color: c, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  const fo = new THREE.Sprite(fm(0xff6a1e)), fi = new THREE.Sprite(fm(0xffd67a)); fo.center.set(0.5, 0.15); fi.center.set(0.5, 0.1); flame.add(fo, fi);
+  const emitter = new THREE.Object3D(); emitter.position.copy(mm.position); g.add(emitter);
+  Object.assign(ud, { emitter, core, flame, amount: 1, cook: 0, burnT: 0 });
+  ud.setAmount = a => { mm.visible = a > 0; if (a <= 0) flame.visible = false; };
+  ud.setCook = c => {
+    ud.cook = c; const k = c / ROAST.at[2], m = mm.material;
+    m.userData.u.uCook.value = k; m.normalScale.setScalar(0.12 + 0.55 * sstep(0.3, 1.0, k));
+    const puff = 1 + 0.1 * sstep(0.15, 0.85, k) - 0.13 * sstep(1.0, 1.2, k);
+    mm.scale.set(puff, puff, 1 + 0.06 * sstep(0.15, 0.85, k) - 0.1 * sstep(1.0, 1.2, k));
+  };
+  ud.setBurn = b => {
+    mm.material.userData.u.uBurn.value = b; flame.visible = b > 0.01 && mm.visible;
+    if (!flame.visible) return;
+    const f = 0.85 + 0.3 * Math.random();
+    fo.material.opacity = 0.85 * b; fi.material.opacity = 0.9 * b;
+    fo.scale.set(0.045 + 0.02 * b, (0.06 + 0.05 * b) * f, 1); fi.scale.set(0.022 + 0.01 * b, (0.03 + 0.025 * b) * f, 1);
+  };
+  ud.setCook(0); ud.setBurn(0);
+  return g;
+}
+
 /* ── 손에 드는 것 ── */
 export function makeItem(type) {
+   if (type === 'marsh') return makeMarsh();
   const g = new THREE.Group(); const emitter = new THREE.Object3D(); g.userData.emitter = emitter; g.userData.amount = 1;
   if (type === 'coffee') {
     const cer = smoothM(0xf2ede4, { roughness: 0.3, side: THREE.DoubleSide });

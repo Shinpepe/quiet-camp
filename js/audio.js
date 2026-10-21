@@ -483,6 +483,28 @@ export function setSparkler(on) {
 }
 export function sparklerLevel(v) { if (spark) spark.gain.gain.setTargetAtTime(v, AC.currentTime, 0.1); }
 
+/* ── 마시멜로 굽는 소리: 불에 대고 있는 동안 아주 작게 지글거리며 가끔 톡, 불이 붙으면 낮게 화르륵 ──
+   main.js 가 매 프레임 부른다. 1.5초쯤 조용하면 노드를 정리한다 */
+let roastSnd = null;
+function killRoast() {
+  const st = roastSnd; if (!st) return; roastSnd = null; killT(st.t);
+  const t = AC.currentTime; st.g.gain.setTargetAtTime(0, t, 0.08); st.bg.gain.setTargetAtTime(0, t, 0.08); setTimeout(() => kill(st.nodes), 500);
+}
+export function setRoast(lv, burn) {
+  if (!AC) return; lv = lv || 0; burn = burn || 0;
+  if (!roastSnd) {
+    if (lv <= 0 && burn <= 0) return;
+    const s = noise('pink', true), f = filt('bandpass', 3400, 0.9), g = gainN(0), b = noise('brown', true), bf = filt('lowpass', 520), bg = gainN(0);
+    chain(s, f, g, sfxBus); chain(b, bf, bg, sfxBus); s.start(0, off()); b.start(0, off());
+    const st = { g, bg, lv: 0, idle: 0, t: [], nodes: [s, f, g, b, bf, bg] }; roastSnd = st;
+    const pop = () => { if (roastSnd !== st) return; if (st.lv > 0.05) burst(sfxBus, false, 'bandpass', rnd(2600, 5200), 3, 0.001, 0.01 * st.lv, 0.012, AC.currentTime); sched(st.t, pop, rnd(110, 480)); };
+    pop();
+  }
+  const st = roastSnd, t = AC.currentTime; st.lv = lv;
+  st.g.gain.setTargetAtTime(0.01 * lv, t, 0.15); st.bg.gain.setTargetAtTime(0.06 * burn, t, 0.08);
+  st.idle = lv > 0 || burn > 0 ? 0 : st.idle + 1; if (st.idle > 90) killRoast();
+}
+
 /* ── 배경 베드 ── */
 /* 가까운 귀뚜라미 한 마리: 캠프 주변 풀숲(4~9m)에 자리를 잡고, 자기 음색·주기로 운다.
    계속 울지 않고 4~10초 울다가 3~9초 쉰다 (마리마다 따로). 먼 합창이 쉬는 동안(quiet)에는 같이 멈춰 진짜 빈틈이 생긴다.
@@ -551,7 +573,7 @@ function startAmb(type, timeKey) {
 export function startAmbience(type, timeKey) { if (!AC) return; menuMode = false; applyWorld(); startAmb(type, timeKey); startEngine(); }
 /* 메뉴 프리뷰용: 같은 베드를 작게 */
 export function menuAmbience(bgKey) { if (!AC || !ctx.W.cfg) return; menuMode = true; indoor = false; applyWorld(); startAmb(BG[bgKey].ambience, isNight(state.clock) ? 'night' : 'day'); }
-export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); setSipFocus(false); }
+export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); setSipFocus(false); killRoast(); }
 
 /* ── 간헐 이벤트: 낮 9~26초, 밤 14~40초. 일부 확률은 일부러 비워 둔다(침묵도 소리).
    돌풍은 여기서 빠지고 바람 값(W.wind)이 솟을 때 updateAudio 가 낸다 ── */
@@ -750,7 +772,9 @@ export function sfx(type, arg) {
     case 'doorOpen': burst(B, false, 'highpass', 3500 * pv, 1, 0.002, 0.08, 0.04, t); { const o = tone(B, 220 * pv, 170, 0.06, 0.02, 0.25, t + 0.05); const v = osc('sine', 9), vg = gainN(12); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 0.4); } burst(B, true, 'lowpass', 700, 1, 0.08, 0.02, 0.3, t + 0.05, 1400, 0.3); return;
     case 'doorClose': tone(B, 70 * pv, 45, 0.004, 0.28, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.2, 0.15, t); burst(B, false, 'highpass', 3000 * pv, 1, 0.002, 0.06, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.05, 0.35, t); return;
     /* 아이템 */
-    case 'pick': if (arg === 'coffee') pour(); else if (arg === 'whisky') { ice(1, t); ice(0.7, t + 0.13); } else if (arg === 'sparkler') { for (let i = 0; i < 3; i++) burst(B, false, 'bandpass', 2000 * rnd(0.9, 1.1), 0.8, 0.01, 0.03, 0.08, t + i * 0.09); } else sfx('lighter'); return;
+    case 'pick': if (arg === 'coffee') pour(); else if (arg === 'whisky') { ice(1, t); ice(0.7, t + 0.13); } else if (arg === 'sparkler') { for (let i = 0; i < 3; i++) burst(B, false, 'bandpass', 2000 * rnd(0.9, 1.1), 0.8, 0.01, 0.03, 0.08, t + i * 0.09); }
+      else if (arg === 'marsh') { for (let i = 0; i < 6; i++) burst(B, false, 'bandpass', rnd(2500, 4500), 1.5, 0.002, rnd(0.012, 0.022), 0.03, t + 0.15 + i * rnd(0.04, 0.09)); }
+      else sfx('lighter'); return;
     /* 마시기: 넘기는 '꿀꺽' 하나만. 커피는 높고 가볍게, 위스키는 낮고 묵직하게 (main.js 가 타이밍을 정한다).
        'sipStart'·'sip'·'sipEnd' 는 예전 호출이 남아 있어도 조용히 넘어가도록 받아 둔다 */
     case 'sipStart': case 'sip': case 'sipEnd': return;
@@ -785,6 +809,22 @@ export function sfx(type, arg) {
     case 'lampOff': tone(B, 1600 * pv, 1200, 0.002, 0.03, 0.04, t); burst(B, false, 'bandpass', 3000, 1.5, 0.02, 0.02, 0.5, t, 1800, 0.5); return;
     case 'sparkOn': burst(B, false, 'bandpass', 5000, 0.8, 0.03, 0.14, 0.45, t); for (let i = 0; i < 6; i++) burst(B, false, 'bandpass', rnd(4500, 8000), 2, 0.002, rnd(0.04, 0.08), 0.02, t + Math.random() * 0.3); return;
     case 'sparkOff': burst(B, false, 'bandpass', 4500, 0.8, 0.02, 0.04, 0.5, t, 2500, 0.5); return;
+    /* 아이스박스: 걸쇠 딸깍 + 뚜껑 들리는 소리 / 닫힐 때 둔탁한 플라스틱 */
+    case 'cooler':
+      if (arg === 'close') { tone(B, 150 * pv, 95, 0.003, 0.1, 0.1, t); burst(B, false, 'lowpass', 800, 1, 0.002, 0.07, 0.06, t); burst(B, false, 'bandpass', 2400 * pv, 3, 0.001, 0.03, 0.02, t + 0.05); }
+      else { burst(B, false, 'bandpass', 2800 * pv, 3, 0.001, 0.06, 0.02, t); burst(B, 'pink', 'lowpass', 600, 1, 0.04, 0.04, 0.3, t + 0.03, 1200, 0.3); }
+      return;
+    /* 마시멜로: 불이 붙는 낮은 화르륵 / 스스로 꺼지는 치익 */
+    case 'marshFlame': burst(B, 'brown', 'lowpass', 300, 1, 0.04, 0.08, 0.35, t, 900, 0.2); burst(B, 'pink', 'bandpass', 1800, 0.8, 0.02, 0.02, 0.3, t); return;
+    case 'marshOut': burst(B, false, 'bandpass', 3000, 1, 0.01, 0.02, 0.4, t, 1500, 0.4); return;
+    /* 먹기: 말랑하게 베어 무는 소리 → 씹기 두 번. 완벽(2)·탐(3)은 겉이 바삭하게 부서진다 (입 근처라 잔향 없는 dryBus) */
+    case 'eat': {
+      const s = arg || 0, D = dryBus;
+      burst(D, 'pink', 'bandpass', 650 * pv, 1.2, 0.02, 0.035, 0.16, t, 380, 0.16);
+      if (s >= 2) for (let i = 0; i < (s === 3 ? 6 : 4); i++) burst(D, false, 'bandpass', rnd(2600, 4800), 2, 0.001, (s === 3 ? 0.022 : 0.016) * rnd(0.6, 1), 0.018, t + 0.01 + i * rnd(0.018, 0.035));
+      [0.42, 0.78].forEach(d => burst(D, 'pink', 'bandpass', 520 * pv, 1, 0.03, 0.022, 0.14, t + d, 330, 0.14));
+      return;
+    }
     /* 낚시: 낚싯대 들기 · 던지기(휙 + 줄 풀리는 소리) · 찌 착수 · 헛입질 톡 · 입질 쑥 · 릴 틱틱 · 물보라 · 물 밖으로 · 줄 풀림 */
     case 'rodUp': fabric(B, t, 0.03, 0.25); return;
     case 'cast': burst(B, 'pink', 'bandpass', 600 * pv, 1, 0.05, 0.1, 0.3, t, 2400, 0.3); burst(B, false, 'highpass', 3500, 1, 0.01, 0.025, 0.5, t + 0.15, 6000, 0.5); return;

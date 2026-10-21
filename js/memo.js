@@ -20,7 +20,13 @@ const CSS = `
 .mpaper ol{margin:0;padding-left:1.3em;font-family:var(--serif);font-size:14.5px;letter-spacing:.02em}
 .mpaper li::marker{color:#8c7b5e}
 #memo .row{justify-content:center;margin-top:22px}
-#memo .row .b{flex:0 0 auto;min-width:140px}`;
+#memo .row .b{flex:0 0 auto;min-width:140px}
+@media (max-height:440px){
+.mpaper{line-height:26px;padding:12px 22px 16px 50px;
+  background-image:linear-gradient(90deg,transparent 38px,rgba(200,96,84,.4) 38px,rgba(200,96,84,.4) 39px,transparent 39px),
+    repeating-linear-gradient(180deg,transparent 0,transparent 25px,rgba(70,104,150,.22) 25px,rgba(70,104,150,.22) 26px);
+  background-position:0 0,0 12px}
+#memo .row{margin-top:12px}}`;
 
 /* 창은 처음 열 때 #hud 안에 만든다 (트렁크·도감 창과 같은 자리) */
 function ensure() {

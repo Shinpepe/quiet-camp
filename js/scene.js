@@ -10,7 +10,7 @@ import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 /* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
-import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo } from './game.js';
+import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler } from './game.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -362,6 +362,7 @@ export function buildScene(bgKey) {
     { id: 'car',      pos: [-0.97, 1.0, 8.1],   r: 1.5, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기', act: () => sitDown('car') },
     { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.2, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },
     { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 1.7, hit: 0.32, from: ['walk'],          label: () => '장작 패기', act: beginChop },
+    { id: 'cooler',   pos: [2.4, 0.3, 0.6],     r: 1.8, hit: 0.32, from: ['walk'],          label: () => state.item === 'marsh' ? '꼬치 넣기' : '마시멜로 꺼내기', act: useCooler },
     { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
     { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 1.8, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
     { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 1.8, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },

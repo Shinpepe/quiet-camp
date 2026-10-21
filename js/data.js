@@ -16,6 +16,8 @@ export const ICON = {
   axe:      svg('<path d="M10.6 2.8c-.3 6-1 12-2.2 18.4"/><path d="M9.4 4.2h5l4.2-2.2c1.6 3 1.6 6.2 0 9.2l-4.2-2.2h-5z"/>'),
   /* 낚싯대: 비스듬한 대, 늘어진 줄 끝의 찌, 손잡이 쪽 릴 */
   rod:      svg('<path d="M4 20L19 4"/><path d="M19 4c1.6 3.5 1.6 7.5.4 11"/><circle cx="19.4" cy="16.6" r="1.3"/><circle cx="7.2" cy="15.2" r="1.7"/>'),
+  /* 마시멜로 꼬치: 비스듬한 꼬치 끝에 꿰인 둥근 마시멜로 */
+  marsh:    svg('<path d="M3 21L20.3 3.7"/><rect x="13.4" y="4.5" width="6.4" height="5.8" rx="2" transform="rotate(-45 16.6 7.4)"/>'),
 };
 
 /* haze: 장소별 안개 배율. 시간대의 fogDen 에 곱한다 — 해변은 바다 습기로 조금 더, 설산은 맑은 고산 공기라 조금 덜
@@ -50,9 +52,11 @@ export const KEYS = [[0.0, 'night'], [0.19, 'night'], [0.27, 'dawn'], [0.58, 'af
 /* 트렁크 아이템. hold: 길게 누르면 계속 (마시는 것) / 아니면 클릭 한 번 */
 export const ITEMS = {
   coffee:   { name: '커피', ic: ICON.coffee, act: '한 모금', hold: true, ds: '따뜻한 김이 천천히 올라온다' },
-  whisky:   { name: '위스키', ic: ICON.whisky, act: '한 잔', hold: true, ds: '얼음이 잔에 부딪히는 소리' },
+  whisky:   { name: '위스키', ic: ICON.whisky, act: '한 잔', hold: true, ds: '얼음이 잔에 살짝 부딪힌다' },
   smoke:    { name: '담배', ic: ICON.smoke, act: '한 모금', hold: true, ds: '연기가 바람에 흩어진다' },
   sparkler: { name: '스파클라', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
+  /* trunk: false — 트렁크 목록에 나오지 않는다 (아이스박스에서 꺼낸다) */
+  marsh:    { name: '마시멜로 꼬치', ic: ICON.marsh, act: '먹기', hold: true, ds: '모닥불에 노릇하게 굽는다', trunk: false },
 };
 
 /* 캠핑 메모(조수석 담요 위의 줄노트)에 적힌 할 일
@@ -63,12 +67,25 @@ export const MEMO = [
   { key: 'trunk', text: '차 트렁크를 열어 짐 꺼내기' },
   { key: 'chop',  text: '모닥불 옆 장작 패기' },
   { key: 'fire',  text: '모닥불 피우기' },
+  { key: 'marsh', text: '아이스박스에서 마시멜로 꺼내 구워 먹기' },
   { key: 'chair', text: '의자에 앉아 한숨 돌리기' },
   { key: 'fish',  text: '부두 끝에서 낚시하기', only: ['lake'] },
   { key: 'sleep', text: '텐트 안 침낭에서 하룻밤 자기' },
 ];
 /* 이 장소의 메모에 적힐 줄 */
 export const memoFor = bg => MEMO.filter(m => !m.only || m.only.includes(bg));
+
+/* 마시멜로 굽기
+   fire: 꼬치 끝이 닿을 불꽃 자리 — 모닥불 가운데 x·z(scene.js 의 모닥불 위치)와 불꽃 높이 y
+   near: 모닥불 가운데까지 수평 거리가 이 안이어야 굽는다 (m). 모닥불 충돌 때문에 가장 가까이 서도 약 1.05m
+   aim: 시선과 불꽃 자리 사이 각도가 이보다 작으면 "불을 바라본다" (rad)
+   at: 익음 단계가 바뀌는 시각(불에 댄 초) — 덜 익음 < 4 ≤ 잘 익음 < 8 ≤ 완벽 < 11 ≤ 탐. 11초를 넘겨 불에 대고 있으면 불이 붙는다
+   eat: 단계별로 먹었을 때의 소식 */
+export const ROAST = {
+  fire: [0.3, 0.72, -1.4], near: 1.75, aim: 0.6, at: [4, 8, 11],
+  eat: ['아직 속은 차갑다', '달달한 맛이 느껴진다', '겉은 바삭하고 속은 촉촉하다', '쓴맛이 느껴진다'],
+};
+export const roastStage = c => c < ROAST.at[0] ? 0 : c < ROAST.at[1] ? 1 : c < ROAST.at[2] ? 2 : 3;
 
 /* 부두 끝 자리는 dock.js 의 DOCK(끝 z −19.2, 윗면 0.36)에 맞춘다: 끝 판자 가장자리에 걸터앉은 눈높이 */
 export const SEAT = {

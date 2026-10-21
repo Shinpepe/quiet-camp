@@ -4,12 +4,13 @@ import { $, rnd, smooth, clamp, wrapPI } from './util.js';
 import { applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
 import { createPost } from './post.js';
-import { spawnFlock, updateFlocks, updateLighthouse } from './props.js';
+import { spawnFlock, updateFlocks, updateLighthouse, MARSH_AT } from './props.js';
 import { WATER_Y } from './terrain.js';
-import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience, setSipFocus } from './audio.js';
-import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep, buildWithLoading } from './game.js';
+import { startAmbience, updateAudio, sfx, setSparkler, sparklerLevel, menuAmbience, setSipFocus, setRoast } from './audio.js';
+import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCaption, resetHand, isNightClock, itemEmptied, updateSleep, buildWithLoading, roastSpot, roastTarget, eatMarsh } from './game.js';
 import { updateChop, chopCamera } from './chop.js';
 import { updateFish } from './fish.js';
+import { ROAST } from './data.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -97,6 +98,61 @@ function assignSparkLights(W) {
   }
 }
 
+/* ── 마시멜로 꼬치: 손 자세(쉬는 자세 ↔ 불에 내민 자세 ↔ 입으로 가져간 자세)와 익히기·불붙음 ──
+   불에 내민 자세는 마시멜로가 불꽃 자리(roastTarget)에 오도록 매 프레임 꼬치를 그쪽으로 겨눈다.
+   그 자리가 꼬치 길이보다 멀면 팔을 뻗듯 앞으로 밀어 준다 (최대 0.75m)
+   먹는 자세는 꼬치를 아래에서 비스듬히 들어 올려 마시멜로를 입 앞으로 가져온다 */
+const M_POS = new THREE.Vector3(0.24, -0.34, -0.2), M_ROT = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6, 0.15, 0));
+const M_FWD = new THREE.Vector3(0, 0, -1), MOUTH = new THREE.Vector3(0.02, -0.07, -0.17), EAT_DIR = new THREE.Vector3(-0.3, 0.85, 0.43).normalize();
+const _mp = new THREE.Vector3(), _mq = new THREE.Quaternion(), _rp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _ep = new THREE.Vector3(), _eq = new THREE.Quaternion();
+const _md = new THREE.Vector3(), _mw = new THREE.Vector3(), _up = new THREE.Vector3(), _iq = new THREE.Quaternion();
+const ease = k => k * k * (3 - 2 * k);
+let roastLv = 0, burnLv = 0;
+function updateMarsh(W, ud, dt) {
+  const hand = ctx.hand, spot = roastSpot();
+  /* 굽는 자리에 들어오고 나갈 때 아이템 상자 안내(굽기 ↔ 먹기)를 바꾼다 */
+  if (spot !== anim.spotPrev) { anim.spotPrev = spot; updateHUD(); }
+  if (anim.roast) { anim.roastMin -= dt; if (spot !== 'roast' || (!anim.holding && anim.roastMin <= 0)) anim.roast = false; }
+  anim.roastK += ((anim.roast ? 1 : 0) - anim.roastK) * Math.min(1, dt * 6);
+  const inFire = anim.roast && anim.roastK > 0.85 && !ctx.paused && ud.amount > 0;
+  if (inFire) ud.setCook(Math.min(ud.cook + dt, ROAST.at[2] + 3));
+  /* 불붙음: 다 탄 뒤에도 불에 대고 있으면 불이 붙고, 떼면 1.6초 뒤 스스로 꺼진다 */
+  if (!ctx.paused) {
+    if (inFire && ud.cook >= ROAST.at[2]) { if (ud.burnT <= 0) sfx('marshFlame'); ud.burnT = 1.6; }
+    else if (ud.burnT > 0) { ud.burnT -= dt; if (ud.burnT <= 0) sfx('marshOut'); }
+  }
+  const bk = ud.amount > 0 ? Math.min(1, Math.max(0, ud.burnT) / 0.4) : 0;
+  ud.setBurn(bk > 0 ? bk * (0.85 + 0.1 * Math.sin(T * 23) + 0.05 * Math.sin(T * 41)) : 0);
+
+  /* 자세: 쉬는 자세(걸을 때 살짝 흔들림) → 불에 내민 자세 → 먹는 자세 순으로 섞는다 */
+  _mp.copy(M_POS); _mq.copy(M_ROT);
+  _mp.x += Math.sin(player.bob * 0.5) * 0.01; _mp.y += Math.abs(Math.sin(player.bob)) * 0.012;
+  if (anim.roastK > 0.001) {
+    ctx.camera.worldToLocal(roastTarget(_md));
+    _md.sub(M_POS); const dist = _md.length(); _md.normalize();
+    _rp.copy(M_POS).addScaledVector(_md, clamp(dist - MARSH_AT, -0.15, 0.75)); _rq.setFromUnitVectors(M_FWD, _md);
+    const k = ease(anim.roastK); _mp.lerp(_rp, k); _mq.slerp(_rq, k);
+  }
+  if (anim.eatT !== null) {
+    anim.eatT += dt / 1.1; const u = anim.eatT, k = ease(u < 0.4 ? u / 0.4 : u < 0.6 ? 1 : Math.max(0, 1 - (u - 0.6) / 0.4));
+    _ep.copy(MOUTH).addScaledVector(EAT_DIR, -MARSH_AT); _eq.setFromUnitVectors(M_FWD, EAT_DIR);
+    _mp.lerp(_ep, k); _mq.slerp(_eq, k);
+    if (u >= 0.45 && !anim.ate) { anim.ate = true; eatMarsh(); }
+    if (u >= 1) anim.eatT = null;
+  }
+  hand.position.copy(_mp); hand.quaternion.copy(_mq);
+
+  /* 불 앞에서: 가는 연기가 오르고(익을수록 진하게), 불이 붙으면 불티가 튄다. 작은 불꽃은 월드 위쪽으로 세운다 */
+  if (inFire || bk > 0) {
+    ud.core.getWorldPosition(_mw);
+    const ck = Math.min(1, ud.cook / ROAST.at[2]);
+    if (inFire && Math.random() < dt * (3 + 6 * ck)) W.smoke.spawn(_mw, { x: 0, y: 0.25, z: 0 }, 0.01, 1.8, 0.03, 0.012, 0.08, 0.1 + 0.15 * ck);
+    if (bk > 0 && Math.random() < dt * 8) W.embers.spawn(_mw, { x: 0, y: 0.5, z: 0 }, 0.02, 0.5, 0.15);
+    if (bk > 0) { W.item.getWorldQuaternion(_iq).invert(); _up.set(0, 1, 0).applyQuaternion(_iq); ud.flame.position.copy(ud.core.position).addScaledVector(_up, 0.02); }
+  }
+  roastLv = inFire ? 0.5 + 0.5 * Math.min(1, ud.cook / ROAST.at[2]) : 0; burnLv = bk;
+}
+
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; const W = ctx.W, scene = ctx.scene;
@@ -132,6 +188,8 @@ function loop(now) {
   W.shT += dt; if (W.shT >= (ctx.running && state.mode === 'chop' ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
+  /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 살짝 들린다 */
+  if (W.coolerLid) { W.coolerT = Math.max(0, (W.coolerT || 0) - dt); const tgt = W.coolerT > 0 ? -0.75 : 0; W.coolerLid.rotation.x += (tgt - W.coolerLid.rotation.x) * Math.min(1, dt * 9); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
   if (W.ff) { const p = W.ff.geometry.attributes.position; W.ffBase.forEach((b, i) => { p.array[i * 3] = b[0] + Math.sin(T * 0.5 + b[3]) * 1.2; p.array[i * 3 + 1] = b[1] + Math.sin(T * 0.9 + b[3] * 2) * 0.4; p.array[i * 3 + 2] = b[2] + Math.cos(T * 0.4 + b[3]) * 1.2; }); p.needsUpdate = true; W.ff.material.opacity = (0.45 + 0.4 * Math.sin(T * 1.7)) * Math.min(1, W.tm.stars * 2.5); }
   if (W.cfg.birds && W.sunUp) { W.birdT -= dt; if (W.birdT < 0) { spawnFlock(); W.birdT = rnd(16, 38); } }
@@ -183,12 +241,14 @@ function loop(now) {
     } else W.fireBurst = false;
   }
 
+  roastLv = burnLv = 0;
   /* ── 손에 든 것 (장작을 패는 동안에는 손을 숨기므로 건너뛴다) ── */
   if (W.item && ctx.running && state.mode !== 'chop') {
     const type = state.item, ud = W.item.userData;
     if (type === 'sparkler') {
       if (ud.lit && !ctx.paused) { burnSparkler(W, ud, dt); if (ud.amount === 0) { ud.setLit(false); itemEmptied(); } }
-    } else {
+    } else if (type === 'marsh') updateMarsh(W, ud, dt);
+    else {
       if (anim.sipT !== null) {
         const atMouth = anim.holding && anim.sipT >= 0.5 && ud.amount > 0 && !ctx.paused;
         if (atMouth) { anim.sipT = 0.5; anim.holdT += dt; } else anim.sipT += dt / 1.7;
@@ -228,6 +288,8 @@ function loop(now) {
   }
   /* 마시는 중이 아니면 포커스를 풀어 둔다 (도중에 끊겨도 남지 않게). 같은 상태면 audio.js 가 아무것도 하지 않는다 */
   if (anim.sipT === null) setSipFocus(false);
+  /* 마시멜로 굽는 소리 (게임 중에만, 멈춘 동안에는 불꽃 소리도 멈춘다) */
+  setRoast(ctx.running ? roastLv : 0, ctx.running && !ctx.paused ? burnLv : 0);
   if (anim.exhale > 0 && ctx.running) {
     anim.exhale -= dt; camera.getWorldDirection(fwdV); tmpV.copy(camera.position).addScaledVector(fwdV, 0.22); tmpV.y -= 0.06;
     for (let i = 0; i < 2; i++) W.smoke.spawn(tmpV, { x: fwdV.x * 0.5, y: 0.1 + fwdV.y * 0.5, z: fwdV.z * 0.5 }, 0.05, 2.6 * anim.exhaleStr, 0.18, 0.06, 0.4, 0.3);
