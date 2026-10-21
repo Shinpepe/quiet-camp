@@ -11,7 +11,7 @@ import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCapt
 import { updateChop, chopCamera } from './chop.js';
 import { updateFish } from './fish.js';
 import { ROAST } from './data.js';
-import { updateSnowman } from './snowman.js';
+import { updateSnowman, snowMoving } from './snowman.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -185,8 +185,8 @@ function loop(now) {
   applyTime();
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
-  /* 그림자맵은 보통 0.1초마다, 장작을 패는 동안에는 눈앞의 빠른 움직임이 끊겨 보이지 않게 매 프레임 갱신한다 */
-  W.shT += dt; if (W.shT >= (ctx.running && state.mode === 'chop' ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리는 동안에는 눈앞의 빠른 움직임이 끊겨 보이지 않게 매 프레임 갱신한다 */
+  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 80° 까지 열렸다가 바로 닫힌다 */

@@ -17,7 +17,7 @@ const CSS = `
   background-position:0 0,0 20px;
   box-shadow:0 18px 50px rgba(0,0,0,.45),0 2px 0 rgba(0,0,0,.08)}
 .mpaper h3{margin:0;font-family:var(--serif);font-weight:500;font-size:17px;letter-spacing:.12em}
-.mpaper ol{margin:0;padding-left:1.3em;font-family:var(--serif);font-size:14.5px;letter-spacing:.02em}
+.mpaper ol{margin:0;padding-left:1.3em;font-family:var(--serif);font-size:14.5px;letter-spacing:.02em;word-break:keep-all}
 .mpaper li::marker{color:#8c7b5e}
 #memo .row{justify-content:center;margin-top:22px}
 #memo .row .b{flex:0 0 auto;min-width:140px}

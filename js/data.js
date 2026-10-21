@@ -81,7 +81,7 @@ export const memoFor = bg => MEMO.filter(m => !m.only || m.only.includes(bg));
    grow: 커지는 빠르기 — 반지름² 이 굴러간 거리 × 2·grow 만큼 늘어난다 (0.18m 약 3m, 0.45m 약 25m)
    near: 두 눈덩이 사이가 이 안이면 "눈사람 만들기" · slow: 최대 크기일 때 걷는 속도 배율
    maxBalls·maxMen: 바닥 눈덩이·눈사람 최대 개수 · trackLife: 굴린 자국이 사라지는 시간(초) · range: 캠프에서 굴릴 수 있는 거리(m) */
-export const SNOW = { start: 0.08, min: 0.18, max: 0.45, grow: 0.0039, near: 0.35, slow: 0.3, maxBalls: 6, maxMen: 2, trackLife: 30, range: 45 };
+export const SNOW = { start: 0.08, min: 0.18, max: 0.45, grow: 0.0039, near: 0.35, slow: 0.3, maxBalls: 6, maxMen: 3, trackLife: 30, range: 45 };
 
 /* 마시멜로 굽기
    fire: 꼬치 끝이 닿을 불꽃 자리 — 모닥불 가운데 x·z(scene.js 의 모닥불 위치)와 불꽃 높이 y

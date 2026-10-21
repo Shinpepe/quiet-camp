@@ -130,7 +130,7 @@ class Track {
           float sl=sign(vU)*(-0.9*wall+0.5*rim);
           vec3 nV=normalize((viewMatrix*vec4(normalize(vec3(vD.x*sl,1.0,vD.y*sl)),0.0)).xyz);
           vec3 upV=normalize((viewMatrix*vec4(0.0,1.0,0.0,0.0)).xyz);
-          float shade=(0.6+0.4*max(dot(nV,uLight),0.0))/(0.6+0.4*max(dot(upV,uLight),0.0));
+          float shade=clamp((0.6+0.4*max(dot(nV,uLight),0.0))/(0.6+0.4*max(dot(upV,uLight),0.0)),0.75,1.12);
           float m=mix(1.0,0.9,trough)*shade*(0.96+0.08*vnoise(vW.xz*40.0));
           m=mix(m,max(m,1.06),rim);
           float f=max(trough,rim*0.8)*life*far*0.8;
@@ -291,13 +291,18 @@ function nearBall() {
   for (const b of S.balls) { const g = Math.hypot(b.x - a.x, b.z - a.z) - b.r - a.r; if (g < gap) { gap = g; best = b; } }
   return best;
 }
-export const rollLabel = () => nearBall() ? '눈사람 만들기' : '내려놓기';
+/* 눈사람이 이미 두 개면 붙어 있어도 "내려놓기" — 내려놓으면서 이유를 알려 준다 */
+export const rollLabel = () => nearBall() && S.men.length < SNOW.maxMen ? '눈사람 만들기' : '내려놓기';
 /* 굴리는 중 E: 다른 눈덩이에 붙어 있으면 눈사람, 아니면 내려놓기 */
-export function rollAct() { const nb = nearBall(); if (nb) combine(nb); else dropBall(); }
+export function rollAct() {
+  const nb = nearBall();
+  if (nb && S.men.length < SNOW.maxMen) combine(nb);
+  else { dropBall(); if (nb) toast('눈사람은 세 개까지 만들 수 있다'); }
+}
 function dropBall() { const b = S.active; S.active = null; register(b); sfx('snowDrop', b.r); toast('눈덩이를 내려놓았다'); updateHUD(); }
 function combine(body) {
   const head = S.active;
-  if (S.men.length >= SNOW.maxMen) { toast('눈사람은 두 개까지'); return; }
+  if (S.men.length >= SNOW.maxMen) { toast('눈사람은 세 개까지 만들 수 있다'); return; }
   if (head.r < SNOW.min || body.r < SNOW.min) { toast('눈덩이가 너무 작다'); return; }
   unregister(body); S.active = null; S.men.push(buildMan(body, head));
   sfx('snowLift'); toast('눈사람을 만들었다'); updateHUD();
@@ -456,3 +461,6 @@ export function updateSnowman(dt) {
   setSnowRoll(clamp(lv, 0, 1), a ? a.r / SNOW.max : 0);
   updateMen(dt); updateMounds(dt); S.fx.update(dt);
 }
+
+/* 눈덩이가 굴러가거나 눈사람이 만들어지는 중 — main.js 가 그동안 그림자맵을 매 프레임 갱신한다 */
+export const snowMoving = () => !!S.active || S.men.some(m => m.anim);

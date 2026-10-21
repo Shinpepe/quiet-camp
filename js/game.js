@@ -118,11 +118,15 @@ export function bindInput() {
      (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
   $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
-  $('#mAct').onclick = interact;
-  /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다 */
-  const ms = $('#mSip');
-  ms.onpointerdown = e => { e.preventDefault(); try { ms.setPointerCapture(e.pointerId); } catch (_) {} useItem(); };
-  ms.onpointerup = ms.onpointercancel = endSip; ms.oncontextmenu = e => e.preventDefault();
+  /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다.
+     옆 버튼(mSip)은 누르는 순간 동작하고, 그 결과 숨으면 행동 버튼(mAct)이 그 자리로 밀려온다.
+     손을 뗄 때 브라우저가 보내는 click 이 행동 버튼에 떨어지지 않게, 옆 버튼을 누르거나 뗀 뒤 0.5초 동안은 행동 버튼 클릭을 무시한다
+     (예: 눈덩이를 부수자마자 발밑에서 "눈 뭉치기"가 눌려 새 눈덩이가 생기던 문제) */
+  const ms = $('#mSip'); let sipTouchT = -1e9;
+  ms.onpointerdown = e => { e.preventDefault(); sipTouchT = performance.now(); try { ms.setPointerCapture(e.pointerId); } catch (_) {} useItem(); };
+  ms.onpointerup = ms.onpointercancel = () => { sipTouchT = performance.now(); endSip(); };
+  ms.oncontextmenu = e => e.preventDefault();
+  $('#mAct').onclick = () => { if (performance.now() - sipTouchT < 500) return; interact(); };
   $('#start').onclick = startGame;
   /* 슬라이더: 같은 키의 메뉴·일시정지 슬라이더를 함께 움직이고 저장한다.
      map 을 주면 슬라이더 값과 설정 값을 서로 바꿔 준다 (하루 길이: 단계 번호 0..3 ↔ 30·60·120·240분) */
@@ -142,6 +146,7 @@ export function bindInput() {
   bindToggle('shadow', 'shadow', on => {
     ctx.renderer.shadowMap.enabled = on; ctx.renderer.shadowMap.needsUpdate = true;
     if (ctx.W.sun) ctx.W.sun.castShadow = on;
+    if (ctx.W.fireLight) ctx.W.fireLight.castShadow = on && FINE;
     if (ctx.scene) ctx.scene.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); });
   });
   bindToggle('bloom', 'bloom', on => ctx.post.setBloom(on));
