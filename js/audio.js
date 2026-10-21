@@ -30,7 +30,7 @@ const SIP_FOCUS = 0.3;
 let AC = null, master, comp, worldLP, worldGain, bedBus, bedLP, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
 let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false, focusOn = false;
-let fire = null, water = null, spark = null, engine = null, engineDone = false;
+let fire = null, water = null, spark = null;
 let windAcc = 0, lastWind = 0, lastGust = -99;
 const flockAudio = new Map();
 const _f = new THREE.Vector3(), _u = new THREE.Vector3();
@@ -444,26 +444,16 @@ function makeWaterSrc(type, z) {
     const lap = () => { if (water !== src) return; burst(pan, 'brown', 'lowpass', rnd(500, 900), 1, 0.08, rnd(0.03, 0.06), 0.5, AC.currentTime, rnd(250, 400), 0.5); sched(t, lap, rnd(1800, 5200)); }; lap();
   }
 }
-/* 방금 도착한 차: 2분 남짓 엔진이 식으며 틱틱 */
-function startEngine() {
-  if (engine || engineDone) return;
-  const pan = panner(0, 0.5, 7.2, 1.5, 30, 1.2), t = [], t0 = AC.currentTime, src = { pan, t, nodes: [pan] }; engine = src;
-  const tick = () => { if (engine !== src) return; const el = AC.currentTime - t0; if (el > 140) { killEngine(); engineDone = true; return; }
-    const now = AC.currentTime; burst(pan, false, 'bandpass', rnd(1800, 3200), 4, 0.002, rnd(0.02, 0.04), 0.04, now); tone(pan, rnd(1400, 2200), 900, 0.002, 0.01, 0.05, now);
-    sched(t, tick, rnd(900, 4000) * (1 + el / 50)); };
-  sched(t, tick, rnd(1500, 3000));
-}
-function killEngine() { if (!engine) return; killT(engine.t); kill(engine.nodes); engine = null; }
 /* 랜턴은 켜고 끌 때만 소리가 난다 (sfx 의 lampOn·lampOff). 켜져 있는 동안 계속 나는 소리는 없다 */
 function buildSpatial() {
   const cfg = ctx.W.cfg; killSpatial();
   makeFireSrc();
   if (cfg.water) makeWaterSrc(cfg.key === 'beach' ? 'waves' : 'lake', cfg.water.z - 3);
-  sceneKey = cfg.key; engineDone = false;
+  sceneKey = cfg.key;
 }
 function killSpatial() {
   if (fire) { killT(fire.t); kill(fire.nodes); } if (water) { killT(water.t); kill(water.nodes); }
-  killEngine(); flockAudio.forEach(a => { killT(a.t); kill(a.nodes); }); flockAudio.clear();
+  flockAudio.forEach(a => { killT(a.t); kill(a.nodes); }); flockAudio.clear();
   fire = water = null; sceneKey = null;
 }
 
@@ -570,7 +560,7 @@ function startAmb(type, timeKey) {
   if (old && old.timeKey === 'night' && timeKey === 'day' && type === 'forest') dawnChorus();
   startEvents(type, timeKey);
 }
-export function startAmbience(type, timeKey) { if (!AC) return; menuMode = false; applyWorld(); startAmb(type, timeKey); startEngine(); }
+export function startAmbience(type, timeKey) { if (!AC) return; menuMode = false; applyWorld(); startAmb(type, timeKey); }
 /* 메뉴 프리뷰용: 같은 베드를 작게 */
 export function menuAmbience(bgKey) { if (!AC || !ctx.W.cfg) return; menuMode = true; indoor = false; applyWorld(); startAmb(BG[bgKey].ambience, isNight(state.clock) ? 'night' : 'day'); }
 export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); setSipFocus(false); killRoast(); }

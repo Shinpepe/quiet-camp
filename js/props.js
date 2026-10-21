@@ -115,7 +115,7 @@ const memoTex = canvasTex(256, 360, (g, w, h) => {
   g.strokeStyle = 'rgba(70,104,150,.4)'; g.lineWidth = 1.5;
   for (let y = 56; y < h - 10; y += 26) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
   g.strokeStyle = 'rgba(200,96,84,.5)'; g.beginPath(); g.moveTo(34, 0); g.lineTo(34, h); g.stroke();
-  /* 손글씨: 물결치는 짧은 선으로 제목 한 줄 + 번호와 할 일 여섯 줄 */
+  /* 손글씨: 물결치는 짧은 선으로 제목 한 줄 + 번호와 할 일 일곱 줄 */
   g.strokeStyle = 'rgba(58,50,40,.7)'; g.lineCap = 'round';
   const scribble = (x, y, len, lw) => { g.lineWidth = lw; g.beginPath(); g.moveTo(x, y); for (let t = 0; t <= len; t += 4) g.lineTo(x + t, y + Math.sin(t * 0.55) * 2.2 + Math.sin(t * 0.13) * 1.2); g.stroke(); };
   scribble(48, 44, 96, 3);
@@ -398,8 +398,9 @@ function makeCarInterior(M) {
   add(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 16), M.dark, D, 1.05, -0.45, Math.PI / 2 - 0.45);
   [[D - 0.18, 1.05, -0.45], [D + 0.18, 1.05, -0.45], [D, 0.888, -0.372]].forEach(p => g.add(bar([D, 1.05, -0.45], p, 0.012, M.dark, 6)));
   [D - 0.1, D + 0.1].forEach(x => add(B(0.08, 0.12, 0.02), M.black, x, 0.6, -0.85, -0.5));
-  /* 햇빛 가리개 두 장, 룸미러 */
-  [D, P].forEach(x => add(roundedBox(0.4, 0.025, 0.18, 0.01), M.trim, x, 1.775, -0.55));
+  /* 햇빛 가리개 두 장: 헤드라이너 밑 5mm(윗면 y 1.80), 앞끝(z −0.58)이 앞유리에서 약 2.7cm 떨어지게.
+     예전 자리(z −0.55)는 앞끝이 앞유리를 뚫고 지붕 앞으로 나와 밖에서 눈썹처럼 보였다. 룸미러 */
+  [D, P].forEach(x => add(roundedBox(0.4, 0.025, 0.18, 0.01), M.trim, x, 1.775, -0.49));
   g.add(bar([0, 1.805, -0.58], [0, 1.71, -0.58], 0.008, M.black, 6));
   add(roundedBox(0.26, 0.07, 0.03, 0.015), M.black, 0, 1.64, -0.57);
   /* 문 안쪽: 팔걸이(앞·뒤), 문 손잡이 */
@@ -448,8 +449,8 @@ export function makeCar() {
   add(B(1.9, 0.5, 0.7), body, 0, 0.66, 1.98);
   [-1, 1].forEach(s => { add(B(0.1, 0.25, 0.7), body, s * 0.9, 1.03, 1.98); add(B(0.1, 0.03, 0.7), dark, s * 0.9, 1.165, 1.98); });
   add(B(1.8, 0.5, 0.03), dark, 0, 0.66, 1.645);                             // 짐칸 앞 격벽
-  /* 지붕 z -0.6 ~ 2.35, 안쪽 헤드라이너 */
-  add(B(1.8, 0.07, 2.95), body, 0, 1.86, 0.875); add(B(1.7, 0.02, 2.85), dark, 0, 1.815, 0.875);
+  /* 지붕 z -0.6 ~ 2.35: 차체 폭에 맞춰 넓혀 옆창 윗변을 덮는다 (필러 바깥면 0.945 와 5mm 어긋나게 0.94). 안쪽 헤드라이너 */
+  add(B(1.88, 0.07, 2.95), body, 0, 1.86, 0.875); add(B(1.7, 0.02, 2.85), dark, 0, 1.815, 0.875);
   /* 필러: A(기울어짐)·B·C·D — 문 이음새와 같은 z 에 세운다 */
   [-1, 1].forEach(s => {
     add(B(0.09, 0.9, 0.09), dark, s * 0.9, 1.49, -0.84, 0.64);
@@ -457,16 +458,19 @@ export function makeCar() {
     add(B(0.09, 0.7, 0.09), dark, s * 0.9, 1.49, 1.42);
     add(B(0.09, 0.7, 0.09), dark, s * 0.9, 1.49, 2.27, -0.06);
   });
-  /* 유리: 앞유리(벨트라인 → 지붕 앞), 옆창 세 장은 필러와 같은 면(x 0.94)에 (뒷유리는 테일게이트에) */
+  /* 유리: 앞유리(벨트라인 → 지붕 앞). 옆창 세 장은 필러 두께 한가운데(x 0.925)에 두고,
+     가장자리를 필러·벨트 몰딩(y 1.15~1.18)·지붕(1.825 위) 속으로 2~3cm 묻어 틈 없이 끼워진 것처럼 보이게 한다.
+     유리면은 상자 속을 직각으로 지나갈 뿐 어떤 면과도 같은 평면에 있지 않아 깜빡이지 않는다 (가장 가까운 면 = 지붕 옆면, 1.5cm).
+     앞창의 앞변은 A필러와 같은 기울기 (뒷유리는 테일게이트에) */
   add(new THREE.PlaneGeometry(1.7, 0.87), glass, 0, 1.49, -0.84, 0.64);
   [-1, 1].forEach(s => {
-    quad(s * 0.94, [[-1.0, 1.19], [0.29, 1.19], [0.29, 1.8], [-0.55, 1.8]]);
-    quad(s * 0.94, [[0.41, 1.19], [1.36, 1.19], [1.36, 1.8], [0.41, 1.8]]);
-    quad(s * 0.94, [[1.48, 1.19], [2.21, 1.19], [2.21, 1.8], [1.48, 1.8]]);
+    quad(s * 0.925, [[-1.06, 1.16], [0.33, 1.16], [0.33, 1.83], [-0.56, 1.83]]);
+    quad(s * 0.925, [[0.37, 1.16], [1.4, 1.16], [1.4, 1.83], [0.37, 1.83]]);
+    quad(s * 0.925, [[1.44, 1.16], [2.25, 1.16], [2.25, 1.83], [1.44, 1.83]]);
   });
   /* 도어 이음새(A·B·C필러 자리)·손잡이 4개·사이드미러.
      손잡이: 앞·뒷문 모두 문 뒤 가장자리에서 0.22m 앞 (앞문 0.35 → 0.13, 뒷문 1.42 → 1.2).
-     사이드미러: 다리는 옆창 유리(x 0.94, y 1.19 위)와 겹치지 않게 유리 아래 벨트라인 높이(y 1.15)에서 바깥으로 1.5cm 띄워 붙이고,
+     사이드미러: 다리는 옆창 유리(x 0.925)와 떨어진 바깥(x 0.955~)에, 유리 아래 벨트라인 높이(y 1.15)에 붙이고,
      거울 면은 머리 뒷면에서 5mm 띄운다 (예전엔 다리 안쪽 면이 유리와 같은 평면이라 차 안에서 보면 깜빡였다) */
   [-1, 1].forEach(s => {
     [-1.1, 0.35, 1.42].forEach(z => add(B(0.006, 0.74, 0.012), dark, s * 0.953, 0.78, z));
@@ -528,7 +532,7 @@ function makeCooler(M) {
   /* 앞면의 살짝 도드라진 판 (사출 성형 느낌) */
   add(roundedBox(0.42, 0.2, 0.014, 0.006), M.body, 0, 0.09, 0.19);
   /* 안쪽: 뚜껑이 들릴 때 보이는 어두운 바닥 (닫혀 있으면 뚜껑 속에 묻힌다) */
-   add(new THREE.ShapeGeometry(roundRectShape(0.49, 0.32, 0.02)).rotateX(-Math.PI / 2), M.dark, 0, 0.3805, 0);
+  add(new THREE.ShapeGeometry(roundRectShape(0.49, 0.32, 0.02)).rotateX(-Math.PI / 2), M.dark, 0, 0.3805, 0);
   /* 뚜껑: 뒤쪽 경첩(z −0.2)을 축으로 열린다. 가운데가 8mm 부풀어 있고, 걸쇠 윗부분이 함께 움직인다.
      g.userData.lid 를 main.js 가 돌린다 (아이스박스에서 꼬치를 꺼내거나 넣을 때 살짝 들렸다 닫힌다) */
   const lid = new THREE.Group(); lid.position.set(0, 0.38, -0.2); g.add(lid); g.userData.lid = lid;
@@ -621,7 +625,7 @@ export function makeProps() {
     body: smoothM(0x3d6f9e, { roughness: 0.55 }), lid: smoothM(0xdde6ee, { roughness: 0.5 }),
     dark: smoothM(0x2a2c30, { roughness: 0.8 }), trim: smoothM(0x9aa3ab, { roughness: 0.45, metalness: 0.2 }),
   });
-   cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = -1.8; scene.add(shadowed(cooler)); ctx.W.coolerLid = cooler.userData.lid;
+  cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = -1.8; scene.add(shadowed(cooler)); ctx.W.coolerLid = cooler.userData.lid;
   /* 배낭: 게임 질감(천 노멀)을 입힌 재질로 makeBackpack 을 만들고 1.15배로 키운다 (높이 약 75cm).
      머그가 아이스박스와 붙어 보이지 않게 아이스박스 반대쪽으로 조금 떼어 놓는다 (data.js 의 BLOCKS·scene.js 의 접지 그림자도 이 위치) */
   const pack = makeBackpack({
@@ -771,7 +775,7 @@ export function updateLighthouse(T) {
 /* ── 마시멜로 꼬치 ──
    원점 = 손이 쥐는 자리, 꼬치는 −z 로 약 0.53m 뻗는다.
    손잡이 쪽 30% 는 껍질이 남은 생가지, 나머지는 껍질을 벗긴 밝은 나무, 끝으로 갈수록 불에 그을렸다.
-   마시멜로는 캠핑용 큰 것(지름 5.4cm·길이 4.8cm). 원점에서 MARSH_AT 에 꿰여 있고 꼬치 끝이 1.4cm 삐져나온다.
+   마시멜로는 캠핑용 큰 것(지름 6.4cm·길이 5.8cm — MR·MH 로 정한다). 원점에서 MARSH_AT 에 꿰여 있고 꼬치 끝이 약 1cm 삐져나온다.
    익음(userData.cook = 불에 댄 초)에 따라 셰이더가 흰색 → 크림 → 금빛 → 황갈색 → 검은 그을음으로 물들인다.
    노이즈를 섞어 한꺼번에 변하지 않고 군데군데·모서리부터 번지며, 금빛일 때 윤기가 돈다.
    익을수록 조금 부풀고 겉이 쭈글쭈글해지며, 타면 쪼그라들고 갈라진 틈이 보인다. 불이 붙으면(setBurn) 틈이 빨갛게 빛나고 끝에 작은 불꽃이 선다 */
@@ -823,7 +827,7 @@ function marshMat() {
 }
 function makeMarsh() {
   const g = new THREE.Group(), V3 = THREE.Vector3, ud = g.userData;
-   const path = new THREE.CatmullRomCurve3([[0, 0, 0.05], [0.003, 0.004, -0.13], [0.004, 0.003, -0.3], [0.001, 0.001, -0.45], [0, 0, -0.53]].map(q => new V3(...q)));
+  const path = new THREE.CatmullRomCurve3([[0, 0, 0.05], [0.003, 0.004, -0.13], [0.004, 0.003, -0.3], [0.001, 0.001, -0.45], [0, 0, -0.53]].map(q => new V3(...q)));
   /* 굵기: 손잡이 8.5mm → 끝 4mm, 마디마다 아주 조금 울퉁불퉁, 마지막 3% 에서 뾰족하게 */
   const radius = t => (0.0085 - 0.0045 * t) * (0.4 + 0.6 * (1 - sstep(0.97, 1, t))) * (1 + 0.05 * Math.sin(t * 37));
   /* 곡선을 따라가는 관. uv 를 바꿔 나뭇결이 길이 방향으로 흐르게 한다 (makeAxe 와 같은 방식) */
@@ -880,7 +884,7 @@ function makeMarsh() {
 
 /* ── 손에 드는 것 ── */
 export function makeItem(type) {
-   if (type === 'marsh') return makeMarsh();
+  if (type === 'marsh') return makeMarsh();
   const g = new THREE.Group(); const emitter = new THREE.Object3D(); g.userData.emitter = emitter; g.userData.amount = 1;
   if (type === 'coffee') {
     const cer = smoothM(0xf2ede4, { roughness: 0.3, side: THREE.DoubleSide });
