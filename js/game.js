@@ -12,11 +12,13 @@ import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHi
 import { showJournal, hideJournal, journalHooks } from './journal.js';
 import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
 import { showMemo, hideMemo, memoHooks } from './memo.js';
+import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman } from './snowman.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
    무엇을 바라보면 무엇이 일어나는지는 scene.js 의 W.interact 에 act 로 적는다 (act 가 없으면 그 id 의 자리에 앉는다).
-   트렁크·도감·메모처럼 화면을 덮는 창이 열린 동안에는 걷기·마시기·E 안내가 멈추고, E 나 ESC 로 닫는다 ── */
+   트렁크·도감·메모처럼 화면을 덮는 창이 열린 동안에는 걷기·마시기·E 안내가 멈추고, E 나 ESC 로 닫는다
+   빈손일 때 바라보는 것에 click 이 있으면 클릭이 그 행동을 한다 (눈덩이·눈사람 부수기). 눈덩이를 굴리는 동안에는 E 만 쓴다 (내려놓기·눈사람 만들기). ── */
 const FINE = matchMedia('(pointer:fine)').matches;
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
@@ -114,7 +116,7 @@ export function bindInput() {
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
   /* 메뉴로 나가기: 잠자기 페이드·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
      (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   $('#mAct').onclick = interact;
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다 */
@@ -173,7 +175,7 @@ function resume() { hidePause(); lock(); }
    실루엣 크기(hit)는 실제 거리로 잰 각도라 3D 거리를 쓴다 */
 const fwd = new THREE.Vector3(), toT = new THREE.Vector3();
 export function currentTarget() {
-  if (cam.t < 1 || inModal() || state.mode === 'sleep' || state.mode === 'chop') return null;
+  if (cam.t < 1 || inModal() || state.mode === 'sleep' || state.mode === 'chop' || snowRolling()) return null;
   const from = state.mode === 'walk' ? 'walk' : state.seat;
   ctx.camera.getWorldDirection(fwd); let best = null, bs = 9;
   for (const it of ctx.W.interact) {
@@ -230,9 +232,14 @@ export function interact() {
   if (state.mode === 'chop') { requestChopStop(); return; }
   /* 물고기와 씨름하거나 들어 올린 동안에는 일어나지 않는다 */
   const busy = fishBusy(); if (busy) { showToast(busy); return; }
-  const t = currentTarget();
-  if (t) { if (t.act) t.act(); else sitDown(t.id); }
-  else if (state.mode === 'seated') { if (state.seat === 'bed') sitDown('tent', true); else standUp(); }
+  /* 눈덩이를 굴리는 중: 내려놓거나, 다른 눈덩이에 붙어 있으면 눈사람을 만든다 */
+  if (snowRolling()) rollAct();
+  else {
+    const t = currentTarget();
+    if (t) { if (t.act) t.act(); else sitDown(t.id); }
+    else if (state.mode === 'walk' && snowStartable()) startSnowball();
+    else if (state.mode === 'seated') { if (state.seat === 'bed') sitDown('tent', true); else standUp(); }
+  }
   updateHUD(); anim.lastTargetId = undefined;
 }
 
@@ -353,7 +360,12 @@ export function resetHand() {
    장작 패기·낚시 중이면 클릭이 타이밍 입력. 마시는 소리('꿀꺽')는 main.js 가 잔의 움직임에 맞춰 낸다 ── */
 function useItem() {
   if (timingMode()) { timingPress(); return; }
-  if (!state.item || !ctx.W.item || inModal() || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
+  /* 빈손 클릭: 바라보는 것에 클릭 행동(click)이 있으면 한다 — 눈덩이·눈사람 부수기 */
+  if (!state.item) {
+    if (state.mode === 'walk' && !snowRolling() && !inModal() && !ctx.paused && cam.t >= 1) { const t = currentTarget(); if (t && t.click) t.click(); }
+    return;
+  }
+  if (!ctx.W.item || inModal() || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
   if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
   if (state.item === 'marsh') { marshPress(); return; }
   if (anim.sipT !== null) return;
@@ -477,19 +489,31 @@ function setAct(text) {
     b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
   }
 }
-/* 안내: PC 는 화면 가운데 "E 행동", 모바일은 행동 버튼의 글자. 조준 표시(가운데 동그라미)는 둘 다 같다 */
+/* 안내: PC 는 화면 가운데 "E 행동 · 클릭 행동", 모바일은 행동 버튼(E)과 옆 버튼(빈손 클릭)의 글자. 조준 표시(가운데 동그라미)는 둘 다 같다.
+   굴리는 중에는 "내려놓기 / 눈사람 만들기", 설산에서 빈손으로 발밑을 보면 "눈 뭉치기" */
 export function updatePrompt() {
   const p = $('#prompt'), cross = $('#cross');
   const off = () => { p.classList.remove('on'); cross.classList.remove('hot'); if (isTouch) setAct(null); };
   if (inModal() || state.mode === 'sleep') { off(); anim.lastTargetId = null; return; }
   /* 물고기와 씨름하거나 들어 올린 동안에는 E 가 막혀 있으므로 안내도(모바일은 버튼도) 숨긴다 */
   if (fishBusy()) { if (anim.lastTargetId !== 'fishBusy') { anim.lastTargetId = 'fishBusy'; off(); } return; }
-  const chop = state.mode === 'chop', t = currentTarget(), id = t ? t.id : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
+  const chop = state.mode === 'chop', roll = snowRolling(), rl = roll ? rollLabel() : null, t = currentTarget();
+  const start = !t && !roll && state.mode === 'walk' && snowStartable();
+  const id = roll ? 'roll:' + rl : t ? t.id : start ? 'snowStart' : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
   if (id === anim.lastTargetId) return; anim.lastTargetId = id;
-  const label = t ? t.label() : state.mode === 'seated' ? SEAT[state.seat].up : chop ? '그만하기' : null;
-  cross.classList.toggle('hot', !!t);
-  if (isTouch) { p.classList.remove('on'); setAct((t && t.tap) || label); return; }
-  if (label) { p.innerHTML = `<kbd class="a">E</kbd>${label}`; p.classList.add('on'); } else p.classList.remove('on');
+  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? SEAT[state.seat].up : chop ? '그만하기' : null;
+  const clickLab = t && t.click && !state.item ? t.clickLabel() : null;
+  cross.classList.toggle('hot', !!t || rl === '눈사람 만들기');
+  if (isTouch) {
+    p.classList.remove('on'); setAct((t && t.tap) || label);
+    /* 빈손으로 서 있을 때 옆 버튼은 클릭 행동(부수기) 자리 — 할 것이 없으면 숨긴다 */
+    if (state.mode === 'walk' && !state.item) { const ms = $('#mSip'); ms.style.display = clickLab ? '' : 'none'; if (clickLab) ms.textContent = clickLab; }
+    return;
+  }
+  const parts = [];
+  if (label) parts.push(`<kbd class="a">E</kbd>${label}`);
+  if (clickLab) parts.push(`<kbd class="a">클릭</kbd>${clickLab}`);
+  if (parts.length) { p.innerHTML = parts.join('<span style="opacity:.5;margin:0 .6em">·</span>'); p.classList.add('on'); } else p.classList.remove('on');
 }
 function showPause() { if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock); }
 function hidePause() { if (ctx.paused) sfx('uiClose'); ctx.paused = false; $('#pause').classList.remove('on'); }
@@ -565,7 +589,7 @@ function sceneReady(bg) {
 function resetSceneForStart() {
   const W = ctx.W, tm = W.tm;
   W.fireLit = tm.stars > 0.1; W.lanternLit = tm.lantern > 0.5; W.tentLampLit = tm.tentLamp > 0.5;
-  clearPlanted(); resetChop(); resetFish(); hideAllFx(); W.splitCount = 0;
+  clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); W.splitCount = 0;
 }
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
@@ -617,12 +641,16 @@ export function walk(dt) {
   if (keys.KeyA || keys.ArrowLeft) mx -= 1; if (keys.KeyD || keys.ArrowRight) mx += 1;
   if (tMove) { mx += tMove.dx; mz += tMove.dy; }
   const len = Math.hypot(mx, mz); if (len > 1) { mx /= len; mz /= len; }
-  const moving = len > 0.05, sp = 2.6 * dt, cam3 = ctx.camera;
+  const moving = len > 0.05, sp = 2.6 * dt * snowSpeed(), cam3 = ctx.camera;
   if (moving) {
     const s = Math.sin(player.yaw), c = Math.cos(player.yaw);
     const wx = (mx * c + mz * s) * sp, wz = (-mx * s + mz * c) * sp;
-    if (!blockedAt(player.x + wx, player.z)) player.x += wx;
-    if (!blockedAt(player.x, player.z + wz)) player.z += wz;
+    /* 눈덩이를 굴리는 동안: 몸과 앞의 눈덩이가 둘 다 갈 수 있을 때만 움직인다 (축별로 미끄러지지 않는다) */
+    if (snowRolling()) { const nx = player.x + wx, nz = player.z + wz; if (!blockedAt(nx, nz) && !rollBlocked(nx, nz)) { player.x = nx; player.z = nz; } }
+    else {
+      if (!blockedAt(player.x + wx, player.z)) player.x += wx;
+      if (!blockedAt(player.x, player.z + wz)) player.z += wz;
+    }
     const prev = Math.floor(player.bob / Math.PI);
     player.bob += dt * (Math.PI / STEP) * Math.min(1, len);
     if (Math.floor(player.bob / Math.PI) !== prev) {

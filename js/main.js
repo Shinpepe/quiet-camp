@@ -11,6 +11,7 @@ import { bindInput, player, cam, anim, walk, updateHUD, updatePrompt, updateCapt
 import { updateChop, chopCamera } from './chop.js';
 import { updateFish } from './fish.js';
 import { ROAST } from './data.js';
+import { updateSnowman } from './snowman.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -197,6 +198,8 @@ function loop(now) {
   updateMeteors(dt);
   updateLighthouse(T);
   if (!ctx.paused) updateChop(dt);
+  /* 눈사람: 멈춘 동안·메뉴에서는 dt 0 (굴리는 소리도 잦아든다) */
+  updateSnowman(ctx.running && !ctx.paused ? dt : 0);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }

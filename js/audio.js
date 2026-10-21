@@ -495,6 +495,30 @@ export function setRoast(lv, burn) {
   st.idle = lv > 0 || burn > 0 ? 0 : st.idle + 1; if (st.idle > 90) killRoast();
 }
 
+/* ── 눈사람: 굴리는 소리 ──
+   굴러가는 속도(lv 0..1)를 따라 뽀드득 알갱이가 촘촘해지고, 눈덩이가 클수록(size 0..1) 낮고 묵직해진다.
+   main.js → snowman.js 가 매 프레임 부른다. 1.5초쯤 조용하면 노드를 정리한다 */
+function snowCrunch(dest, t, n, span, peak) { for (let i = 0; i < n; i++) burst(dest, false, 'bandpass', rnd(1600, 3600), 1.6, 0.001, peak * rnd(0.4, 1), rnd(0.012, 0.03), t + Math.random() * span); }
+let rollSnd = null;
+function killSnowRoll() {
+  const st = rollSnd; if (!st) return; rollSnd = null; killT(st.t);
+  const t = AC.currentTime; st.g.gain.setTargetAtTime(0, t, 0.08); st.bg.gain.setTargetAtTime(0, t, 0.08); setTimeout(() => kill(st.nodes), 500);
+}
+export function setSnowRoll(lv, size) {
+  if (!AC) return; lv = lv || 0; size = size || 0;
+  if (!rollSnd) {
+    if (lv <= 0) return;
+    const s = noise('pink', true), f = filt('bandpass', 900, 0.7), g = gainN(0), b = noise('brown', true), bf = filt('lowpass', 260), bg = gainN(0);
+    chain(s, f, g, sfxBus); chain(b, bf, bg, sfxBus); s.start(0, off()); b.start(0, off());
+    const st = { g, bg, f, lv: 0, idle: 0, t: [], nodes: [s, f, g, b, bf, bg] }; rollSnd = st;
+    const grain = () => { if (rollSnd !== st) return; if (st.lv > 0.05) snowCrunch(sfxBus, AC.currentTime, 2, 0.03, 0.022 * st.lv); sched(st.t, grain, rnd(35, 90) / (0.4 + st.lv)); };
+    grain();
+  }
+  const st = rollSnd, t = AC.currentTime; st.lv = lv;
+  st.g.gain.setTargetAtTime(0.03 * lv, t, 0.12); st.bg.gain.setTargetAtTime(0.06 * lv * (0.4 + size), t, 0.12); st.f.frequency.setTargetAtTime(1000 - 450 * size, t, 0.3);
+  st.idle = lv > 0 ? 0 : st.idle + 1; if (st.idle > 90) killSnowRoll();
+}
+
 /* ── 배경 베드 ── */
 /* 가까운 귀뚜라미 한 마리: 캠프 주변 풀숲(4~9m)에 자리를 잡고, 자기 음색·주기로 운다.
    계속 울지 않고 4~10초 울다가 3~9초 쉰다 (마리마다 따로). 먼 합창이 쉬는 동안(quiet)에는 같이 멈춰 진짜 빈틈이 생긴다.
@@ -563,7 +587,7 @@ function startAmb(type, timeKey) {
 export function startAmbience(type, timeKey) { if (!AC) return; menuMode = false; applyWorld(); startAmb(type, timeKey); }
 /* 메뉴 프리뷰용: 같은 베드를 작게 */
 export function menuAmbience(bgKey) { if (!AC || !ctx.W.cfg) return; menuMode = true; indoor = false; applyWorld(); startAmb(BG[bgKey].ambience, isNight(state.clock) ? 'night' : 'day'); }
-export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); setSipFocus(false); killRoast(); }
+export function stopAmbience() { clearTimeout(evTimer); killBed(bed); bed = null; killSpatial(); setSparkler(false); setSipFocus(false); killRoast(); killSnowRoll(); }
 
 /* ── 간헐 이벤트: 낮 9~26초, 밤 14~40초. 일부 확률은 일부러 비워 둔다(침묵도 소리).
    돌풍은 여기서 빠지고 바람 값(W.wind)이 솟을 때 updateAudio 가 낸다 ── */
@@ -807,6 +831,12 @@ export function sfx(type, arg) {
     /* 마시멜로: 불이 붙는 낮은 화르륵 / 스스로 꺼지는 치익 */
     case 'marshFlame': burst(B, 'brown', 'lowpass', 300, 1, 0.04, 0.08, 0.35, t, 900, 0.2); burst(B, 'pink', 'bandpass', 1800, 0.8, 0.02, 0.02, 0.3, t); return;
     case 'marshOut': burst(B, false, 'bandpass', 3000, 1, 0.01, 0.02, 0.4, t, 1500, 0.4); return;
+    /* 눈사람: 뭉치기(두 손으로 꾹꾹) · 내려놓기·머리 얹기(크기만큼 묵직하게) · 머리 들어 올리기 · 장식 톡 · 부수기 */
+    case 'snowPack': { const n = arg === 'grab' ? 1 : 2; for (let i = 0; i < n; i++) { const tt = t + i * 0.2; burst(B, 'pink', 'lowpass', 520 * pv, 1, 0.025, 0.045, 0.14, tt, 300, 0.14); snowCrunch(B, tt, 9, 0.1, 0.028); } return; }
+    case 'snowDrop': { const k = Math.min(1, (arg || 0.2) / 0.45); burst(B, 'brown', 'lowpass', 300 - 120 * k, 1, 0.004, 0.08 + 0.1 * k, 0.16 + 0.1 * k, t); snowCrunch(B, t, 6 + Math.round(8 * k), 0.08, 0.02 + 0.015 * k); return; }
+    case 'snowLift': burst(B, 'pink', 'bandpass', 600 * pv, 0.8, 0.12, 0.028, 0.32, t, 1000, 0.32); fabric(B, t, 0.025, 0.25); return;
+    case 'snowPop': burst(B, 'pink', 'bandpass', rnd(1100, 1700), 2.2, 0.002, 0.02, 0.045, t); return;
+    case 'snowBreak': { const k = Math.min(1, (arg || 0.3) / 0.45); burst(B, 'brown', 'lowpass', 380, 1, 0.004, 0.1 + 0.08 * k, 0.2, t); snowCrunch(B, t, 16 + Math.round(16 * k), 0.15, 0.035); burst(B, 'pink', 'bandpass', 2400, 0.7, 0.02, 0.02, 0.6, t + 0.05, 1200, 0.6); return; }
     /* 먹기: 말랑하게 베어 무는 소리 → 씹기 두 번. 완벽(2)·탐(3)은 겉이 바삭하게 부서진다 (입 근처라 잔향 없는 dryBus) */
     case 'eat': {
       const s = arg || 0, D = dryBus;

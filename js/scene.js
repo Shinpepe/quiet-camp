@@ -11,6 +11,7 @@ import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 /* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
 import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler } from './game.js';
+import { buildSnowman } from './snowman.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -322,6 +323,8 @@ export function buildScene(bgKey) {
   /* 장작 패기 도구는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
   buildChop();
   if (cfg.snow) makeSnowCaps();
+  /* 눈사람 만들기: 설산이면 재질·자국·견본을 만들고, 다른 장소면 이전 상태만 비운다 (텐트 다음 — 목도리를 W.tentMats 에 넣는다) */
+  buildSnowman(cfg);
   contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(3.05, 0.15, 0.8, 0.8, 0.5);
 
   W.steam = new Particles(160, { color: 0xffffff, size: 0.05, opacity: 0.32 }); scene.add(W.steam.mesh);

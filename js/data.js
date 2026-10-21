@@ -70,10 +70,18 @@ export const MEMO = [
   { key: 'marsh', text: '아이스박스에서 마시멜로 꺼내 구워 먹기' },
   { key: 'chair', text: '의자에 앉아 한숨 돌리기' },
   { key: 'fish',  text: '부두 끝에서 낚시하기', only: ['lake'] },
+  { key: 'snowman', text: '눈덩이를 굴려 눈사람 만들기', only: ['snow'] },
   { key: 'sleep', text: '텐트 안 침낭에서 하룻밤 자기' },
 ];
 /* 이 장소의 메모에 적힐 줄 */
 export const memoFor = bg => MEMO.filter(m => !m.only || m.only.includes(bg));
+
+/* 눈사람 만들기 (설산 전용, snowman.js)
+   start: 처음 뭉친 반지름 · min: 눈사람이 되는 최소 반지름 · max: 최대 반지름(머리·몸통 같다)
+   grow: 커지는 빠르기 — 반지름² 이 굴러간 거리 × 2·grow 만큼 늘어난다 (0.18m 약 3m, 0.45m 약 25m)
+   near: 두 눈덩이 사이가 이 안이면 "눈사람 만들기" · slow: 최대 크기일 때 걷는 속도 배율
+   maxBalls·maxMen: 바닥 눈덩이·눈사람 최대 개수 · trackLife: 굴린 자국이 사라지는 시간(초) · range: 캠프에서 굴릴 수 있는 거리(m) */
+export const SNOW = { start: 0.08, min: 0.18, max: 0.45, grow: 0.0039, near: 0.35, slow: 0.3, maxBalls: 6, maxMen: 2, trackLife: 30, range: 45 };
 
 /* 마시멜로 굽기
    fire: 꼬치 끝이 닿을 불꽃 자리 — 모닥불 가운데 x·z(scene.js 의 모닥불 위치)와 불꽃 높이 y
