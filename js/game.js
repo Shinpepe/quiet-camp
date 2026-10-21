@@ -343,7 +343,7 @@ function clearPlanted() {
 }
 export function resetHand() {
   const h = ctx.hand;
-  if (state.item === 'marsh') { h.position.set(0.24, -0.34, -0.2); h.rotation.set(0.6, 0.15, 0); return; }
+  if (state.item === 'marsh') { h.position.set(0.24, -0.4, -0.42); h.rotation.set(0.85, 0.12, 0); return; }
   else if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); }
   else if (state.item === 'sparkler') { h.position.set(0.2, -0.28, -0.55); h.rotation.set(-0.2, 0, -0.25); }
   else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); }

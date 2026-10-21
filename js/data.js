@@ -82,7 +82,7 @@ export const memoFor = bg => MEMO.filter(m => !m.only || m.only.includes(bg));
    at: 익음 단계가 바뀌는 시각(불에 댄 초) — 덜 익음 < 4 ≤ 잘 익음 < 8 ≤ 완벽 < 11 ≤ 탐. 11초를 넘겨 불에 대고 있으면 불이 붙는다
    eat: 단계별로 먹었을 때의 소식 */
 export const ROAST = {
-  fire: [0.3, 0.72, -1.4], near: 1.75, aim: 0.6, at: [4, 8, 11],
+  fire: [0.3, 0.72, -1.4], near: 1.55, aim: 0.6, at: [4, 8, 11],
   eat: ['아직 속은 차갑다', '달달한 맛이 느껴진다', '겉은 바삭하고 속은 촉촉하다', '쓴맛이 느껴진다'],
 };
 export const roastStage = c => c < ROAST.at[0] ? 0 : c < ROAST.at[1] ? 1 : c < ROAST.at[2] ? 2 : 3;

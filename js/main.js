@@ -102,7 +102,7 @@ function assignSparkLights(W) {
    불에 내민 자세는 마시멜로가 불꽃 자리(roastTarget)에 오도록 매 프레임 꼬치를 그쪽으로 겨눈다.
    그 자리가 꼬치 길이보다 멀면 팔을 뻗듯 앞으로 밀어 준다 (최대 0.75m)
    먹는 자세는 꼬치를 아래에서 비스듬히 들어 올려 마시멜로를 입 앞으로 가져온다 */
-const M_POS = new THREE.Vector3(0.24, -0.34, -0.2), M_ROT = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6, 0.15, 0));
+const M_POS = new THREE.Vector3(0.24, -0.4, -0.42), M_ROT = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.85, 0.12, 0));
 const M_FWD = new THREE.Vector3(0, 0, -1), MOUTH = new THREE.Vector3(0.02, -0.07, -0.17), EAT_DIR = new THREE.Vector3(-0.3, 0.85, 0.43).normalize();
 const _mp = new THREE.Vector3(), _mq = new THREE.Quaternion(), _rp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _ep = new THREE.Vector3(), _eq = new THREE.Quaternion();
 const _md = new THREE.Vector3(), _mw = new THREE.Vector3(), _up = new THREE.Vector3(), _iq = new THREE.Quaternion();

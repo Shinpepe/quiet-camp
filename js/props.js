@@ -769,14 +769,14 @@ export function updateLighthouse(T) {
 }
 
 /* ── 마시멜로 꼬치 ──
-   원점 = 손이 쥐는 자리, 꼬치는 −z 로 약 0.85m 뻗는다.
+   원점 = 손이 쥐는 자리, 꼬치는 −z 로 약 0.53m 뻗는다.
    손잡이 쪽 30% 는 껍질이 남은 생가지, 나머지는 껍질을 벗긴 밝은 나무, 끝으로 갈수록 불에 그을렸다.
    마시멜로는 캠핑용 큰 것(지름 5.4cm·길이 4.8cm). 원점에서 MARSH_AT 에 꿰여 있고 꼬치 끝이 1.4cm 삐져나온다.
    익음(userData.cook = 불에 댄 초)에 따라 셰이더가 흰색 → 크림 → 금빛 → 황갈색 → 검은 그을음으로 물들인다.
    노이즈를 섞어 한꺼번에 변하지 않고 군데군데·모서리부터 번지며, 금빛일 때 윤기가 돈다.
    익을수록 조금 부풀고 겉이 쭈글쭈글해지며, 타면 쪼그라들고 갈라진 틈이 보인다. 불이 붙으면(setBurn) 틈이 빨갛게 빛나고 끝에 작은 불꽃이 선다 */
-export const MARSH_AT = 0.812;
-const MR = 0.027, MH = 0.024;
+export const MARSH_AT = 0.49;
+const MR = 0.032, MH = 0.029;
 function marshGeo() {
   const R = MR, H = MH, F = 0.011, B = 0.0014, D = 0.0018, V2 = THREE.Vector2, pts = [];
   /* 옆에서 본 윤곽: 아랫면(가운데가 꼬치 자리로 살짝 눌림) → 둥근 모서리 → 살짝 볼록한 옆면 → 둥근 모서리 → 윗면 */
@@ -823,7 +823,7 @@ function marshMat() {
 }
 function makeMarsh() {
   const g = new THREE.Group(), V3 = THREE.Vector3, ud = g.userData;
-  const path = new THREE.CatmullRomCurve3([[0, 0, 0.06], [0.003, 0.004, -0.22], [0.005, 0.004, -0.5], [0.002, 0.001, -0.74], [0, 0, -0.85]].map(q => new V3(...q)));
+   const path = new THREE.CatmullRomCurve3([[0, 0, 0.05], [0.003, 0.004, -0.13], [0.004, 0.003, -0.3], [0.001, 0.001, -0.45], [0, 0, -0.53]].map(q => new V3(...q)));
   /* 굵기: 손잡이 8.5mm → 끝 4mm, 마디마다 아주 조금 울퉁불퉁, 마지막 3% 에서 뾰족하게 */
   const radius = t => (0.0085 - 0.0045 * t) * (0.4 + 0.6 * (1 - sstep(0.97, 1, t))) * (1 + 0.05 * Math.sin(t * 37));
   /* 곡선을 따라가는 관. uv 를 바꿔 나뭇결이 길이 방향으로 흐르게 한다 (makeAxe 와 같은 방식) */
