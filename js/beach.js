@@ -204,5 +204,5 @@ export const parasolOpen = () => B.on && B.to > 0.5;
 export const parasolMoving = () => B.on && B.p < 1;
 /* 프리뷰 씬을 재사용해 다시 시작할 때 시간대에 맞는 처음 상태로 */
 export function resetBeach() { if (!B.on) return; B.k = B.from = B.to = startOpen(); B.p = 1; shape(0.4); }
-/* 돗자리 위인지 (발자국·발소리) */
-export function onMat(x, z) { if (!B.on) return false; const m = BEACH.mat; return Math.abs(x - m.x) < m.w / 2 && Math.abs(z - m.z) < m.l / 2; }
+/* 돗자리 위인지. pad 만큼 바깥까지 넓혀 본다 (발소리는 0, 발자국은 발자국 크기만큼) */
+export function onMat(x, z, pad = 0) { if (!B.on) return false; const m = BEACH.mat; return Math.abs(x - m.x) < m.w / 2 + pad && Math.abs(z - m.z) < m.l / 2 + pad; }

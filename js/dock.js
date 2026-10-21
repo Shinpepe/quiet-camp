@@ -61,7 +61,7 @@ export function makeDock() {
   /* 랜턴 기둥: 물가 쪽 첫 부두 기둥 위로 이어 올린다 (밤에 길을 밝힌다). main.js 가 W.dockLight·W.dockLampObj 를 시간대에 맞춰 켠다 */
   const lx = X + 0.7, lz = zs[0];
   g.add(bar([lx, TOP - 0.1, lz], [lx, 1.5, lz], 0.045, post, 8));
-  const lamp = makeLantern(W.tm.lantern > 0.5); lamp.scale.setScalar(0.8); lamp.position.set(lx, 1.52, lz); g.add(lamp); W.dockLampObj = lamp;
+  const lamp = makeLantern(W.tm.lantern > 0.5); lamp.scale.setScalar(0.8); lamp.position.set(lx, 1.5, lz); g.add(lamp); W.dockLampObj = lamp;
   W.dockLight = new THREE.PointLight(0xffc07a, W.tm.lantern * 0.8, 8, 2); W.dockLight.position.set(lx, 1.65, lz); g.add(W.dockLight);
 
   /* 끝자락 소품: 미끼 통 · 태클 상자 */

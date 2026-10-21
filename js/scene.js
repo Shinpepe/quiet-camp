@@ -12,7 +12,7 @@ import { paramsAt, sunDirAt } from './time.js';
 /* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
 import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler, lieDown } from './game.js';
 import { buildSnowman } from './snowman.js';
-import { buildBeach, toggleParasol, parasolOpen } from './beach.js';
+import { buildBeach, toggleParasol, parasolOpen, onMat } from './beach.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -341,6 +341,8 @@ export function buildScene(bgKey) {
     for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffd8a0, 0, 3.5, 2); scene.add(l); W.sparkLights.push(l); } }
   W.prints = cfg.snow ? new Footprints(140, [0.66, 0.7, 0.8], 45) : cfg.key === 'beach' ? new Footprints(140, [0.72, 0.65, 0.55], 90) : null;
   if (W.prints) { W.prints.mesh.userData.noRefl = true; scene.add(W.prints.mesh); }
+  /* 돗자리 위(와 가장자리에 걸치는 자리)에는 발자국을 찍지 않는다 */
+  if (W.prints && beach) W.prints.skip = (x, z) => onMat(x, z, 0.16);
   if (cfg.snow) {
     const n = 2800, sp = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { sp[i * 3] = rnd(-35, 35); sp[i * 3 + 1] = rnd(0, 30); sp[i * 3 + 2] = rnd(-40, 20); }
@@ -384,7 +386,7 @@ export function buildScene(bgKey) {
   /* 해변: 돗자리(바닥 가운데)와 파라솔(기둥 중간). 서서 내려다보면 돗자리, 정면을 보면 파라솔 — 높이로 갈린다 */
   if (beach) W.interact.push(
     { id: 'mat',     pos: beach.mat,     r: 2.2, hit: 0.6,  from: ['walk'], label: () => '돗자리에 눕기', act: lieDown },
-    { id: 'parasol', pos: beach.parasol, r: 1.8, hit: 0.35, from: ['walk'], label: () => parasolOpen() ? '파라솔 접기' : '파라솔 펴기', act: toggleParasol },
+    { id: 'parasol', pos: beach.parasol, r: 2.2, hit: 0.35, from: ['walk'], label: () => parasolOpen() ? '파라솔 접기' : '파라솔 펴기', act: toggleParasol },
   );
   if (ctx.post) ctx.post.setScene(scene);
   applyTime(); rebakeEnv();

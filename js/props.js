@@ -135,7 +135,8 @@ export function makeLantern(lit) {
   const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.14, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x7a6a58, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false })); glass.position.y = 0.09; g.add(glass);
   const core = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.1, 8), new THREE.MeshBasicMaterial({ color: 0x8a7a62 })); core.position.y = 0.09; g.add(core);
   g.add(at(new THREE.Mesh(lathe([[0, 0], [0.078, 0], [0.06, 0.03], [0.03, 0.05], [0, 0.05]]), frame), 0, 0.16, 0));
-  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.005, 6, 16, Math.PI), frame); handle.position.y = 0.21; g.add(handle);
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.005, 6, 16, Math.PI), frame); handle.position.y = 0.19; g.add(handle);
+  [-0.05, 0.05].forEach(x => g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), frame), x, 0.193, 0)));
   g.userData.lit = null;
   g.userData.setLit = on => { on = !!on; if (on === g.userData.lit) return; g.userData.lit = on; core.material.color.setHex(on ? 0xfff0c8 : 0x8a7a62); if (on) { glass.material.color.setHex(0xffd9a0).multiplyScalar(1.5); glass.material.opacity = 0.55; } else { glass.material.color.setHex(0x7a6a58); glass.material.opacity = 0.35; } };
   g.userData.setLit(!!lit);
@@ -1033,10 +1034,13 @@ export class Footprints {
     const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < n; i++) this.mesh.setMatrixAt(i, zero);
     this.mesh.frustumCulled = false; this.mesh.userData.noAO = true; this.mesh.castShadow = this.mesh.receiveShadow = false; this.mesh.renderOrder = 1;
   }
+  /* skip(x, z) 가 있으면 그 자리에는 찍지 않는다 (해변 돗자리 — scene.js 가 연결한다) */
   stamp(x, z, fx, fz, side) {
-    const cfg = ctx.W.cfg, i = this.i; this.i = (i + 1) % this.n;
+    const cfg = ctx.W.cfg;
     const L = Math.hypot(fx, fz) || 1; fx /= L; fz /= L;
     const px = x - fx * 0.15 - fz * 0.12 * side, pz = z - fz * 0.15 + fx * 0.12 * side;
+    if (this.skip && this.skip(px, pz)) return;
+    const i = this.i; this.i = (i + 1) % this.n;
     const h = terrainH(px, pz, cfg), nx = -(terrainH(px + 0.3, pz, cfg) - terrainH(px - 0.3, pz, cfg)) / 0.6, nz = -(terrainH(px, pz + 0.3, cfg) - terrainH(px, pz - 0.3, cfg)) / 0.6;
     _fpN.set(nx, 1, nz).normalize(); _fpQ1.setFromUnitVectors(_fpUP, _fpN); _fpQ2.setFromAxisAngle(_fpUP, Math.atan2(-fx, -fz)); _fpQ1.multiply(_fpQ2);
     _fpM.compose(_fpP.set(px, h + 0.02, pz), _fpQ1, _fpS); this.mesh.setMatrixAt(i, _fpM); this.mesh.instanceMatrix.needsUpdate = true;

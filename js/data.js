@@ -102,7 +102,7 @@ export const roastStage = c => c < ROAST.at[0] ? 0 : c < ROAST.at[1] ? 1 : c < R
    head: 누운 머리 자리 · eye: 누운 눈높이(지면 위) · lie: 누울 때 올려다보는 각도
    look: 누운 동안 시선 [좌우, 아래, 위] (rad) · lantern: 머리맡 랜턴 자리 */
 export const BEACH = {
-  mat: { x: 5.5, z: -5.5, w: 1.3, l: 1.9 }, parasol: { x: 6.2, z: -4.9, tilt: [-0.12, 0.1], yaw: 0.2 },
+  mat: { x: 5.5, z: -5.5, w: 1.3, l: 1.9 }, parasol: { x: 6.55, z: -4.9, tilt: [-0.12, 0.16], yaw: 0.2 },
   head: [5.5, -4.8], eye: 0.32, lie: 0.9, look: [1.75, -0.1, 1.3], lantern: [4.72, -4.65],
 };
 
