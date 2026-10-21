@@ -56,7 +56,8 @@ function bindToggle(id, key, onChange) {
 /* 포인터 잠금. 브라우저가 거절하면(ESC 직후 등) 클릭 안내를 띄운다 */
 function lock() {
   if (isTouch) return;
-  const p = canvas().requestPointerLock(); if (p && p.catch) p.catch(() => { $('#lockmsg').style.opacity = 0.85; });
+  const p = canvas().requestPointerLock();
+  if (p && p.catch) p.catch(() => { const m = $('#lockmsg'); m.firstChild.textContent = '화면을 클릭하면 계속합니다'; m.style.opacity = 0.85; });
 }
 
 const timingMode = () => state.mode === 'chop' || fishActive();
@@ -81,7 +82,7 @@ export function bindInput() {
     if (e.repeat) return;
     /* Enter 의 기본 동작(포커스된 버튼의 click)을 막아 두 번 실행되지 않게 한다 */
     if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) { e.preventDefault(); startGame(); } return; }
-    if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape' || e.code === 'Space') { e.preventDefault(); resume(); } return; }
+    if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
     if (e.code === 'Escape' && inModal()) { closeModal(); return; }
     if (e.code === 'KeyE') interact();
@@ -526,6 +527,7 @@ export function startGame() {
     guideReady = false; const gs = ++guideSess;
     ctx.running = true; updateHUD(); fade.style.opacity = 0;
     if (isTouch) setTimeout(() => { if (gs !== guideSess || !ctx.running) return; guideReady = true; refreshGuide(); }, 700);
+    $('#lockmsg').firstChild.textContent = '화면을 클릭하면 시작합니다';
     $('#lockmsg').style.opacity = isTouch ? 0 : 0.85;
     $('#caption').classList.add('bright'); setTimeout(() => $('#caption').classList.remove('bright'), 5000);
   };
