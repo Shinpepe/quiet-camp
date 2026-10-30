@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { ctx, state, settings, saveSettings, DAY_LEN, records } from './state.js';
-import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH } from './data.js';
+import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
-import { buildScene, precompileScene, rebakeEnv, compileReflection } from './scene.js';
-import { clockLabel } from './time.js';
+import { buildScene, precompileScene, rebakeEnv, compileReflection, applyTime } from './scene.js';
+import { clockLabel, paramsAt } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
 import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHint, fishHooks, fishCount } from './fish.js';
@@ -14,12 +14,15 @@ import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
 import { showMemo, hideMemo, memoHooks } from './memo.js';
 import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman } from './snowman.js';
 import { onMat, resetBeach } from './beach.js';
+import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
+import { onRoad, roadYaw } from './road.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
    무엇을 바라보면 무엇이 일어나는지는 scene.js 의 W.interact 에 act 로 적는다 (act 가 없으면 그 id 의 자리에 앉는다).
    트렁크·도감·메모처럼 화면을 덮는 창이 열린 동안에는 걷기·마시기·E 안내가 멈추고, E 나 ESC 로 닫는다
-   빈손일 때 바라보는 것에 click 이 있으면 클릭이 그 행동을 한다 (눈덩이·눈사람 부수기). 눈덩이를 굴리는 동안에는 E 만 쓴다 (내려놓기·눈사람 만들기). ── */
+   빈손일 때 바라보는 것에 click 이 있으면 클릭이 그 행동을 한다 (눈덩이·눈사람 부수기). 눈덩이를 굴리는 동안에는 E 만 쓴다 (내려놓기·눈사람 만들기).
+   꿈속(dream.js)에서는 트렁크가 총을 쥐여 주고 'shoot' 모드가 된다: 걷지 않고 시선이 길 쪽 하늘로 묶이며, 클릭이 쏘기다 ── */
 const FINE = matchMedia('(pointer:fine)').matches;
 export const player = { x: -2.1, z: 8.2, yaw: 0, pitch: 0, bob: 0, side: false };
 export const cam = { from: new THREE.Vector3(), to: new THREE.Vector3(), t: 1, yawFrom: 0, yawTo: 0, pitchFrom: 0, pitchTo: 0 };
@@ -33,7 +36,7 @@ let stashed = null;
 const canvas = () => ctx.renderer.domElement;
 const locked = () => document.pointerLockElement === canvas();
 export const isNightClock = c => c < 0.22 || c > 0.8;
-/* 트렁크에 들어 있는 물건 (마시멜로 꼬치는 아이스박스에서 꺼낸다 — data.js ITEMS 의 trunk: false) */
+/* 트렁크에 들어 있는 물건 (마시멜로 꼬치는 아이스박스에서, 총은 꿈속에서 꺼낸다 — data.js ITEMS 의 trunk: false) */
 const TRUNK = Object.keys(ITEMS).filter(k => ITEMS[k].trunk !== false), NITEMS = TRUNK.length;
 const inTrunk = k => !!k && ITEMS[k].trunk !== false;
 /* 화면을 덮는 창(트렁크·도감·메모)이 열려 있는지 */
@@ -115,9 +118,9 @@ export function bindInput() {
   $('#pause').addEventListener('click', e => { if (e.target === $('#pause')) resume(); });
   $('#pausebtn').style.display = isTouch ? '' : 'none';
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
-  /* 메뉴로 나가기: 잠자기 페이드·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
+  /* 메뉴로 나가기: 잠자기 페이드·꿈·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
      (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다.
      옆 버튼(mSip)은 누르는 순간 동작하고, 그 결과 숨으면 행동 버튼(mAct)이 그 자리로 밀려온다.
@@ -162,7 +165,8 @@ export function bindInput() {
   });
   renderMenu();
 }
-/* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만, 돗자리에 누우면 바다 쪽으로 */
+/* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만, 돗자리에 누우면 바다 쪽으로,
+   꿈속에서 총을 든 동안에는 길이 뻗어 나가는 쪽 하늘로만 */
 function look(dx, dy, s) {
   player.yaw -= dx * s; player.pitch = clamp(player.pitch - dy * s, -1.3, 1.3);
   if (state.mode === 'chop' && cam.t >= 1) {
@@ -176,6 +180,10 @@ function look(dx, dy, s) {
     /* 돗자리에 누워서: 바다 쪽 좌우 약 100°, 수평선부터 거의 머리 위까지 */
     player.yaw = clamp(wrapPI(player.yaw), -BEACH.look[0], BEACH.look[0]);
     player.pitch = clamp(player.pitch, BEACH.look[1], BEACH.look[2]);
+  } else if (state.mode === 'shoot' && cam.t >= 1) {
+    const c = dreamCenter();
+    player.yaw = c + clamp(wrapPI(player.yaw - c), -DREAM.look[1], DREAM.look[1]);
+    player.pitch = clamp(player.pitch, DREAM.look[2], DREAM.look[3]);
   }
 }
 function resume() { hidePause(); lock(); }
@@ -280,7 +288,21 @@ function endChop() {
   startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); updateHUD();
 }
 
-export function openTrunk() { state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunkOpen'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD(); }
+export function openTrunk() {
+  if (dreamOn()) { takeGun(); return; }
+  state.mode = 'trunk'; $('#trunk').classList.add('on'); sfx('trunkOpen'); if (!isTouch) document.exitPointerLock(); renderTrunk(); updateHUD();
+}
+/* 꿈속의 트렁크: 창을 여는 대신 총을 쥐고, 길이 뻗어 나가는 쪽 하늘을 올려다본다 (road.js roadYaw).
+   트렁크 뚜껑은 W.trunkT 동안 잠깐 열린다 (main.js) */
+function takeGun() {
+  if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
+  ctx.W.trunkT = 1.4; sfx('trunkOpen'); setTimeout(() => sfx('trunkClose'), 1300);
+  pickItem('gun'); showToast('하늘에서 무언가 떨어진다');
+  const y0 = roadYaw(player.x, player.z);
+  state.mode = 'shoot'; anim.lastTargetId = undefined;
+  startMove(ctx.camera.position.clone(), y0, DREAM.look[0]);
+  beginShoot(y0); $('#cross').classList.add('aim'); updateHUD();
+}
 function closeTrunk() { if (state.mode !== 'trunk') return; state.mode = 'walk'; $('#trunk').classList.remove('on'); sfx('trunkClose'); lock(); updateHUD(); }
 /* ── 물고기 도감: 부두 끝 태클 상자 위의 노트. 열고 닫을 때 종이가 스치는 부드러운 소리(천 스침 소리를 함께 쓴다) ── */
 export function openJournal() { state.mode = 'journal'; anim.holding = false; showJournal(); sfx('rodUp'); if (!isTouch) document.exitPointerLock(); updateHUD(); }
@@ -299,14 +321,18 @@ function closeMemo() { if (state.mode !== 'memo') return; state.mode = 'seated';
 /* ESC 로 닫기: 지금 열린 창을 닫는다 */
 function closeModal() { if (state.mode === 'trunk') closeTrunk(); else if (state.mode === 'journal') closeJournal(); else closeMemo(); }
 
-/* ── 메모 안내: 지금 장소의 메모에 아직 안 읽은 줄이 있으면 소식 자리에 계속 띄운다 ──
+/* ── 안내: 소식 자리에 거둘 때까지 떠 있는 한 줄 ──
+   꿈속이면 꿈의 안내("차 트렁크를 확인해 보자")가 우선이다.
+   그 밖에는 지금 장소의 메모에 아직 안 읽은 줄이 있으면 메모 안내를 띄운다.
    시작 직후에는 띄우지 않는다: PC 는 화면을 클릭해 조작이 시작된 뒤, 모바일은 화면이 밝아진 뒤부터 (guideReady).
    운전석에 앉아 있으면 "내리기 전에…", 그 밖에서는 "차 조수석의…". 잠자는 동안에는 숨긴다.
    updateHUD 가 부를 때마다 다시 판단하므로 자리·모드가 바뀌면 문구도 따라 바뀐다 */
 let guideReady = false, guideSess = 0;
 const memoUnread = () => memoFor(state.bg).some(m => !records.memoRead.includes(m.key));
 function refreshGuide() {
-  if (!ctx.running || !guideReady || state.mode === 'sleep' || !memoUnread()) { guide(null); return; }
+  if (!ctx.running || !guideReady || state.mode === 'sleep') { guide(null); return; }
+  if (dreamOn()) { guide(dreamGuide()); return; }
+  if (!memoUnread()) { guide(null); return; }
   guide(state.mode === 'seated' && state.seat === 'car' ? '내리기 전에 조수석 메모를 보자' : '차 조수석의 메모를 보자');
 }
 
@@ -374,10 +400,11 @@ export function resetHand() {
   if (state.item === 'marsh') { h.position.set(0.24, -0.4, -0.42); h.rotation.set(0.85, 0.12, 0); return; }
   else if (state.item === 'smoke') { h.position.set(0.2, -0.13, -0.4); h.rotation.set(0, 0.6, 0.15); }
   else if (state.item === 'sparkler') { h.position.set(0.2, -0.28, -0.55); h.rotation.set(-0.2, 0, -0.25); }
+  else if (state.item === 'gun') { h.position.set(0.2, -0.2, -0.42); h.rotation.set(0.05, 0, 0); }
   else { h.position.set(0.22, -0.2, -0.45); h.rotation.set(0, 0, 0); }
 }
 
-/* ── 손에 든 것 사용: 마실 것·담배는 길게, 스파클라는 클릭으로 점화 → 다시 클릭으로 땅에 꽂기.
+/* ── 손에 든 것 사용: 마실 것·담배는 길게, 스파클라는 클릭으로 점화 → 다시 클릭으로 땅에 꽂기, 꿈속의 총은 클릭으로 쏘기.
    장작 패기·낚시 중이면 클릭이 타이밍 입력. 마시는 소리('꿀꺽')는 main.js 가 잔의 움직임에 맞춰 낸다 ── */
 function useItem() {
   if (timingMode()) { timingPress(); return; }
@@ -387,6 +414,7 @@ function useItem() {
     return;
   }
   if (!ctx.W.item || inModal() || state.mode === 'sleep' || ctx.paused || cam.t < 1) return;
+  if (state.item === 'gun') { dreamShoot(); return; }
   if (state.item === 'sparkler') { if (ctx.W.item.userData.lit) plantSparkler(); else igniteSparkler(); return; }
   if (state.item === 'marsh') { marshPress(); return; }
   if (anim.sipT !== null) return;
@@ -426,19 +454,27 @@ export function itemEmptied() {
   updateHUD();
 }
 
-/* ── 잠자기: 언제 잠들든 다음 아침 7시(WAKE)에 깬다 ── */
-const sleep = { on: false, phase: '', t: 0, from: 0, to: 0 };
-export function startSleep() {
+/* ── 잠자기: 보통은 다음 아침 7시(WAKE)에 깬다.
+   꿈을 꾸면(pickDream — 처음 잠들 때는 반드시) 잠자기 시계가 0:00 까지 돌아가 멈추고, 꿈속 밤에 깨어난다 (dream.js startDream).
+   꿈에서 깰 때(wake)는 화면이 흐려지며 어두워지고, 시계가 0:00 → 7:00 으로 돌아 아침의 침낭에서 깬다.
+   꿈속에서 침낭에 다시 누워도, 운석 막기가 끝나도(dream.js) wake 로 깬다 ── */
+const sleep = { on: false, phase: '', t: 0, from: 0, to: 0, wake: false, dream: false };
+export function startSleep(wake) {
+  if (sleep.on) return;
+  sleep.wake = wake === true || dreamOn(); sleep.dream = false;
   sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false; anim.roast = false; anim.eatT = null;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
-  $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none'; $('#itembox').classList.remove('on'); sfx('bag');
+  $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none';
+  if (sleep.wake) canvas().style.filter = 'blur(10px)'; else sfx('bag');
+  updateHUD();
 }
-/* 잠자기 화면을 정리한다. 잠자는 도중(페이드가 검은 상태)이었다면 페이드도 걷어 낸다 */
+/* 잠자기 화면을 정리한다. 잠자는 도중(페이드가 검은 상태)이었다면 페이드도 걷어 낸다. 흐림·조준 모양도 되돌린다 */
 function endSleepUI() {
   const was = sleep.on; sleep.on = false; sleep.phase = ''; sleep.t = 0;
   $('#sleep').classList.remove('on');
   const f = $('#fade'); f.style.transition = ''; if (was) f.style.opacity = 0;
-  $('#cross').style.display = ''; $('#legend').style.display = '';
+  $('#cross').style.display = ''; $('#cross').classList.remove('aim'); $('#legend').style.display = '';
+  canvas().style.filter = '';
 }
 export function updateSleep(dt) {
   if (!sleep.on) return; sleep.t += dt;
@@ -447,18 +483,28 @@ export function updateSleep(dt) {
     setVolume(settings.vol * Math.max(0.12, 1 - sleep.t / 1.6));
     if (sleep.t >= 1.7) {
       const b = SEAT.bed; state.seat = 'bed'; ctx.camera.position.set(...b.pos); player.yaw = b.yaw; player.pitch = b.pitch; cam.t = 1; putBack();
-      sleep.from = state.clock; sleep.to = state.clock < WAKE ? WAKE : 1 + WAKE; sleep.phase = 'night'; sleep.t = 0;
+      if (sleep.wake) endDream(); else sleep.dream = pickDream();
+      setIndoor(true);
+      sleep.from = state.clock; sleep.to = sleep.dream ? 1 : state.clock < WAKE ? WAKE : 1 + WAKE; sleep.phase = 'night'; sleep.t = 0;
       st.classList.add('on'); ctx.W.fireLit = false;
       clearPlanted();
     }
   } else if (sleep.phase === 'night') {
     const k = Math.min(1, sleep.t / 4.5), e = k * k * (3 - 2 * k);
-    state.clock = k >= 1 ? WAKE : (sleep.from + (sleep.to - sleep.from) * e) % 1;
+    state.clock = k >= 1 ? (sleep.dream ? 0 : WAKE) : (sleep.from + (sleep.to - sleep.from) * e) % 1;
     $('#sleepText').textContent = clockLabel(state.clock);
-    if (k >= 1) { rebakeEnv(); ctx.W.envT = 0; sleep.phase = 'out'; sleep.t = 0; st.classList.remove('on'); f.style.opacity = 0; }
+    if (k >= 1) {
+      /* 하늘·주변광을 새 시각에 바로 맞춘다 (꿈이면 startDream 이 꿈 색으로) */
+      if (sleep.dream) startDream(); else { paramsAt(state.clock, ctx.W.tm); applyTime(); rebakeEnv(); }
+      ctx.W.envT = 0; sleep.phase = 'out'; sleep.t = 0; st.classList.remove('on'); f.style.opacity = 0; canvas().style.filter = '';
+    }
   } else if (sleep.phase === 'out') {
     setVolume(settings.vol * Math.min(1, 0.12 + sleep.t / 1.6));
-    if (sleep.t >= 1.7) { endSleepUI(); setVolume(settings.vol); state.mode = 'seated'; updateHUD(); anim.lastTargetId = undefined; showToast('아침이 왔다'); }
+    if (sleep.t >= 1.7) {
+      const dream = sleep.dream;
+      endSleepUI(); setVolume(settings.vol); state.mode = 'seated'; updateHUD(); anim.lastTargetId = undefined;
+      showToast(dream ? '아직 밤이다' : '아침이 왔다');
+    }
   }
 }
 
@@ -490,6 +536,11 @@ export function updateHUD() {
     ib.querySelector('.ic').innerHTML = def.ic; ib.querySelector('.nm').textContent = def.name;
     ib.querySelector('.hn').textContent = marshEmpty ? '빈 꼬치. 아이스박스에 넣기' : spot === 'roast' ? btn + ' 불에 굽기, 길게 누르면 계속' : spot === 'cold' ? '불을 피우면 구울 수 있다' : btn + ' 먹기';
     $('#mSip').textContent = spot ? '굽기' : '먹기';
+  } else if (state.item === 'gun') {
+    /* 꿈속의 총: 이름 아래 줄에 막아 낸 운석, 안내 줄에 남은 시간 (dream.js 가 1초마다 updateHUD 를 부른다) */
+    const [line, hn] = dreamHint(btn);
+    ib.querySelector('.ic').innerHTML = ICON.gun; ib.querySelector('.nm').innerHTML = ITEMS.gun.name + (line ? sub(line) : '');
+    ib.querySelector('.hn').textContent = hn; $('#mSip').textContent = ITEMS.gun.act;
   } else if (state.item) {
     const def = ITEMS[state.item], ud = ctx.W.item && ctx.W.item.userData, empty = ud && ud.amount <= 0;
     ib.querySelector('.ic').innerHTML = def.ic; ib.querySelector('.nm').textContent = def.name;
@@ -610,7 +661,7 @@ function sceneReady(bg) {
 function resetSceneForStart() {
   const W = ctx.W, tm = W.tm;
   W.fireLit = tm.stars > 0.1; W.lanternLit = tm.lantern > 0.5; W.tentLampLit = tm.tentLamp > 0.5;
-  clearPlanted(); resetChop(); resetFish(); clearSnowman(); resetBeach(); hideAllFx(); W.splitCount = 0;
+  clearPlanted(); resetChop(); resetFish(); clearSnowman(); resetBeach(); resetDream(); hideAllFx(); W.splitCount = 0; W.trunkT = 0;
 }
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
@@ -640,7 +691,15 @@ export function startGame() {
 
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }
-function surfaceAt(x, z) { const cfg = ctx.W.cfg; if (onPlatform(x, z)) return 'wood'; if (onMat(x, z)) return 'mat'; if (cfg.water && z - cfg.water.z - shoreOff(x, cfg) < -1.2) return 'wet'; return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass'; }
+/* 발밑 바닥: 부두 판자 · 돗자리 · 젖은 물가 · 숲의 길(낙엽 없는 흙) · 장소의 바닥 */
+function surfaceAt(x, z) {
+  const cfg = ctx.W.cfg;
+  if (onPlatform(x, z)) return 'wood';
+  if (onMat(x, z)) return 'mat';
+  if (cfg.water && z - cfg.water.z - shoreOff(x, cfg) < -1.2) return 'wet';
+  if (cfg.key === 'lake' && onRoad(x, z)) return 'road';
+  return cfg.key === 'snow' ? 'snow' : cfg.key === 'beach' ? 'sand' : 'grass';
+}
 /* 걷기 충돌: 몸(반지름 PR)이 네모나 원에 닿으면 막힌다.
    네모는 "가장 가까운 점까지의 거리"로 재서 모서리를 둥글게 돌아 나간다 (예전엔 네모를 PR 만큼 키워 모서리에서 더 일찍 막혔다) */
 function blockedAt(x, z) {

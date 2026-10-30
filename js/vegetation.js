@@ -4,6 +4,7 @@ import { BLOCKS } from './data.js';
 import { rnd, fbm, std, smoothM, shadowed, jitter, mergeParts, tintOf, pushAll, isTouch } from './util.js';
 import { terrainH, slopeUp, shoreOff, campDirt, WATER_Y } from './terrain.js';
 import { tex } from './textures.js';
+import { onRoad, nearRoad } from './road.js';
 
 /* 모바일은 식생 밀도를 낮춘다 */
 const M = isTouch ? 0.55 : 1;
@@ -417,8 +418,13 @@ function clamGeo() {
     return [x, y, z, ...mix3(base, dark, Math.max(ray * 0.55, ring * 0.3) * sstep(0.1, 0.4, u))];
   }]]));
 }
-/* 캠프와 부두 자리는 비워 둔다 */
-function reserved(x, z) { if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true; if (ctx.W.cfg.dock && x > 3 && x < 9 && z < -6 && z > -22) return true; return false; }
+/* 캠프·부두·차 뒤쪽 길 자리는 비워 둔다 (길은 road.js 의 nearRoad — 차 바로 뒤는 더 넓게 비워 하늘이 트이게) */
+function reserved(x, z) {
+  if (Math.abs(x) < 9.5 && z > -9 && z < 14) return true;
+  if (ctx.W.cfg.dock && x > 3 && x < 9 && z < -6 && z > -22) return true;
+  if (nearRoad(x, z)) return true;
+  return false;
+}
 
 export function makeVegetation(cfg) {
   const W = ctx.W, scene = ctx.scene, pines = [], leafs = [], bushes = [];
@@ -448,7 +454,7 @@ export function makeVegetation(cfg) {
   /* 소나무: 원뿔 밑지름의 약 2/3 간격 (가지 끝은 맞닿아도 줄기와 몸통은 겹치지 않는다).
      활엽수: 가지가 넓게 퍼지므로 조금 더 띄운다. 덤불: 나무 그늘 아래에도 자라되 줄기는 피한다.
      숲이 눈에 보이는 거리에 모이도록 소나무의 60% 는 10~50m, 활엽수는 10~60m.
-     물가·경사·군집 노이즈에서 탈락이 많아 시도 횟수는 넉넉히 준다 */
+     물가·경사·군집 노이즈·길에서 탈락이 많아 시도 횟수는 넉넉히 준다 */
   const PINE = { r: 0.95, h: 0.3 }, LEAF = { r: 1.2, h: 0.25 }, BUSH = { r: 0.54, h: 0.3, under: true };
   const near = Math.round(nPines * 0.6);
   for (let i = 0; i < near * 8 && pines.length < near; i++) tryPlace(10, 50, pines, 0.3, 60, 0.32, 0.68, cfg.key === 'lake' ? 0.34 : 0.42, undefined, PINE);
@@ -485,10 +491,10 @@ export function makeVegetation(cfg) {
     const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); n++;
   }
 
-  /* 낙엽: 활엽수 밑에만 (눈 제외). 땅에 납작하게 깔려 겹쳐도 자연스러우므로 자리 검사를 하지 않는다 */
+  /* 낙엽: 활엽수 밑에만 (눈 제외). 땅에 납작하게 깔려 겹쳐도 자연스러우므로 자리 검사를 하지 않는다. 길 위에는 깔지 않는다 */
   if (leafs.length && !cfg.snow) {
     const lv = [], cols = [0xc8742a, 0x8a5a2e, 0xd6a33a, 0x9a4a22], c = new THREE.Color();
-    leafs.forEach(t => { for (let i = 0; i < 7; i++) { const a = rnd(0, 6.3), r = rnd(0.5, 4.5) * t.s, x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r; const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.1) continue; c.set(cols[Math.floor(Math.random() * 4)]).multiplyScalar(rnd(0.75, 1.15)); lv.push({ x, y: h + 0.012, z, s: rnd(0.7, 1.2), rot: rnd(0, 6.3), rx: rnd(-0.15, 0.15), tint: [c.r, c.g, c.b] }); } });
+    leafs.forEach(t => { for (let i = 0; i < 7; i++) { const a = rnd(0, 6.3), r = rnd(0.5, 4.5) * t.s, x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r; if (onRoad(x, z, 0.2)) continue; const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.1) continue; c.set(cols[Math.floor(Math.random() * 4)]).multiplyScalar(rnd(0.75, 1.15)); lv.push({ x, y: h + 0.012, z, s: rnd(0.7, 1.2), rot: rnd(0, 6.3), rx: rnd(-0.15, 0.15), tint: [c.r, c.g, c.b] }); } });
     const lg = new THREE.PlaneGeometry(0.14, 0.09); lg.rotateX(-Math.PI / 2);
     if (lv.length) { const im = instanced(lg, new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide }), lv, false); im.userData.noRefl = true; scene.add(im); }
   }
@@ -540,7 +546,7 @@ export function makeVegetation(cfg) {
   }
 
   const gr = cfg.grass; if (!gr) return;
-  /* 풀: 바위·줄기·조개 같은 단단한 부분만 피한다 (나무 그늘 아래 풀은 그대로). 풀끼리는 기록하지 않는다 */
+  /* 풀: 바위·줄기·조개 같은 단단한 부분만 피한다 (나무 그늘 아래 풀은 그대로). 풀끼리는 기록하지 않는다. 길 위에는 자라지 않는다 */
   const list = [], base = new THREE.Color(gr.color), c = new THREE.Color(), nGrass = Math.round(gr.n * M);
   for (let tries = 0; tries < nGrass * 4 && list.length < nGrass; tries++) {
     const a = rnd(0, Math.PI * 2), r = 3.5 + 44 * Math.pow(Math.random(), 0.7), x = Math.cos(a) * r, z = 3 + Math.sin(a) * r;
@@ -548,6 +554,7 @@ export function makeVegetation(cfg) {
     if (campDirt(x, z) > 0.35) continue;
     if (BLOCKS.some(b => x > b.x[0] - 0.2 && x < b.x[1] + 0.2 && z > b.z[0] - 0.2 && z < b.z[1] + 0.2)) continue;
     if (cfg.dock && x > 4.6 && x < 6.8 && z < -7.5) continue;
+    if (onRoad(x, z, 0.1)) continue;
     const cl = fbm(x * 0.11 + 3, z * 0.11 + 8, 3); if (cl < 0.42 && Math.random() > (cl - 0.25) * 2) continue;
     const h = terrainH(x, z, cfg); if (h < WATER_Y + 0.3 && cfg.water) continue;
     if (!S.fits(x, z, 0.04, true)) continue;

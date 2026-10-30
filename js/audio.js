@@ -6,7 +6,7 @@ import { rnd } from './util.js';
 /* ── 방향: 힐링 캠핑. 모든 소리는 멀리·부드럽게·드물게. 날카로운 고역 없음, 긴 어택, 밤엔 더 뜸하게.
    버스: world(환경·위치음, 실내 필터) / bed(world 안의 배경 베드 — 한 모금 하는 동안 살짝 물러난다)
          sfx(손·몸 근처) / dry(입 근처, 잔향 없음) / ui(메뉴·셔터, 컴프레서 우회)
-   공간 잔향: world 와 sfx 가 같은 절차적 임펄스 응답을 공유한다 (텐트·차·숲·해변·설원) ── */
+   공간 잔향: world 와 sfx 가 같은 절차적 임펄스 응답을 공유한다 (텐트·차·숲·해변·설원·꿈) ── */
 
 /* ── 녹음 샘플로 바꾸고 싶을 때: 파일 경로를 넣으면 합성 버퍼 대신 이 파일들을 돌아가며 쓴다.
    예) sand: ['sounds/sand_1.ogg', 'sounds/sand_2.ogg', ...]
@@ -32,6 +32,8 @@ const LIE_FOCUS = 0.22;
 let AC = null, master, comp, worldLP, worldGain, bedBus, bedLP, sfxBus, dryBus, uiBus, verb = null;
 const bufs = {}, irCache = {};
 let bed = null, evTimer = null, sceneKey = null, menuMode = false, indoor = false, focusOn = false, lyingOn = false;
+/* 꿈속(dream.js): 바깥 소리가 먹먹하고 잔향이 길다 */
+let dreaming = false;
 let fire = null, water = null, spark = null;
 let windAcc = 0, lastWind = 0, lastGust = -99;
 const flockAudio = new Map();
@@ -81,13 +83,15 @@ export function setLying(on) {
 }
 
 /* ── 공간 잔향: 감쇠하는 저역통과 노이즈로 임펄스 응답을 만든다. 설원은 먼 산에서 되돌아오는 메아리 두 번 ──
-   dur: 길이(초), decay: 감쇠 곡선 지수(클수록 빨리 죽음), lp: 잔향 음색(Hz), wet: 잔향 크기 */
+   dur: 길이(초), decay: 감쇠 곡선 지수(클수록 빨리 죽음), lp: 잔향 음색(Hz), wet: 잔향 크기
+   dream: 꿈속 — 길고 먹먹하게, 잔향이 크게 */
 const SPACE = {
   tent:   { dur: 0.35, decay: 4,   lp: 2500, wet: 0.45 },
   car:    { dur: 0.25, decay: 5,   lp: 1800, wet: 0.5 },
   forest: { dur: 1.8,  decay: 3,   lp: 5000, wet: 0.12 },
   beach:  { dur: 1.2,  decay: 3.5, lp: 4000, wet: 0.06 },
   snow:   { dur: 2.5,  decay: 2,   lp: 3000, wet: 0.08, echo: [[0.32, 0.35], [0.74, 0.2]] },
+  dream:  { dur: 3.5,  decay: 1.6, lp: 2500, wet: 0.35 },
 };
 const OUTDOOR = { lake: 'forest', beach: 'beach', snow: 'snow' };
 function makeIR(sp) {
@@ -103,23 +107,30 @@ function makeIR(sp) {
   }
   return b;
 }
-/* 공간이 바뀌면 새 컨볼버를 만들어 크로스페이드하고, 이전 것은 잔향 꼬리가 끝난 뒤 정리한다 */
+/* 공간이 바뀌면 새 컨볼버를 만들어 크로스페이드하고, 이전 것은 잔향 꼬리가 끝난 뒤 정리한다.
+   정리할 때 잔향 입력(verb.in)에서 이전 컨볼버로 가는 연결도 끊는다 — disconnect() 는 그 노드의 출력만 끊어서,
+   입력 쪽을 그대로 두면 공간을 오갈 때마다 쓰이지 않는 컨볼버가 쌓인다 */
 function setSpace(key) {
   if (!verb || !key || verb.key === key) return;
   const sp = SPACE[key], t = AC.currentTime, old = verb.slot, oldDur = verb.key ? SPACE[verb.key].dur : 0; verb.key = key;
   const c = AC.createConvolver(); c.buffer = irCache[key] || (irCache[key] = makeIR(sp));
   const w = gainN(0); verb.in.connect(c); c.connect(w); w.connect(comp); w.gain.setTargetAtTime(sp.wet, t, 0.15);
   verb.slot = { c, w };
-  if (old) { old.w.gain.cancelScheduledValues(t); old.w.gain.setTargetAtTime(0, t, 0.15); setTimeout(() => kill([old.c, old.w]), (oldDur + 1.5) * 1000); }
+  if (old) {
+    old.w.gain.cancelScheduledValues(t); old.w.gain.setTargetAtTime(0, t, 0.15);
+    setTimeout(() => { try { verb.in.disconnect(old.c); } catch (e) {} kill([old.c, old.w]); }, (oldDur + 1.5) * 1000);
+  }
 }
 function applyWorld() {
   if (!AC) return; const t = AC.currentTime;
   worldGain.gain.setTargetAtTime((menuMode ? 0.35 : 1) * (indoor ? 0.5 : 1), t, 0.2);
-  worldLP.frequency.setTargetAtTime(indoor ? 1300 : 20000, t, 0.15);
+  worldLP.frequency.setTargetAtTime(indoor ? 1300 : dreaming ? 2800 : 20000, t, 0.15);
   const out = ctx.W.cfg ? OUTDOOR[ctx.W.cfg.key] : 'forest';
-  setSpace(indoor ? (state.seat === 'car' ? 'car' : 'tent') : out || 'forest');
+  setSpace(dreaming ? 'dream' : indoor ? (state.seat === 'car' ? 'car' : 'tent') : out || 'forest');
 }
 export function setIndoor(on) { indoor = !!on; applyWorld(); }
+/* 꿈에 들어가고 나올 때 dream.js 가 부른다 */
+export function setDream(on) { dreaming = !!on; applyWorld(); }
 
 /* ── 재료: 노이즈 버퍼 세 종류 ──
    white: 날카로운 쉭 / pink: 자연음 대부분(잎·물거품·불) / brown: 먹먹한 바람·럼블
@@ -696,17 +707,17 @@ export function updateAudio(dt) {
 }
 
 /* ── 발소리 ──
-   모래·흙(숲) 바닥: 폴리 뱅크에서 변형을 골라 재생 (게임 발소리 방식)
+   모래·흙(숲)·숲의 길 바닥: 폴리 뱅크에서 변형을 골라 재생 (게임 발소리 방식). 길(road)은 낙엽·잔가지 없는 흙
    눈·나무·돗자리·젖은 바닥: 기존 합성 그대로
    위스키를 들었으면 가끔 얼음이 잔에 부딪힌다 */
 let stepIdx = 0;
 function footstep(surface) {
   const t0 = AC.currentTime + rnd(0, 0.012), side = (stepIdx++ % 2) ? 0.12 : -0.12, v = rnd(0.72, 0.98);
-  if (surface === 'sand' || surface === 'grass') {
+  if (surface === 'sand' || surface === 'grass' || surface === 'road') {
     const leaves = surface === 'grass' && ctx.W.cfg && ctx.W.cfg.leafs;
     const key = surface === 'sand' ? 'sand' : leaves ? 'dirtLeaf' : 'dirt', gk = surface === 'sand' ? 'sand' : 'dirt';
     playBank(key, sfxBus, FOLEY_GAIN[gk] * rnd(0.82, 1), rnd(0.93, 1.07), t0, side * 0.8);
-    /* 숲 바닥: 가끔 잔가지가 '딱' */
+    /* 숲 바닥: 가끔 잔가지가 '딱' (길 위에는 잔가지가 없다) */
     if (surface === 'grass' && Math.random() < 0.05) { const tc = t0 + rnd(0.02, 0.08); burst(sfxBus, 'white', 'bandpass', rnd(2000, 3200), 3, 0.001, 0.035 * v, 0.02, tc); burst(sfxBus, 'white', 'bandpass', rnd(1200, 1800), 4, 0.001, 0.02 * v, 0.03, tc + rnd(0.015, 0.03)); }
   } else {
     const pan = AC.createStereoPanner(); pan.pan.value = side; pan.connect(sfxBus); setTimeout(() => { try { pan.disconnect(); } catch (e) {} }, 1500);
@@ -800,9 +811,10 @@ export function sfx(type, arg) {
     case 'trunkClose': tone(B, 95 * pv, 60, 0.004, 0.22, 0.22, t); burst(B, false, 'lowpass', 500, 1, 0.003, 0.15, 0.12, t); burst(B, false, 'bandpass', 2500 * pv, 2, 0.003, 0.025, 0.06, t + 0.02); return;
     case 'doorOpen': burst(B, false, 'highpass', 3500 * pv, 1, 0.002, 0.08, 0.04, t); { const o = tone(B, 220 * pv, 170, 0.06, 0.02, 0.25, t + 0.05); const v = osc('sine', 9), vg = gainN(12); v.connect(vg); vg.connect(o.frequency); v.start(t); v.stop(t + 0.4); } burst(B, true, 'lowpass', 700, 1, 0.08, 0.02, 0.3, t + 0.05, 1400, 0.3); return;
     case 'doorClose': tone(B, 70 * pv, 45, 0.004, 0.28, 0.28, t); burst(B, false, 'lowpass', 400, 1, 0.003, 0.2, 0.15, t); burst(B, false, 'highpass', 3000 * pv, 1, 0.002, 0.06, 0.04, t + 0.03); burst(B, false, 'bandpass', 180, 4, 0.01, 0.05, 0.35, t); return;
-    /* 아이템 */
+    /* 아이템 (꿈의 총: 슬라이드가 걸리는 딸깍 두 번) */
     case 'pick': if (arg === 'coffee') pour(); else if (arg === 'whisky') { ice(1, t); ice(0.7, t + 0.13); } else if (arg === 'sparkler') { for (let i = 0; i < 3; i++) burst(B, false, 'bandpass', 2000 * rnd(0.9, 1.1), 0.8, 0.01, 0.03, 0.08, t + i * 0.09); }
       else if (arg === 'marsh') { for (let i = 0; i < 6; i++) burst(B, false, 'bandpass', rnd(2500, 4500), 1.5, 0.002, rnd(0.012, 0.022), 0.03, t + 0.15 + i * rnd(0.04, 0.09)); }
+      else if (arg === 'gun') { burst(B, false, 'bandpass', 3200 * pv, 4, 0.001, 0.06, 0.02, t); burst(B, false, 'bandpass', 2200 * pv, 4, 0.001, 0.05, 0.02, t + 0.09); }
       else sfx('lighter'); return;
     /* 마시기: 넘기는 '꿀꺽' 하나만. 커피는 높고 가볍게, 위스키는 낮고 묵직하게 (main.js 가 타이밍을 정한다).
        'sipStart'·'sip'·'sipEnd' 는 예전 호출이 남아 있어도 조용히 넘어가도록 받아 둔다 */
@@ -877,6 +889,16 @@ export function sfx(type, arg) {
     case 'splash': burst(B, 'pink', 'lowpass', 1500, 0.6, 0.01, 0.2 * (arg || 1), 0.45, t, 500, 0.45); return;
     case 'fishOut': burst(B, 'pink', 'lowpass', 1900, 0.6, 0.01, 0.25, 0.6, t, 400, 0.6); return;
     case 'snap': burst(B, false, 'highpass', 4000, 1, 0.001, 0.15, 0.06, t); tone(B, 1200, 300, 0.001, 0.06, 0.12, t); return;
+    /* 꿈: 총소리(짧은 탕 + 낮은 울림) · 운석을 맞힌 소리(멀리서 부서지는 쩡 + 잔불티) */
+    case 'gunShot':
+      burst(B, false, 'highpass', 2500 * pv, 1, 0.001, 0.12, 0.05, t);
+      burst(B, 'pink', 'lowpass', 1800, 1, 0.001, 0.2, 0.18, t, 400, 0.18);
+      tone(B, 150 * pv, 45, 0.002, 0.22, 0.16, t);
+      burst(B, 'brown', 'lowpass', 300, 1, 0.01, 0.08, 0.5, t + 0.04); return;
+    case 'meteorHit':
+      for (let i = 0; i < 8; i++) burst(B, false, 'bandpass', rnd(3500, 8000), 2, 0.001, rnd(0.02, 0.04), 0.03, t + 0.03 + Math.random() * 0.25);
+      burst(B, 'pink', 'bandpass', 1600, 0.7, 0.01, 0.06, 0.6, t + 0.02, 500, 0.6);
+      tone(B, 70, 35, 0.02, 0.1, 1.0, t + 0.05); return;
     /* UI (컴프레서 우회, 실내 필터 무관) */
     case 'ui': tone(U, 880 * pv, 0, 0.004, 0.025, 0.08, t); tone(U, 1320 * pv, 0, 0.004, 0.01, 0.06, t); return;
     case 'uiGo': tone(U, 392, 0, 0.01, 0.035, 0.3, t); tone(U, 523, 0, 0.01, 0.035, 0.4, t + 0.16); return;

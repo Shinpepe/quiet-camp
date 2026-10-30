@@ -13,6 +13,8 @@ import { paramsAt, sunDirAt } from './time.js';
 import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler, lieDown } from './game.js';
 import { buildSnowman } from './snowman.js';
 import { buildBeach, toggleParasol, parasolOpen, onMat } from './beach.js';
+import { prepareRoad, makeRoad } from './road.js';
+import { buildDream, dreamOn } from './dream.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -72,8 +74,8 @@ export function compileReflection() {
 }
 
 /* ── 사전 컴파일: 로딩 화면 뒤에서 셰이더를 미리 만든다 ──
-   숨겨진 것(불꽃·유성·오로라·장작 패기 도구 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다.
-   손에 드는 아이템은 임시로 한 벌 만들어 프로그램을 캐시에 올린다 — 재질을 dispose 하면 프로그램도 풀리므로 지오메트리만 정리한다.
+   숨겨진 것(불꽃·유성·오로라·장작 패기 도구·꿈의 운석 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다.
+   손에 드는 아이템(꿈의 총 포함)은 임시로 한 벌 만들어 프로그램을 캐시에 올린다 — 재질을 dispose 하면 프로그램도 풀리므로 지오메트리만 정리한다.
    ctx.compiling 동안 메인 루프는 그리지 않고, 컴파일이 겹치면 마지막 것이 끝날 때만 푼다 */
 let compileGen = 0;
 export function precompileScene() {
@@ -230,7 +232,8 @@ function spawnMeteor(m) {
 }
 export function updateMeteors(dt) {
   const W = ctx.W; if (!W.meteors) return;
-  const night = W.tm.stars > 0.5 && !W.sunUp;
+  /* 꿈속에서 운석을 막는 동안에는 장식용 별똥별을 띄우지 않는다 (쏠 수 없는 것이 섞이면 헷갈린다) */
+  const night = W.tm.stars > 0.5 && !W.sunUp && state.mode !== 'shoot';
   if (night && !ctx.paused) {
     W.meteorT -= dt;
     if (W.meteorT <= 0) {
@@ -255,14 +258,17 @@ export function buildScene(bgKey) {
   const scene = ctx.scene = new THREE.Scene(); scene.add(ctx.camera);
   /* dome·domeLit·domeK: 차 실내등 (makeCar 가 채우고, game.js 가 켜고, main.js 가 밝힌다)
      wind: 바람 0..1 (main.js 가 계산하고 셰이더·오디오가 읽는다)
-     fireBase·firePop·fireBurst: 모닥불 기본 밝기·오디오 파칙의 순간 밝기·큰 파칙의 불티 */
+     fireBase·firePop·fireBurst: 모닥불 기본 밝기·오디오 파칙의 순간 밝기·큰 파칙의 불티
+     trunkT: 트렁크 뚜껑을 잠깐 여는 남은 시간 (꿈속에서 총을 꺼낼 때) */
   const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
     dome: null, domeLit: false, domeK: 0,
     wind: { value: 0.4 },
-    fireBase: 0, firePop: 0, fireBurst: false };
+    fireBase: 0, firePop: 0, fireBurst: false, trunkT: 0 };
   /* Fog 객체는 셰이더의 USE_FOG 를 켜고 fogColor 를 넘기는 용도. 실제 농도는 util.js 의 FOG 배열이 정한다 */
   scene.fog = new THREE.Fog(cur.fog, 40, 1000);
   ctx.renderer.toneMappingExposure = cur.exposure;
+  /* 차 뒤쪽 길: 지형을 굽기 전에 경로와 길 격자를 만든다 (이 뒤로 terrainH 가 길을 따라 평평해진다) */
+  prepareRoad(cfg);
 
   const skyMat = new THREE.ShaderMaterial({
     uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, moonDir: { value: new THREE.Vector3(0, -1, 0) }, sunColor: { value: new THREE.Color() }, glow: { value: 0 }, uTime: W.uTime, uCover: { value: 0.5 }, cloudLit: { value: new THREE.Color() }, cloudShade: { value: new THREE.Color() }, uMoon: { value: 0 } },
@@ -292,6 +298,8 @@ export function buildScene(bgKey) {
 
   if (cfg.water) { W.shoreTex = bakeShoreTex(cfg); W.heightTex = bakeHeightMap(cfg); }
   const ground = makeGround(cfg, W.uTime, W.shoreTex); scene.add(ground); W.groundMat = ground.material;
+  /* 길 띠: 평평해진 지면 위에 얹는다 */
+  scene.add(makeRoad(cfg));
   if (cfg.water) { W.water = makeWater(cfg.water, cur, W.uTime, W.heightTex, waterEdge(cfg)); scene.add(W.water); }
   makeVegetation(cfg);
   if (cfg.dock) {
@@ -325,6 +333,8 @@ export function buildScene(bgKey) {
   makeProps();
   /* 장작 패기 도구는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
   buildChop();
+  /* 꿈의 운석·번쩍임·탄도선 (모든 장소 — 꿈은 장소를 가리지 않는다) */
+  buildDream();
   if (cfg.snow) makeSnowCaps();
   /* 눈사람 만들기: 설산이면 재질·자국·견본을 만들고, 다른 장소면 이전 상태만 비운다 (텐트 다음 — 목도리를 W.tentMats 에 넣는다) */
   buildSnowman(cfg);
@@ -355,16 +365,17 @@ export function buildScene(bgKey) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(sp, 3));
     W.ff = new THREE.Points(g, new THREE.PointsMaterial({ map: softTex, color: 0xd6ff7a, size: 0.14, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); W.ff.frustumCulled = false; scene.add(W.ff);
   }
-  /* 물 반사에서 뺄 것들 (풀·낙엽·자갈·조개·발자국·낚싯줄 등) */
+  /* 물 반사에서 뺄 것들 (풀·낙엽·자갈·조개·발자국·낚싯줄·길 등) */
   scene.traverse(o => { if (o.userData.noRefl) W.noRefl.push(o); });
 
   /* 상호작용: 바라보고 E 를 누르면 act 를 부른다 (game.js 의 함수). act 가 없으면 그 id 의 자리(SEAT)에 앉는다.
      r: 바닥 기준 수평 거리. 기준은 "사물 표면에서 약 1.5m 안" — 크기가 있는 사물은 r 에 중심~표면 거리를 더하고,
         트렁크·텐트·운전석처럼 한 면으로 다가가는 것은 점을 그 면 위에 두고 r 1.5.
      from: 어디서 볼 때 보이는지 ('walk' = 서 있을 때, 그 밖에는 앉은 자리 이름)
-     tap: 모바일 행동 버튼에 쓸 짧은 이름 (없으면 label 을 그대로 쓴다) */
+     tap: 모바일 행동 버튼에 쓸 짧은 이름 (없으면 label 을 그대로 쓴다)
+     꿈속에서는 트렁크가 "확인하기"(총을 꺼낸다), 침낭이 "꿈에서 깨기"가 된다 */
   W.interact = [
-    { id: 'trunk',    pos: [0, 1.0, 10.45],     r: 1.5, hit: 0.9,  from: ['walk'],          label: () => '트렁크 열기', act: openTrunk },
+    { id: 'trunk',    pos: [0, 1.0, 10.45],     r: 1.5, hit: 0.9,  from: ['walk'],          label: () => dreamOn() ? '트렁크 확인하기' : '트렁크 열기', act: openTrunk },
     { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 1.8, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기', act: () => sitDown('chair') },
     { id: 'tent',     pos: [-1.6, 0.7, -0.13],  r: 1.5, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기', act: () => sitDown('tent') },
     { id: 'car',      pos: [-0.97, 1.0, 8.1],   r: 1.5, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기', act: () => sitDown('car') },
@@ -373,7 +384,7 @@ export function buildScene(bgKey) {
     { id: 'cooler',   pos: [2.4, 0.3, 0.6],     r: 1.8, hit: 0.32, from: ['walk'],          label: () => state.item === 'marsh' ? '꼬치 넣기' : '마시멜로 꺼내기', act: useCooler },
     { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
     { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 1.8, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
-    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 1.8, hit: 0.5,  from: ['tent'],          label: () => '침낭에 눕기', act: startSleep },
+    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 1.8, hit: 0.5,  from: ['tent'],          label: () => dreamOn() ? '꿈에서 깨기' : '침낭에 눕기', act: startSleep },
     { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.0, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
     { id: 'memo',     pos: [0.43, 0.83, 8.05],  r: 1.0, hit: 0.14, from: ['car'],           label: () => '캠핑 메모 보기', tap: '메모 보기', act: openMemo },
   ];

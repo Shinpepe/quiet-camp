@@ -13,6 +13,7 @@ import { updateFish } from './fish.js';
 import { ROAST } from './data.js';
 import { updateSnowman, snowMoving } from './snowman.js';
 import { updateBeach, parasolMoving } from './beach.js';
+import { updateDream, dreamOn, tintDream } from './dream.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -41,7 +42,10 @@ ctx.reflRT = new THREE.WebGLRenderTarget(...reflSize(), { type: THREE.HalfFloatT
 ctx.reflCam = new THREE.PerspectiveCamera(70, 1, 0.05, 3000);
 const reflMat = new THREE.Matrix4(), _lk = new THREE.Vector3(), _rd = new THREE.Vector3(), clipArr = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y + 0.02)];
 ctx.reflClip = clipArr;
-/* 손과 낚싯대는 카메라에 붙어 있어 반사 카메라에 엉뚱하게 잡히므로 숨긴다 */
+/* 반사를 그리는 동안 숨긴 물체들의 원래 보임 상태 (매 프레임 재사용) */
+const _noReflVis = [];
+/* 손과 낚싯대는 카메라에 붙어 있어 반사 카메라에 엉뚱하게 잡히므로 숨긴다.
+   W.noRefl 의 물체(낚싯줄·찌·물결 고리처럼 원래 숨겨져 있을 수 있는 것)는 숨기기 전 상태를 기억했다가 그대로 되돌린다 */
 function renderReflection(scene) {
   const W = ctx.W; if (!W.water || !settings.reflect || !FINE) return;
   const rc = ctx.reflCam;
@@ -51,10 +55,17 @@ function renderReflection(scene) {
   rc.up.set(0, -1, 0); rc.lookAt(_lk); rc.updateMatrixWorld();
   reflMat.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1).multiply(rc.projectionMatrix).multiply(rc.matrixWorldInverse);
   W.water.material.uniforms.uReflMat.value.copy(reflMat);
-  const hv = ctx.hand.visible, rv = !!ctx.rod && ctx.rod.visible;
-  W.water.visible = false; ctx.hand.visible = false; if (ctx.rod) ctx.rod.visible = false; W.noRefl.forEach(o => { o.visible = false; });
-  renderer.clippingPlanes = clipArr; renderer.setRenderTarget(ctx.reflRT); renderer.render(scene, rc); renderer.setRenderTarget(null); renderer.clippingPlanes = [];
-  W.water.visible = true; ctx.hand.visible = hv; if (ctx.rod) ctx.rod.visible = rv; W.noRefl.forEach(o => { o.visible = true; });
+  const hv = ctx.hand.visible, rv = !!ctx.rod && ctx.rod.visible, wv = W.water.visible;
+  const nr = W.noRefl; _noReflVis.length = nr.length;
+  for (let i = 0; i < nr.length; i++) { _noReflVis[i] = nr[i].visible; nr[i].visible = false; }
+  W.water.visible = false; ctx.hand.visible = false; if (ctx.rod) ctx.rod.visible = false;
+  try {
+    renderer.clippingPlanes = clipArr; renderer.setRenderTarget(ctx.reflRT); renderer.render(scene, rc);
+  } finally {
+    renderer.setRenderTarget(null); renderer.clippingPlanes = [];
+    W.water.visible = wv; ctx.hand.visible = hv; if (ctx.rod) ctx.rod.visible = rv;
+    for (let i = 0; i < nr.length; i++) nr[i].visible = _noReflVis[i];
+  }
 }
 fitView();
 addEventListener('resize', () => { fitView(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); ctx.reflRT.setSize(...reflSize()); });
@@ -164,8 +175,10 @@ function loop(now) {
   W.wind.value = windAt(T, W.cfg.key);
   const hand = ctx.hand;
 
-  if (settings.flow && !ctx.paused && state.mode !== 'sleep') state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
-  paramsAt(state.clock, W.tm);
+  /* 시간 흐름: 잠자는 동안(잠자기 화면이 직접 돌린다)과 꿈속(0:00 에 멈춘다)에는 흐르지 않는다 */
+  if (settings.flow && !ctx.paused && state.mode !== 'sleep' && !dreamOn()) state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
+  /* 꿈속이면 시간대 값 위에 꿈의 하늘색을 덮어쓴다 */
+  paramsAt(state.clock, W.tm); tintDream(W.tm);
   if (Math.floor(T) !== lastSec) { lastSec = Math.floor(T); if (ctx.running) updateCaption(); }
   { const night = isNightClock(state.clock); if (ctx.running && night !== W.wasNight) { W.wasNight = night; startAmbience(W.cfg.ambience, night ? 'night' : 'day'); } }
 
@@ -189,7 +202,8 @@ function loop(now) {
   /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리거나 파라솔을 접고 펴는 동안에는 매 프레임 갱신한다 */
   W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
-  if (W.trunkLid) { const tgt = state.mode === 'trunk' ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
+  /* 트렁크 뚜껑: 트렁크 창이 열린 동안, 또는 꿈속에서 총을 꺼낼 때 W.trunkT 동안 열린다 */
+  if (W.trunkLid) { W.trunkT = Math.max(0, (W.trunkT || 0) - dt); const tgt = state.mode === 'trunk' || W.trunkT > 0 ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 80° 까지 열렸다가 바로 닫힌다 */
   if (W.coolerLid) { W.coolerT = Math.max(0, (W.coolerT || 0) - dt); const tgt = W.coolerT > 0 ? -1.4 : 0; W.coolerLid.rotation.x += (tgt - W.coolerLid.rotation.x) * Math.min(1, dt * 6); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
@@ -203,6 +217,8 @@ function loop(now) {
   updateSnowman(ctx.running && !ctx.paused ? dt : 0);
   /* 해변 파라솔·랜턴 (멈춘 동안에는 움직이지 않는다) */
   updateBeach(ctx.paused ? 0 : dt);
+  /* 꿈: 운석·총의 반동·번쩍임·남은 시간 (멈춘 동안·메뉴에서는 dt 0) */
+  updateDream(ctx.running && !ctx.paused ? dt : 0);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }
@@ -248,13 +264,13 @@ function loop(now) {
   }
 
   roastLv = burnLv = 0;
-  /* ── 손에 든 것 (장작을 패는 동안에는 손을 숨기므로 건너뛴다) ── */
+  /* ── 손에 든 것 (장작을 패는 동안에는 손을 숨기므로 건너뛴다). 꿈의 총은 dream.js 가 반동을 맡는다 ── */
   if (W.item && ctx.running && state.mode !== 'chop') {
     const type = state.item, ud = W.item.userData;
     if (type === 'sparkler') {
       if (ud.lit && !ctx.paused) { burnSparkler(W, ud, dt); if (ud.amount === 0) { ud.setLit(false); itemEmptied(); } }
     } else if (type === 'marsh') updateMarsh(W, ud, dt);
-    else {
+    else if (type !== 'gun') {
       if (anim.sipT !== null) {
         const atMouth = anim.holding && anim.sipT >= 0.5 && ud.amount > 0 && !ctx.paused;
         if (atMouth) { anim.sipT = 0.5; anim.holdT += dt; } else anim.sipT += dt / 1.7;

@@ -921,6 +921,23 @@ export function makeItem(type) {
     };
     g.userData.setLit = on => { g.userData.lit = on; tip.visible = on; if (!on) { glow.material.opacity = 0; decal.visible = false; } };
     stick.add(emitter); g.userData.setAmount(1); return g;
+  } else if (type === 'gun') {
+    /* 꿈속의 총 (dream.js): 원점 = 손잡이를 쥐는 자리, 총구는 −z. 짙은 강철 몸통·탄창에 나무 손잡이. 길이 약 25cm.
+       userData.flash: 쏠 때 총구에서 번쩍이는 빛 — dream.js 가 반동과 함께 밝기를 조절한다. 줄어드는 양이 없어 setAmount 는 비워 둔다 */
+    const steel = smoothM(0x2b2d31, { metalness: 0.8, roughness: 0.35 }), grip = smoothM(0x6a4128, { roughness: 0.7 });
+    const box = (w, h, d, m, x, y, z, rx) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); b.rotation.x = rx || 0; g.add(b); return b; };
+    const cyl = (r0, r1, l, m, y, z) => { const c = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, l, 12), m); c.rotation.x = Math.PI / 2; c.position.set(0, y, z); g.add(c); return c; };
+    box(0.026, 0.08, 0.034, grip, 0, -0.035, 0.012, -0.3);     // 손잡이
+    box(0.028, 0.034, 0.1, steel, 0, 0.02, -0.035);            // 몸통
+    cyl(0.019, 0.019, 0.042, steel, 0.02, -0.03);              // 탄창
+    cyl(0.0075, 0.0085, 0.13, steel, 0.028, -0.145);           // 총신
+    box(0.004, 0.009, 0.006, steel, 0, 0.04, -0.205);          // 가늠쇠
+    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.0025, 6, 14, Math.PI), steel);
+    guard.position.set(0, 0.003, -0.02); guard.rotation.set(0, Math.PI / 2, Math.PI); g.add(guard);
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex, color: 0xffd27a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    flash.scale.setScalar(0.09); flash.position.set(0, 0.028, -0.225); g.add(flash);
+    emitter.position.set(0, 0.028, -0.215);
+    g.userData.flash = flash; g.userData.setAmount = () => {};
   } else {
     const paper = smoothM(0xf4f1ea, { roughness: 0.9 });
     const cig = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.07, 12), paper); cig.rotation.z = Math.PI / 2; g.add(cig);

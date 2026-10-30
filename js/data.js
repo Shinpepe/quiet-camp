@@ -18,6 +18,8 @@ export const ICON = {
   rod:      svg('<path d="M4 20L19 4"/><path d="M19 4c1.6 3.5 1.6 7.5.4 11"/><circle cx="19.4" cy="16.6" r="1.3"/><circle cx="7.2" cy="15.2" r="1.7"/>'),
   /* 마시멜로 꼬치: 비스듬한 꼬치 끝에 꿰인 둥근 마시멜로 */
   marsh:    svg('<path d="M3 21L20.3 3.7"/><rect x="13.4" y="4.5" width="6.4" height="5.8" rx="2" transform="rotate(-45 16.6 7.4)"/>'),
+  /* 총: 옆에서 본 리볼버 — 위로 긴 총신, 아래로 비스듬한 손잡이, 방아쇠 */
+  gun:      svg('<path d="M3 7h17v4h-9l-1 3H8l-1 6H3.5l1.5-9H3z"/><path d="M10 11c0 1.6.8 2.6 2.2 2.6"/>'),
 };
 
 /* haze: 장소별 안개 배율. 시간대의 fogDen 에 곱한다 — 해변은 바다 습기로 조금 더, 설산은 맑은 고산 공기라 조금 덜
@@ -57,6 +59,8 @@ export const ITEMS = {
   sparkler: { name: '스파클라', ic: ICON.sparkler, act: '불붙이기', hold: false, ds: '어둠 속에서 불티가 사방으로 튄다' },
   /* trunk: false — 트렁크 목록에 나오지 않는다 (아이스박스에서 꺼낸다) */
   marsh:    { name: '마시멜로 꼬치', ic: ICON.marsh, act: '먹기', hold: true, ds: '모닥불에 노릇하게 굽는다', trunk: false },
+  /* 꿈속의 트렁크에서만 나온다 (dream.js) */
+  gun:      { name: '총', ic: ICON.gun, act: '쏘기', hold: false, ds: '꿈속에서만 보이는 총', trunk: false },
 };
 
 /* 캠핑 메모(조수석 담요 위의 줄노트)에 적힌 할 일
@@ -72,6 +76,7 @@ export const MEMO = [
   { key: 'fish',  text: '부두 끝에서 낚시하기', only: ['lake'] },
   { key: 'snowman', text: '눈덩이를 굴려 눈사람 만들기', only: ['snow'] },
   { key: 'stars', text: '바닷가 돗자리에 누워 별 보기', only: ['beach'] },
+  { key: 'meteor', text: '밤하늘에 별똥별보고 소원빌기' },
   { key: 'sleep', text: '텐트 안 침낭에서 하룻밤 자기' },
 ];
 /* 이 장소의 메모에 적힐 줄 */
@@ -164,3 +169,34 @@ export const GEAR = [
 ];
 /* 처음 시작할 때의 색 (저장된 값이 목록에 없을 때도 이 값으로 돌아간다) */
 export const GEAR_DEFAULT = { car: 'burgundy', tent: 'orange' };
+
+/* 꿈 (dream.js)
+   chance: 첫 꿈 뒤로 잠들 때마다 꿈을 꿀 확률 (첫 꿈은 처음 텐트에서 잠들 때 반드시)
+   dur: 운석 막기 시간(초) · endWait: 끝난 뒤 깨어나기 시작할 때까지(초)
+   look: 총을 든 동안 시선 [처음 올려다보는 각도, 정면에서 좌우 범위, 아래 한계, 위 한계] (rad). 정면은 길이 뻗어 나가는 방향 (road.js roadYaw)
+   every: 운석이 떨어지는 간격 [처음, 끝](초) · speed: 떨어지는 빠르기(m/s, 끝으로 갈수록 1.5배까지)
+   spread: 정면에서 좌우로 퍼져 떨어지는 범위(rad) · size: 운석 머리 반지름(m) · trail: 꼬리 길이(m)
+   floor: 이 높이 아래로 내려오면 스스로 사그라든다(m) — 실패 없이 그냥 사라진다
+   aim: 조준 허용 각도 [PC, 모바일](rad) · cool: 쏘는 간격(초) · pool: 동시에 떠 있을 수 있는 운석 수 */
+export const DREAM = {
+  chance: 0.2, dur: 60, endWait: 2.8, look: [0.55, 1.25, 0.12, 1.3],
+  every: [1.6, 0.6], speed: [14, 20], spread: 0.75, size: 1.6, trail: 26, floor: 14,
+  aim: [0.035, 0.07], cool: 0.28, pool: 14,
+};
+
+/* 차 뒤쪽 길 (road.js) — 차가 이 길을 따라 들어와 캠프 앞에 멈춘 모습
+   pts: 길 중심이 지나는 점 [x, z]. 차 밑(z 5)에서 시작해 뒤쪽(+z)으로 S자로 휘어 나간다 (모든 장소 같은 모양)
+   hw: 길 반폭(m). 바퀴 자국 두 줄은 반폭의 절반 자리 (반폭 1.6 → 1.6m 간격, 실제 차 폭)
+   flat: 길 가장자리(+0.6m)에서 지형이 원래 높이로 돌아가는 거리(m)
+   clear: 나무·바위·덤불이 길 가장자리에서 비키는 거리(m) · clearStart: 차 바로 뒤 20m 는 이만큼 더 비운다 (꿈속에서 하늘을 올려다보는 자리)
+   rut: 바퀴 자국 진하기 0..1
+   tone: 장소별 색 — base 바탕 · rut 바퀴 자국 · mid 가운데 둔덕(숲 = 풀, 해변 = 덜 다져진 모래, 설산 = 덜 밟힌 눈) · midK 둔덕 세기 */
+export const ROAD = {
+  pts: [[0, 5], [0, 12], [-1.2, 22], [-4.5, 34], [-5, 48], [-1, 62], [6, 78], [11, 96], [10, 116], [4, 136], [-2, 156]],
+  hw: 1.6, flat: 5.4, clear: 3, clearStart: 6, rut: 0.8,
+  tone: {
+    lake:  { base: 0x7a6446, rut: 0x54452f, mid: 0x5f8a3e, midK: 1 },
+    beach: { base: 0xd2bc8a, rut: 0xb39b6c, mid: 0xe2d3a8, midK: 0.7 },
+    snow:  { base: 0xdde3ec, rut: 0xa6b2c4, mid: 0xf2f5fa, midK: 0.8 },
+  },
+};

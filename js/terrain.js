@@ -55,7 +55,8 @@ function mountainH(x, z, cfg) {
   const sec = cfg.key === 'snow' ? 0.28 * ridge(x * mt.f * 3.1 + mt.seed + 9, z * mt.f * 3.1 + mt.seed) : 0.14 * (fbm(x * 0.004 + mt.seed, z * 0.004, 3) - 0.5);
   return hills + (Math.pow(r, mt.p) * (1 + sec) * cfg.mtAmp * far + cfg.mtBase * far) * m;
 }
-export function terrainH(x, z, cfg) {
+/* 길을 반영하기 전의 지형 높이. road.js 가 길 높이를 정할 때 이것을 읽는다 */
+export function terrainBase(x, z, cfg) {
   const d = Math.hypot(x, z);
   let h = localBase(x, z, cfg) + localNoise(x, z, cfg) * (1 - smooth(150, 230, d)) + mountainH(x, z, cfg);
   if (cfg.water) {
@@ -69,6 +70,32 @@ export function terrainH(x, z, cfg) {
     }
   }
   return h;
+}
+
+/* ── 차 뒤쪽 길: road.js 가 씬마다 굽는 1m 격자 ──
+   칸마다 [길까지 거리 d, 길 높이 h, 길을 따라간 거리 s]. terrainH 는 길 가장자리(+0.6m) 안쪽을 길 높이로 평평하게 하고,
+   그 바깥 flat m 에서 원래 지형으로 되돌린다. 격자 밖이거나 다른 장소의 격자면 손대지 않는다.
+   terrainH 는 수십만 번 불리므로 경로와의 거리를 매번 재지 않고 이 표를 쌍선형으로 읽기만 한다 */
+let RG = null;
+const RR = { d: 0, h: 0, s: 0 };
+export function setRoadGrid(g) { RG = g; }
+/* (x, z) 의 길 정보. 격자 밖이면 null. 돌려주는 객체는 재사용되므로 받은 즉시 읽는다 */
+export function roadAt(x, z) {
+  const g = RG; if (!g) return null;
+  const fx = (x - g.x0) / g.cell, fz = (z - g.z0) / g.cell;
+  if (!(fx >= 0 && fz >= 0 && fx < g.nx - 1 && fz < g.nz - 1)) return null;
+  const i = fx | 0, j = fz | 0, u = fx - i, v = fz - j, k = j * g.nx + i, n = g.nx;
+  const w0 = (1 - u) * (1 - v), w1 = u * (1 - v), w2 = (1 - u) * v, w3 = u * v;
+  RR.d = g.d[k] * w0 + g.d[k + 1] * w1 + g.d[k + n] * w2 + g.d[k + n + 1] * w3;
+  RR.h = g.h[k] * w0 + g.h[k + 1] * w1 + g.h[k + n] * w2 + g.h[k + n + 1] * w3;
+  RR.s = g.s[k] * w0 + g.s[k + 1] * w1 + g.s[k + n] * w2 + g.s[k + n + 1] * w3;
+  return RR;
+}
+export function terrainH(x, z, cfg) {
+  const h = terrainBase(x, z, cfg);
+  if (!RG || RG.key !== cfg.key || !roadAt(x, z)) return h;
+  const k = 1 - smooth(RG.hw + 0.6, RG.hw + RG.flat, RR.d);
+  return k > 0 ? h + (RR.h - h) * k : h;
 }
 export function slopeUp(x, z, cfg) { const h = terrainH(x, z, cfg); const gx = terrainH(x + 0.7, z, cfg) - h, gz = terrainH(x, z + 0.7, cfg) - h; return 1 / Math.sqrt(1 + (gx / 0.7) ** 2 + (gz / 0.7) ** 2); }
 

@@ -42,8 +42,10 @@ export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: nul
          물고기 도감(journal.js)이 이 값을 보여 준다.
          예전 저장본은 최고 크기 숫자만 있었다 → 잡은 수 1, 처음 잡은 곳은 모름(null)으로 옮긴다
    chopBest: 장작 패기 최고 연속
-   memoRead: 캠핑 메모에서 읽은 할 일 이름표 (data.js MEMO 의 key). 지금 장소의 메모에 여기 없는 줄이 있으면 안내를 띄운다 */
-export const records = { fish: {}, chopBest: 0, memoRead: [] };
+   memoRead: 캠핑 메모에서 읽은 할 일 이름표 (data.js MEMO 의 key). 지금 장소의 메모에 여기 없는 줄이 있으면 안내를 띄운다
+   dreams: 꿈을 꾼 횟수 (0 이면 다음에 텐트에서 잠들 때 반드시 꿈을 꾼다 — dream.js pickDream)
+   dreamBest: 꿈속에서 막아 낸 운석 최고 기록 */
+export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0 };
 if (saved.records && typeof saved.records === 'object') {
   const f = saved.records.fish, okSize = v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 500;
   const okClock = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1;
@@ -59,6 +61,10 @@ if (saved.records && typeof saved.records === 'object') {
   /* 읽은 이름표: 글자만, 중복 없이 */
   const mr = saved.records.memoRead;
   if (Array.isArray(mr)) records.memoRead = [...new Set(mr.filter(k => typeof k === 'string' && k.length > 0 && k.length < 40))].slice(0, 500);
+  /* 꿈: 0 이상 정수만 */
+  const okInt = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1e6;
+  if (okInt(saved.records.dreams)) records.dreams = Math.floor(saved.records.dreams);
+  if (okInt(saved.records.dreamBest)) records.dreamBest = Math.floor(saved.records.dreamBest);
 }
 
 /* 슬라이더처럼 연달아 바뀌는 값은 300ms 모아서 한 번에 쓴다. 페이지를 닫을 때는 바로 기록 */
