@@ -33,9 +33,28 @@ const _s = new THREE.Color();
 const lum = c => 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
 function hueTint(out, c, k) { _s.copy(c); const L = Math.max(lum(_s), 1e-3); _s.multiplyScalar(1 / L); _s.r = Math.min(_s.r, 1.8); _s.g = Math.min(_s.g, 1.8); _s.b = Math.min(_s.b, 1.8); out.set(1 + (_s.r - 1) * k, 1 + (_s.g - 1) * k, 1 + (_s.b - 1) * k); }
 
+/* GTAO 합성 셰이더: 원래 합성(AO 를 화면에 곱하기)에 깊이 비교를 더한다.
+   GTAO 는 화면과 따로 장면을 다시 그린다 — 흔들림 없는 노멀 재질로, noAO 물체(흔들리는 나무·덤불·갈대 등)는 숨기고.
+   그래서 그대로 합성하면 숨긴 나무 위에 뒤쪽 물체의 AO 가 비치고, 바람에 흔들린 풀 옆에 멈춘 자리의 풀 AO 가 남는다.
+   화면 깊이(zs)와 GTAO 가 본 깊이(za)가 거리의 1.5~5% 이상 다르면 GTAO 가 다른 면을 본 것이므로 그 픽셀에는 AO 를 칠하지 않는다.
+   풀 뿌리·텐트 모서리처럼 두 깊이가 같은 곳의 AO 는 그대로 남는다 */
+const BLEND_FS = `#include <packing>
+  uniform float intensity,cameraNear,cameraFar;uniform sampler2D tDiffuse,tSceneDepth,tAODepth;varying vec2 vUv;
+  void main(){
+    vec4 texel=texture2D(tDiffuse,vUv);
+    float zs=-perspectiveDepthToViewZ(texture2D(tSceneDepth,vUv).x,cameraNear,cameraFar);
+    float za=-perspectiveDepthToViewZ(texture2D(tAODepth,vUv).x,cameraNear,cameraFar);
+    float keep=1.0-smoothstep(0.015,0.05,abs(za-zs)/max(zs,1e-3));
+    gl_FragColor=vec4(mix(vec3(1.0),texel.rgb,intensity*keep),texel.a);}`;
+
 export function createPost(renderer, camera) {
-  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: FINE ? 4 : 0 });
+  /* 화면 깊이를 GTAO 합성에서 읽을 수 있게 깊이 텍스처를 붙인다 (MSAA 면 three 가 깊이도 함께 풀어 준다) */
+  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, {
+    type: THREE.HalfFloatType, samples: FINE ? 4 : 0, depthTexture: new THREE.DepthTexture(innerWidth, innerHeight),
+  });
   const composer = new EffectComposer(renderer, rt);
+  /* 컴포저는 rt 를 복제해 두 번째 버퍼를 만든다. 깊이 텍스처를 같이 쓰지 않도록 따로 준다 */
+  composer.renderTarget2.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight);
   /* 직접 만든 RT를 넘기면 컴포저가 setSize 를 부르지 않아 DPR 이 반영되지 않는다 → 명시적으로 한 번 */
   composer.setSize(innerWidth, innerHeight);
   const dummy = new THREE.Scene();
@@ -47,6 +66,23 @@ export function createPost(renderer, camera) {
   gtao.blendIntensity = 0.6; gtao.enabled = settings.ao;
   if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
   if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
+  /* GTAO 합성에 깊이 비교를 넣는다 (BLEND_FS 설명 참고).
+     three r169 GTAOPass 의 내부 이름(blendMaterial · depthTexture)에 기대므로, three 를 올리면 여기를 다시 확인한다 */
+  if (gtao.blendMaterial) {
+    const bm = gtao.blendMaterial;
+    Object.assign(bm.uniforms, {
+      tSceneDepth: { value: null }, tAODepth: { value: null },
+      cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
+    });
+    bm.fragmentShader = BLEND_FS; bm.needsUpdate = true;
+    /* 이번 프레임의 화면 깊이 = GTAO 가 받는 readBuffer(RenderPass 가 장면을 그린 버퍼)의 깊이 */
+    const render = gtao.render.bind(gtao);
+    gtao.render = (r, wb, rb, dt, mask) => {
+      bm.uniforms.tSceneDepth.value = rb.depthTexture; bm.uniforms.tAODepth.value = gtao.depthTexture;
+      bm.uniforms.cameraNear.value = camera.near; bm.uniforms.cameraFar.value = camera.far;
+      render(r, wb, rb, dt, mask);
+    };
+  }
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.4, 1.25);
   const output = new OutputPass();
   const pr = renderer.getPixelRatio();
