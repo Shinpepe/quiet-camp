@@ -22,19 +22,52 @@
 <canvas id="c"></canvas>
 <div id="fade"></div>
 <div id="loading" class="on"><div class="ring"></div><div>캠핑을 준비하는 중</div></div>
-<div id="menu">
+<div id="home">
   <div class="side">
     <div class="eyebrow">QUIET CAMP</div>
     <h1>고요 속의 캠핑</h1>
     <div class="tag">원하는 곳에서 원하는 시간에.<br>차에서 내려, 짐을 꺼내고, 잠시 쉬었다 가세요.</div>
-    <div class="sec">장소</div>
-    <div id="bgList"></div>
-    <div class="sec">시작 시각</div>
-    <div class="chips" id="timeList"></div>
+    <div class="homeStep" data-step="start">
+      <button class="homeOpt" id="hSolo"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20L12 4l9 16z"/><path d="M9 20l3-5 3 5"/></svg></span><span><b>1인 캠핑</b><small>혼자 조용히 쉬었다 가기</small></span></button>
+      <button class="homeOpt" id="hMulti"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2c3 .1 5 2.6 5 5.8"/></svg></span><span><b>멀티 캠핑</b><small>친구들과 함께 캠핑하기</small></span></button>
+    </div>
+    <div class="homeStep" data-step="multi">
+      <button class="homeOpt" id="hHost"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20L11 6l8 14z"/><path d="M19 2.5v6M16 5.5h6"/></svg></span><span><b>캠핑장 초대하기</b><small>초대 코드를 만들어 부른다</small></span></button>
+      <button class="homeOpt" id="hJoin"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h11"/><path d="M10 8l4 4-4 4"/><path d="M17 4h3v16h-3"/></svg></span><span><b>캠핑장 놀러가기</b><small>받은 코드로 들어간다</small></span></button>
+      <button class="homeBack" data-back="start">← 뒤로</button>
+    </div>
+    <div class="homeStep" data-step="join">
+      <div class="sec">초대 코드</div>
+      <input class="codeIn" id="hCode" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="AB3K9" aria-label="초대 코드">
+      <div class="homeErr" id="hErr"></div>
+      <button class="go" id="hEnter">놀러가기 <span>Enter ↵</span></button>
+      <button class="homeBack" data-back="multi">← 뒤로</button>
+    </div>
+  </div>
+  <div class="preview-tag">LIVE PREVIEW</div>
+</div>
+<div id="menu" class="hidden">
+  <div class="side">
+    <button class="homeBack" id="toHome">← 처음으로</button>
+    <div class="eyebrow">QUIET CAMP</div>
+    <h1>고요 속의 캠핑</h1>
+    <div class="tag">원하는 곳에서 원하는 시간에.<br>차에서 내려, 짐을 꺼내고, 잠시 쉬었다 가세요.</div>
+    <div class="roomBox" id="roomBox">
+      <div class="roomLab" id="roomLab">캠핑장 초대 코드</div>
+      <div class="roomCode" id="roomCode"></div>
+      <div class="roomBtns"><button class="b" id="copyCode">코드 복사</button><button class="b" id="copyLink">링크 복사</button></div>
+      <div class="roomNote" id="roomNote"></div>
+    </div>
+    <div class="guestNote" id="guestNote">장소/시간 등은 방장이 정한다.</div>
+    <div class="sec hostOnly">장소</div>
+    <div id="bgList" class="hostOnly"></div>
+    <div class="sec hostOnly">시작 시각</div>
+    <div class="chips hostOnly" id="timeList"></div>
     <div class="sec">캠핑 장비</div>
     <div class="gear">
-      <div class="gearRow"><span>자동차</span><div class="sws" id="carList"></div><span class="gn" id="carListName"></span></div>
-      <div class="gearRow"><span>텐트</span><div class="sws" id="tentList"></div><span class="gn" id="tentListName"></span></div>
+      <div class="gearRow" id="nameRow"><span>이름</span><input class="nameIn" id="nameInput" maxlength="12" autocomplete="off" spellcheck="false" placeholder="캠퍼" aria-label="이름"></div>
+      <div class="gearRow hostOnly"><span>자동차</span><div class="sws" id="carList"></div><span class="gn" id="carListName"></span></div>
+      <div class="gearRow hostOnly"><span>텐트</span><div class="sws" id="tentList"></div><span class="gn" id="tentListName"></span></div>
       <div class="gearRow"><span>재킷</span><div class="sws" id="jacketList"></div><span class="gn" id="jacketListName"></span></div>
     </div>
     <button class="go" id="start">떠나기 <span>Enter ↵</span></button>
@@ -84,6 +117,7 @@
   </div></div>
   <div class="modal" id="pause"><div class="box">
     <h2>잠시 멈춤</h2><div class="sub" id="pauseSub"></div>
+    <div class="roomLine" id="pauseRoom">초대 코드 <b id="pauseCode"></b><button class="b" id="pauseCopy">코드 복사</button></div>
     <div class="settings" style="margin-bottom:6px">
       <span>소리</span><input type="range" id="vol2" min="0" max="1" step="0.05" value="0.5"><span id="volV2">50%</span>
       <span>시선 감도</span><input type="range" id="sens2" min="0.3" max="2" step="0.1" value="1"><span id="sensV2">1.0</span>
