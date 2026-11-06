@@ -193,7 +193,7 @@ body.touch .go span,body.touch .keys,body.touch #legend{display:none}
 /* 친구: 방장이 정하는 칸은 흐리게 잠근다. 떠나기 버튼 자리는 기다림 안내 */
 .guestNote{display:none;font-size:11.5px;color:var(--mute);margin:4px 0 0;line-height:1.6}
 #menu.guest .guestNote{display:block}
-#menu.guest .hostOnly{opacity:.4;pointer-events:none}
+#menu.guest .hostOnly,#pause.guest .hostOnly{opacity:.4;pointer-events:none}
 .go.wait{opacity:.55;pointer-events:none;font-size:14px;letter-spacing:.06em}
 /* 일시정지 창의 초대 코드 줄 */
 .roomLine{display:flex;align-items:center;justify-content:center;gap:10px;margin:-14px 0 18px;font-size:12px;color:var(--mute)}
