@@ -15,6 +15,7 @@ import { buildSnowman } from './snowman.js';
 import { buildBeach, toggleParasol, parasolOpen, onMat } from './beach.js';
 import { prepareRoad, makeRoad } from './road.js';
 import { buildDream, dreamOn } from './dream.js';
+import { attachAvatar } from './avatar.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -26,8 +27,8 @@ const streakTex = canvasTex(128, 16, (g, w, h) => {
 });
 const _fc = new THREE.Color(), _ag = new THREE.Color(0x2fae70);
 
-/* 카메라 아래(손, 낚싯대)는 씬이 바뀌어도 살아남는다 */
-const underCamera = o => { for (let p = o; p; p = p.parent) if (p === ctx.camera) return true; return false; };
+/* 카메라 아래(손, 낚싯대)와 씬을 옮겨 다니는 것(내 아바타 — userData.persist)은 씬이 바뀌어도 살아남는다 */
+const persists = o => { for (let p = o; p; p = p.parent) if (p === ctx.camera || p.userData.persist) return true; return false; };
 
 function disposeScene() {
   const scene = ctx.scene, W = ctx.W; if (!scene) return;
@@ -36,7 +37,7 @@ function disposeScene() {
   if (W.heightTex) { W.heightTex.dispose(); W.heightTex = null; }
   if (W.shoreTex) { W.shoreTex.dispose(); W.shoreTex = null; }
   scene.traverse(o => {
-    if (underCamera(o)) return;
+    if (persists(o)) return;
     /* 라이트의 그림자맵과 InstancedMesh 의 인스턴스 버퍼는 dispose 를 불러야 GPU 에서 풀린다 */
     if ((o.isLight || o.isInstancedMesh) && o.dispose) o.dispose();
     /* userData.shared: 여러 씬에 걸쳐 재사용하는 자원(새 지오메트리·재질)은 정리하지 않는다 */
@@ -264,6 +265,7 @@ export function buildScene(bgKey) {
     dome: null, domeLit: false, domeK: 0,
     wind: { value: 0.4 },
     fireBase: 0, firePop: 0, fireBurst: false, trunkT: 0 };
+  attachAvatar(scene, cfg);
   /* Fog 객체는 셰이더의 USE_FOG 를 켜고 fogColor 를 넘기는 용도. 실제 농도는 util.js 의 FOG 배열이 정한다 */
   scene.fog = new THREE.Fog(cur.fog, 40, 1000);
   ctx.renderer.toneMappingExposure = cur.exposure;

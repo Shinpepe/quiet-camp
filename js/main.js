@@ -14,6 +14,7 @@ import { ROAST } from './data.js';
 import { updateSnowman, snowMoving } from './snowman.js';
 import { updateBeach, parasolMoving } from './beach.js';
 import { updateDream, dreamOn, tintDream } from './dream.js';
+import { updateView, beginView, endView, viewThird } from './view.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -200,7 +201,7 @@ function loop(now) {
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
   /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리거나 파라솔을 접고 펴는 동안에는 매 프레임 갱신한다 */
-  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving() || viewThird()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   /* 트렁크 뚜껑: 트렁크 창이 열린 동안, 또는 꿈속에서 총을 꺼낼 때 W.trunkT 동안 열린다 */
   if (W.trunkLid) { W.trunkT = Math.max(0, (W.trunkT || 0) - dt); const tgt = state.mode === 'trunk' || W.trunkT > 0 ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
@@ -346,8 +347,11 @@ function loop(now) {
   /* 연기·김은 바람을 따라 옆으로 흐른다 */
   const wv = W.wind.value;
   W.steam.update(dt, 0.01 + 0.04 * wv); W.smoke.update(dt, 0.015 + 0.06 * wv); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
+  updateView(dt);
+  const third = beginView(camera);
   renderReflection(scene);
   ctx.post.render();
+  if (third) endView(camera);
 }
 
 /* 루프는 바로 돌리고, 첫 빌드도 buildWithLoading 을 거친다 (로딩 중에 장소를 바꿔도 마지막 요청만 반영).

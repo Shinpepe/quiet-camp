@@ -16,6 +16,7 @@ import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, roll
 import { onMat, resetBeach } from './beach.js';
 import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
 import { onRoad, roadYaw } from './road.js';
+import { toggleView, beginView, endView } from './view.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -97,6 +98,7 @@ export function bindInput() {
     if (e.code === 'Escape' && inModal()) { closeModal(); return; }
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyP') takePhoto();
+    if (e.code === 'KeyV') toggleView();
     if (state.mode === 'trunk' && /^Digit[1-9]$/.test(e.code)) trunkKey(+e.code[5]);
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
@@ -118,6 +120,8 @@ export function bindInput() {
   $('#pause').addEventListener('click', e => { if (e.target === $('#pause')) resume(); });
   $('#pausebtn').style.display = isTouch ? '' : 'none';
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
+  $('#viewbtn').style.display = isTouch ? '' : 'none';
+  $('#viewbtn').onclick = toggleView;
   /* 메뉴로 나가기: 잠자기 페이드·꿈·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
      (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
   $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
@@ -165,6 +169,7 @@ export function bindInput() {
   });
   renderMenu();
 }
+
 /* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만, 돗자리에 누우면 바다 쪽으로,
    꿈속에서 총을 든 동안에는 길이 뻗어 나가는 쪽 하늘로만 */
 function look(dx, dy, s) {
@@ -387,8 +392,12 @@ function renderTrunk() {
 }
 const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 0 1 0 10h-3"/></svg>';
 function pickItem(type) { putBack(); state.item = type; const it = makeItem(type); ctx.hand.add(it); ctx.W.item = it; resetHand(); sfx('pick', type); showToast(josa(ITEMS[type].name, '을', '를') + ' 챙겼다'); }
-/* 손에 든 것을 내려놓는다. 떼어 내기 전에 GPU 자원을 해제한다 */
-export function putBack() { state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; anim.mouth = false; anim.roast = false; anim.roastK = 0; anim.eatT = null; anim.ate = false; }
+/* 손에 든 것을 내려놓는다. 떼어 내기 전에 GPU 자원을 해제한다. 3인칭이면 물건이 아바타 손에 붙어 있으므로 그쪽에서도 떼어 낸다 */
+export function putBack() {
+  const it = ctx.W.item;
+  if (it && it.parent && it.parent !== ctx.hand) { it.removeFromParent(); disposeTree(it); }
+  state.item = null; disposeTree(ctx.hand); ctx.hand.clear(); ctx.W.item = null; anim.sipT = null; anim.holding = false; anim.holdT = 0; anim.mouth = false; anim.roast = false; anim.roastK = 0; anim.eatT = null; anim.ate = false;
+}
 /* 땅에 꽂힌 스파클라를 모두 치운다 (메뉴로 나갈 때, 잠들 때, 같은 씬으로 다시 시작할 때) */
 function clearPlanted() {
   const W = ctx.W; if (!W.planted) return;
@@ -598,9 +607,11 @@ function takePhoto() {
   if (shooting || !ctx.running || ctx.paused || state.mode === 'sleep') return;
   shooting = true;
   const hud = $('#hud'); hud.classList.add('photo'); sfx('shutter');
+  const third = beginView(ctx.camera);
   ctx.post.render();
   const src = canvas(), w = src.width, h = src.height, cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
   g.drawImage(src, 0, 0);
+  if (third) endView(ctx.camera);
   const s = h / 1080, x0 = 48 * s, label = clockLabel(state.clock);
   const grd = g.createLinearGradient(0, h - 190 * s, 0, h); grd.addColorStop(0, 'rgba(0,0,0,0)'); grd.addColorStop(1, 'rgba(0,0,0,.5)'); g.fillStyle = grd; g.fillRect(0, h - 190 * s, w, 190 * s);
   g.textBaseline = 'alphabetic';
@@ -629,9 +640,9 @@ function renderMenu() {
   Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div class="nm">${b.name}</div>`; d.onclick = () => { if (state.bg === b.key) return; sfx('ui'); state.bg = b.key; saveSettings(); renderMenu(); previewRebuild(); }; bl.append(d); });
   const tl = $('#timeList'); tl.innerHTML = '';
   Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { sfx('ui'); state.time = t.key; state.clock = t.clock; saveSettings(); renderMenu(); const W = ctx.W; if (W.tm) { W.fireLit = W.tm.stars > 0.1; W.lanternLit = W.tm.lantern > 0.5; W.tentLampLit = W.tm.tentLamp > 0.5; } if (!ctx.running) menuAmbience(state.bg); }; tl.append(d); });
-  const gear = (id, kind, prop) => {
+  const gear = (id, kind, prop, def = kind) => {
     const box = $('#' + id); if (!box) return; box.innerHTML = '';
-    const cur = GEAR.find(g => g.key === state[prop]) || GEAR.find(g => g.key === GEAR_DEFAULT[kind]);
+    const cur = GEAR.find(g => g.key === state[prop]) || GEAR.find(g => g.key === GEAR_DEFAULT[def]);
     GEAR.forEach(g => {
       const b = document.createElement('button'); b.className = 'sw' + (g === cur ? ' sel' : '');
       b.style.setProperty('--c', '#' + g[kind].toString(16).padStart(6, '0')); b.title = g.name; b.setAttribute('aria-label', g.name);
@@ -641,6 +652,8 @@ function renderMenu() {
     const lab = $('#' + id + 'Name'); if (lab) lab.textContent = cur.name;
   };
   gear('carList', 'car', 'carColor'); gear('tentList', 'tent', 'tentColor');
+  /* 재킷: 텐트와 같은 천 색 목록에서 따로 고른다 */
+  gear('jacketList', 'tent', 'jacketColor', 'jacket');
 }
 let buildGen = 0, doneGen = 0, builtReflect = false;
 export function buildWithLoading(after) {

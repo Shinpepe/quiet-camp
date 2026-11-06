@@ -168,7 +168,7 @@ export const GEAR = [
   { key: 'black',    name: '블랙', car: 0x1c1d20, tent: 0x2a2b2d },
 ];
 /* 처음 시작할 때의 색 (저장된 값이 목록에 없을 때도 이 값으로 돌아간다) */
-export const GEAR_DEFAULT = { car: 'burgundy', tent: 'orange' };
+export const GEAR_DEFAULT = { car: 'burgundy', tent: 'orange',  jacket: 'forest'  };
 
 /* 꿈 (dream.js)
    chance: 첫 꿈 뒤로 잠들 때마다 꿈을 꿀 확률 (첫 꿈은 처음 텐트에서 잠들 때 반드시)
