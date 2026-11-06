@@ -92,6 +92,9 @@ h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:.12em;
 #pausebtn{position:absolute;top:calc(22px + var(--sat));right:calc(26px + var(--sar));pointer-events:auto;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--glass);color:var(--ink);cursor:pointer;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:0;transition:.2s}
 #pausebtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 #pausebtn:hover{border-color:var(--accent);color:var(--accent)}
+#viewbtn{position:absolute;top:calc(22px + var(--sat));right:calc(76px + var(--sar));pointer-events:auto;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--glass);color:var(--ink);cursor:pointer;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:0;transition:.2s}
+#viewbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+#viewbtn:hover{border-color:var(--accent);color:var(--accent)}
 #lockmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:var(--serif);font-size:15px;letter-spacing:.25em;background:rgba(0,0,0,.3);transition:opacity .3s;opacity:0;text-align:center;padding:0 24px}
 #lockmsg small{font-family:var(--sans);font-size:11px;letter-spacing:.2em;color:var(--mute)}
 /* 소식: 화면 위쪽 가운데의 작은 유리 알약. 밝은 하늘 위에서도 읽히게 배경을 깐다 */
