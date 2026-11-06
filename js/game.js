@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { ctx, state, settings, saveSettings, DAY_LEN, records } from './state.js';
+import { ctx, state, settings, saveSettings, DAY_LEN, records, session } from './state.js';
+import { bindHome, showHome, inviteLink } from './home.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM } from './data.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
@@ -74,6 +75,33 @@ function lock() {
 const timingMode = () => state.mode === 'chop' || fishActive();
 function timingPress() { if (cam.t < 1 || ctx.paused) return; if (state.mode === 'chop') chopPress(); else if (fishActive()) fishPress(); }
 
+/* 복사: 버튼 글자를 잠깐 "복사했다"로. 클립보드를 쓸 수 없으면 직접 복사할 수 있게 띄운다 */
+function copyText(btn, text) {
+  if (!text) return;
+  const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+  const done = () => { sfx('ui'); btn.textContent = '복사했다'; clearTimeout(btn._t); btn._t = setTimeout(() => { btn.textContent = label; }, 1400); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => prompt('복사해서 보내 주자', text));
+  else prompt('복사해서 보내 주자', text);
+}
+/* 메뉴를 지금 캠핑 방식(session)에 맞춰 연다.
+   1인·방장은 모든 칸을 고르고, 친구(guest)는 이름·재킷만 고른다 (장소·시각·차·텐트는 흐리게 잠김, 떠나기 대신 기다림 안내).
+   방장·친구는 맨 위에 캠핑장 칸(초대 코드)과 이름 줄이 나온다 */
+export function openMenu() {
+  const m = $('#menu'), multi = session.mode !== 'solo', guest = session.mode === 'guest';
+  m.classList.toggle('guest', guest);
+  $('#roomBox').style.display = multi ? '' : 'none';
+  $('#nameRow').style.display = multi ? '' : 'none';
+  if (multi) {
+    $('#roomLab').textContent = guest ? '놀러 갈 캠핑장' : '캠핑장 초대 코드';
+    $('#roomCode').textContent = session.code;
+    $('#copyLink').style.display = guest ? 'none' : '';
+    $('#roomNote').textContent = guest ? '연결되면 초대한 사람의 캠핑장이 보인다' : '친구에게 코드나 링크를 보내자.';
+  }
+  const go = $('#start'); go.classList.toggle('wait', guest);
+  go.firstChild.textContent = guest ? '출발하기를 기다리는 중 ' : '떠나기 ';
+  renderMenu(); m.classList.remove('hidden');
+}
+
 export function bindInput() {
   /* 모바일이면 body 에 touch 를 단다 → style.css 가 키 표시(E·숫자)를 숨긴다 */
   document.body.classList.toggle('touch', isTouch);
@@ -92,7 +120,7 @@ export function bindInput() {
     keys[e.code] = true;
     if (e.repeat) return;
     /* Enter 의 기본 동작(포커스된 버튼의 click)을 막아 두 번 실행되지 않게 한다 */
-    if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) { e.preventDefault(); startGame(); } return; }
+    if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden') && session.mode !== 'guest') { e.preventDefault(); startGame(); } return; }
     if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
     if (e.code === 'Escape' && inModal()) { closeModal(); return; }
@@ -124,7 +152,7 @@ export function bindInput() {
   $('#viewbtn').onclick = toggleView;
   /* 메뉴로 나가기: 잠자기 페이드·꿈·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
      (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); $('#menu').classList.remove('hidden'); ctx.hand.visible = false; hideJoy(); };
+  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); if (session.mode === 'guest') showHome('multi'); else openMenu(); ctx.hand.visible = false; hideJoy(); };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다.
      옆 버튼(mSip)은 누르는 순간 동작하고, 그 결과 숨으면 행동 버튼(mAct)이 그 자리로 밀려온다.
@@ -167,7 +195,17 @@ export function bindInput() {
       setTimeout(() => { compileReflection(); builtReflect = true; $('#loading').classList.remove('on'); }, 40);
     }
   });
+  /* 홈·메뉴의 캠핑장 칸: 처음으로, 코드·링크 복사, 이름 */
+  $('#toHome').onclick = () => { sfx('ui'); showHome(session.mode === 'solo' ? 'start' : 'multi'); };
+  $('#copyCode').onclick = () => copyText($('#copyCode'), session.code);
+  $('#copyLink').onclick = () => copyText($('#copyLink'), inviteLink(session.code));
+  $('#pauseCopy').onclick = () => copyText($('#pauseCopy'), session.code);
+  const ni = $('#nameInput'); ni.value = state.name;
+  ni.oninput = () => { state.name = ni.value.trim().slice(0, 12); saveSettings(); };
+  /* 이름을 쓰는 동안 글자가 게임 키(E·V·Enter)로 넘어가지 않게 */
+  ni.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') ni.blur(); });
   renderMenu();
+  bindHome();
 }
 
 /* 시선. 장작을 패는 동안에는 그루터기 주변으로, 낚시하는 동안에는 물 쪽 180° · 아래 약 20° 까지만, 돗자리에 누우면 바다 쪽으로,
@@ -596,7 +634,12 @@ export function updatePrompt() {
   if (clickLab) parts.push(`<kbd class="a">클릭</kbd>${clickLab}`);
   if (parts.length) { p.innerHTML = parts.join('<span style="opacity:.5;margin:0 .6em">·</span>'); p.classList.add('on'); } else p.classList.remove('on');
 }
-function showPause() { if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock); }
+function showPause() {
+  if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock);
+  $('#pauseRoom').style.display = session.mode === 'solo' ? 'none' : '';
+  $('#pauseCode').textContent = session.code || '';
+  $('#toMenu').textContent = session.mode === 'guest' ? '캠핑장 나가기' : '장소 바꾸기';
+}
 function hidePause() { if (ctx.paused) sfx('uiClose'); ctx.paused = false; $('#pause').classList.remove('on'); }
 
 /* ── 사진: 지금 화면에 장소·시각 캡션을 얹어 저장한다.
@@ -679,6 +722,8 @@ function resetSceneForStart() {
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
 export function startGame() {
+  /* 친구는 방장이 출발할 때 함께 들어간다 (net.js 에서 이어 붙인다) */
+  if (session.mode === 'guest') return;
   clearTimeout(rebuildT);
   initAudio(); resumeAudio(); sfx('uiGo');
   const fade = $('#fade'); fade.style.opacity = 1; $('#menu').classList.add('hidden');

@@ -33,9 +33,14 @@ settings.dayMin = DAY_LEN.reduce((a, b) => Math.abs(b - settings.dayMin) < Math.
 const bg0 = BG[saved.bg] ? saved.bg : 'lake', time0 = TIME[saved.time] ? saved.time : 'sunset';
 /* 목록에 없는 장비 색은 기본색으로 */
 const pickGear = (k, def) => GEAR.some(g => g.key === k) ? k : def;
-/* clock: 하루를 0..1 로 (0 = 자정, 0.5 = 정오). carColor·tentColor·jacketColor 는 GEAR 의 key */
+
+/* 지금 캠핑 방식 (저장하지 않는다): solo = 1인 캠핑, host = 캠핑장을 연 방장, guest = 놀러 간 친구. code = 초대 코드 */
+export const session = { mode: 'solo', code: null };
+
+/* clock: 하루를 0..1 로 (0 = 자정, 0.5 = 정오). carColor·tentColor·jacketColor 는 GEAR 의 key. name = 멀티 캠핑 이름표 (12자까지) */
 export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: null, mode: 'seated', seat: 'car',
-  carColor: pickGear(saved.carColor, GEAR_DEFAULT.car), tentColor: pickGear(saved.tentColor, GEAR_DEFAULT.tent), jacketColor: pickGear(saved.jacketColor, GEAR_DEFAULT.jacket) };
+  carColor: pickGear(saved.carColor, GEAR_DEFAULT.car), tentColor: pickGear(saved.tentColor, GEAR_DEFAULT.tent), jacketColor: pickGear(saved.jacketColor, GEAR_DEFAULT.jacket),
+  name: typeof saved.name === 'string' ? saved.name.slice(0, 12) : '' };
 
 /* 기록
    fish: 종 이름 → { best: 최고 크기(cm), count: 잡은 수, first: { bg: 장소 key, clock: 게임 속 시각 0..1 } | null }
@@ -69,6 +74,6 @@ if (saved.records && typeof saved.records === 'object') {
 
 /* 슬라이더처럼 연달아 바뀌는 값은 300ms 모아서 한 번에 쓴다. 페이지를 닫을 때는 바로 기록 */
 let saveT = null;
-function flush() { clearTimeout(saveT); saveT = null; try { localStorage.setItem(KEY, JSON.stringify({ v: SAVE_V, settings, records, bg: state.bg, time: state.time, carColor: state.carColor, tentColor: state.tentColor, jacketColor: state.jacketColor })); } catch (e) {} }
+function flush() { clearTimeout(saveT); saveT = null; try { localStorage.setItem(KEY, JSON.stringify({ v: SAVE_V, settings, records, bg: state.bg, time: state.time, carColor: state.carColor, tentColor: state.tentColor, jacketColor: state.jacketColor, name: state.name })); } catch (e) {} }
 export function saveSettings() { clearTimeout(saveT); saveT = setTimeout(flush, 300); }
 addEventListener('pagehide', () => { if (saveT) flush(); });
