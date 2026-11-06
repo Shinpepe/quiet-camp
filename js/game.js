@@ -91,6 +91,7 @@ export function openMenu() {
   m.classList.toggle('guest', guest);
   $('#roomBox').style.display = multi ? '' : 'none';
   $('#nameRow').style.display = multi ? '' : 'none';
+  $('#day').disabled = $('#day2').disabled = guest;
   if (multi) {
     $('#roomLab').textContent = guest ? '놀러 갈 캠핑장' : '캠핑장 초대 코드';
     $('#roomCode').textContent = session.code;
@@ -636,8 +637,10 @@ export function updatePrompt() {
 }
 function showPause() {
   if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock);
+  $('#pause').classList.toggle('guest', session.mode === 'guest');
   $('#pauseRoom').style.display = session.mode === 'solo' ? 'none' : '';
   $('#pauseCode').textContent = session.code || '';
+  $('#day').disabled = $('#day2').disabled = session.mode === 'guest';
   $('#toMenu').textContent = session.mode === 'guest' ? '캠핑장 나가기' : '장소 바꾸기';
 }
 function hidePause() { if (ctx.paused) sfx('uiClose'); ctx.paused = false; $('#pause').classList.remove('on'); }
