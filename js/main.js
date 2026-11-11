@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { ctx, state, settings } from './state.js';
+import { ctx, state, settings, session } from './state.js';
+import { updateNet, clockRule, netBusy } from './net.js';
 import { $, rnd, smooth, clamp, wrapPI } from './util.js';
 import { applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
@@ -176,8 +177,10 @@ function loop(now) {
   W.wind.value = windAt(T, W.cfg.key);
   const hand = ctx.hand;
 
-  /* 시간 흐름: 잠자는 동안(잠자기 화면이 직접 돌린다)과 꿈속(0:00 에 멈춘다)에는 흐르지 않는다 */
-  if (settings.flow && !ctx.paused && state.mode !== 'sleep' && !dreamOn()) state.clock = (state.clock + dt / (settings.dayMin * 60)) % 1;
+  /* 시간 흐름: 잠자는 동안(잠자기 화면이 직접 돌린다)과 꿈속(0:00 에 멈춘다)에는 흐르지 않는다.
+     멀티에서는 일시정지해도 세계가 멈추지 않고, 친구는 방장의 하루 길이·시간 흐름을 따른다 (net.js clockRule) */
+  const cr = clockRule();
+  if (cr.flow && (!ctx.paused || session.mode !== 'solo') && state.mode !== 'sleep' && !dreamOn()) state.clock = (state.clock + dt / (cr.dayMin * 60)) % 1;
   /* 꿈속이면 시간대 값 위에 꿈의 하늘색을 덮어쓴다 */
   paramsAt(state.clock, W.tm); tintDream(W.tm);
   if (Math.floor(T) !== lastSec) { lastSec = Math.floor(T); if (ctx.running) updateCaption(); }
@@ -201,7 +204,7 @@ function loop(now) {
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
   /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리거나 파라솔을 접고 펴는 동안에는 매 프레임 갱신한다 */
-  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving() || viewThird()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving() || viewThird() || netBusy()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   /* 트렁크 뚜껑: 트렁크 창이 열린 동안, 또는 꿈속에서 총을 꺼낼 때 W.trunkT 동안 열린다 */
   if (W.trunkLid) { W.trunkT = Math.max(0, (W.trunkT || 0) - dt); const tgt = state.mode === 'trunk' || W.trunkT > 0 ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
@@ -347,6 +350,8 @@ function loop(now) {
   /* 연기·김은 바람을 따라 옆으로 흐른다 */
   const wv = W.wind.value;
   W.steam.update(dt, 0.01 + 0.04 * wv); W.smoke.update(dt, 0.015 + 0.06 * wv); W.fire.update(dt); W.fireCore.update(dt); W.embers.update(dt, 0.1);
+  /* 멀티: 스냅샷 보내기·받은 아바타 움직이기·방장 시계 (1인이면 아무것도 하지 않는다) */
+  updateNet(dt);
   updateView(dt);
   const third = beginView(camera);
   renderReflection(scene);

@@ -7,6 +7,7 @@ import { DOCK } from './dock.js';
 /* game.js·snowman.js 와 서로 불러오지만, 실행 중에만 부르므로 순환해도 괜찮다 (snowman.js 와 같은 방식) */
 import { player, anim } from './game.js';
 import { snowRolling } from './snowman.js';
+import { makeItem } from './props.js';
 
 /* ══ 아바타 ══
    원점 = 발바닥 가운데, 앞 = −z (카메라와 같은 방향). 키 약 1.72m, 눈높이 1.6m (data.js EYE 와 같다).
@@ -256,6 +257,7 @@ export function updateAvatar(A, S, dt) {
   j.head = [look, hyaw, 0]; j.spine = j.spine || [0, 0, 0];
   /* 손에 든 것 (누워 있으면 맡겨 두었다) */
   const it = sp && sp.lie ? null : S.item, I = it ? ITEM[it] : null;
+  if (A.remote) syncItem(A, it, S);
   if (it !== A.item) { A.item = it; A.dr = 0; A.itemFresh = true; if (I) A.grip.position.set(I.g[0], I.g[1], I.g[2]); }
   const ie = I ? I.arm(j, S, A, dt) : Z;
   /* 관절: 자세가 바뀐 직후 0.9초는 천천히, 그 뒤엔 빠르게 따라간다 (처음 보일 때는 바로) */
@@ -275,13 +277,15 @@ export function updateAvatar(A, S, dt) {
     A.J.handR.getWorldQuaternion(_q1).invert(); A.body.getWorldQuaternion(_q2); _q3.setFromEuler(_e2.set(A.curI.x, A.curI.y, A.curI.z, 'XYZ'));
     A.mount.quaternion.copy(_q1).multiply(_q2).multiply(_q3);
   }
+  /* 이름표: 엉덩이 높이를 따라 머리 위에 (누우면 머리 자리 위) */
+  if (A.tag) A.tag.position.set(0, sp && sp.lie ? 0.75 : A.hy + 1.2, 0);
   A.snap = false;
 }
 
 /* ── 내 아바타 ── */
 let LA = null;
 const LS = {};
-/* 게임 상태 → 스냅샷. 멀티에서는 이 값을 그대로 보내면 된다 */
+/* 게임 상태 → 스냅샷. 멀티에서는 net.js 가 이 값을 그대로 보낸다 */
 function localState(o) {
   o.mode = state.mode; o.seat = state.seat; o.x = player.x; o.z = player.z; o.yaw = player.yaw; o.pitch = player.pitch;
   o.item = state.item; o.jacket = state.jacketColor; o.roll = snowRolling();
@@ -291,11 +295,73 @@ function localState(o) {
   const u = anim.eatT; o.eat = u === null ? 0 : ez(u < 0.4 ? u / 0.4 : u < 0.6 ? 1 : Math.max(0, 1 - (u - 0.6) / 0.4));
   return o;
 }
-/* 씬마다 (scene.js buildScene): 처음이면 만들고, 새 씬으로 옮긴다. 모자는 장소별로 */
+export const snapshot = localState;
+
+/* ── 다른 사람의 아바타 (net.js) ──
+   내 아바타와 같은 모델·자세를 쓴다. 손에 든 것은 스냅샷의 물건 종류로 따로 만들어 쥐고, 남은 양·익음·불붙음을 따라간다.
+   머리 위에 이름표(자리 비움이면 흐리게 덧붙인다). 씬이 바뀌어도 살아남고(attachAvatar 가 새 씬으로 옮긴다), 나가면 removeRemote 로 정리한다 */
+const REMOTES = new Set();
+/* 스프라이트 지오메트리는 three 가 모든 스프라이트에 함께 쓰므로 정리하지 않는다. 텍스처도 공유(softTex 등)라 건드리지 않는다 */
+function disposeTree(root) {
+  root.traverse(o => {
+    if (o.geometry && !o.isSprite) o.geometry.dispose();
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m && m.dispose && m.dispose());
+  });
+}
+function drawTag(A, name, away) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 96;
+  const g = cv.getContext('2d'), text = away ? name + ' · 자리 비움' : name;
+  let fs = 40; g.font = `500 ${fs}px "Pretendard Variable", Pretendard, sans-serif`;
+  while (g.measureText(text).width > 440 && fs > 22) { fs -= 2; g.font = `500 ${fs}px "Pretendard Variable", Pretendard, sans-serif`; }
+  const w = Math.min(500, g.measureText(text).width + 48), x = (512 - w) / 2, y = 18, h = 60, r = 30;
+  g.fillStyle = 'rgba(10,12,18,0.55)'; g.beginPath(); g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); g.fill();
+  g.fillStyle = away ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.95)'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, y + h / 2 + 2);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  if (A.tag.material.map) A.tag.material.map.dispose();
+  A.tag.material.map = t; A.tag.material.needsUpdate = true;
+}
+export function setRemoteTag(A, name, away) { const key = name + (away ? '|away' : ''); if (key === A.tagKey) return; A.tagKey = key; drawTag(A, name, away); }
+export function addRemote(name) {
+  const A = buildAvatar(); A.remote = true; A.itemType = null; A.itemMesh = null; A.tagKey = '';
+  A.tag = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
+  A.tag.scale.set(0.9, 0.169, 1); A.tag.renderOrder = 10; A.tag.userData.noAO = true; A.tag.userData.noRefl = true; A.root.add(A.tag);
+  setRemoteTag(A, name, false); REMOTES.add(A);
+  const W = ctx.W;
+  if (ctx.scene) ctx.scene.add(A.root);
+  if (W.cfg) setHat(A, HAT[W.cfg.key] || 'beanie');
+  if (W.noRefl) W.noRefl.push(A.tag);
+  return A;
+}
+export function hideRemote(A) { A.root.visible = false; A.placed = false; A.snap = true; }
+export function removeRemote(A) {
+  REMOTES.delete(A); A.root.removeFromParent();
+  const W = ctx.W; if (W.noRefl) { const i = W.noRefl.indexOf(A.tag); if (i >= 0) W.noRefl.splice(i, 1); }
+  if (A.tag.material.map) A.tag.material.map.dispose();
+  if (A.mat.zip.map) A.mat.zip.map.dispose();
+  disposeTree(A.root);
+}
+/* 다른 사람 손의 물건: 종류가 바뀌면 새로 만들고, 남은 양·익음·불붙음을 맞춘다 */
+function syncItem(A, it, S) {
+  if (A.itemType !== it) {
+    if (A.itemMesh) { A.itemMesh.removeFromParent(); disposeTree(A.itemMesh); }
+    A.itemType = it; A.itemMesh = it && ITEM[it] ? makeItem(it) : null;
+    if (A.itemMesh) A.grip.add(A.itemMesh);
+  }
+  const m = A.itemMesh; if (!m) return;
+  const ud = m.userData;
+  if (typeof S.amount === 'number' && Math.abs(ud.amount - S.amount) > 0.004) { ud.amount = S.amount; ud.setAmount(S.amount); }
+  if (ud.setCook && typeof S.cook === 'number' && Math.abs(ud.cook - S.cook) > 0.01) ud.setCook(S.cook);
+  if (ud.setLit && !!ud.lit !== !!S.lit) ud.setLit(!!S.lit);
+  if (ud.setLit && ud.glow) ud.glow.material.opacity = S.lit ? 0.6 + Math.random() * 0.4 : 0;
+}
+
+/* 씬마다 (scene.js buildScene): 처음이면 만들고, 새 씬으로 옮긴다. 모자는 장소별로 (다른 사람 아바타도 함께) */
 export function attachAvatar(scene, cfg) {
   if (!LA) LA = buildAvatar();
   scene.add(LA.root); LA.root.visible = false; LA.placed = false; LA.snap = true;
   setHat(LA, HAT[cfg.key] || 'beanie');
+  REMOTES.forEach(R => { scene.add(R.root); hideRemote(R); setHat(R, HAT[cfg.key] || 'beanie'); });
 }
 /* 손에 든 것(W.item)을 아바타 손(true) 또는 카메라 손(false)에 붙인다 */
 export function mountItem(onAvatar) {

@@ -18,6 +18,7 @@ import { onMat, resetBeach } from './beach.js';
 import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
+import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netSpawn, roomNoteText } from './net.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -96,7 +97,7 @@ export function openMenu() {
     $('#roomLab').textContent = guest ? '놀러 갈 캠핑장' : '캠핑장 초대 코드';
     $('#roomCode').textContent = session.code;
     $('#copyLink').style.display = guest ? 'none' : '';
-    $('#roomNote').textContent = guest ? '연결되면 초대한 사람의 캠핑장이 보인다' : '친구에게 코드나 링크를 보내자.';
+    $('#roomNote').textContent = roomNoteText();
   }
   const go = $('#start'); go.classList.toggle('wait', guest);
   go.firstChild.textContent = guest ? '출발하기를 기다리는 중 ' : '떠나기 ';
@@ -151,9 +152,8 @@ export function bindInput() {
   $('#pausebtn').onclick = () => { if (ctx.paused) resume(); else showPause(); };
   $('#viewbtn').style.display = isTouch ? '' : 'none';
   $('#viewbtn').onclick = toggleView;
-  /* 메뉴로 나가기: 잠자기 페이드·꿈·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
-     (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다 */
-  $('#toMenu').onclick = () => { hidePause(); ctx.running = false; endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx(); $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); if (session.mode === 'guest') showHome('multi'); else openMenu(); ctx.hand.visible = false; hideJoy(); };
+  /* 메뉴로 나가기 (정리는 exitGame). 친구는 캠핑장을 나가 홈으로, 방장은 메뉴로 가면서 친구들도 대기실로 데려간다 */
+  $('#toMenu').onclick = () => { exitGame(); if (session.mode === 'guest') showHome('multi'); else { openMenu(); netLobby(); } };
   $('#photoBtn').onclick = () => { hidePause(); setTimeout(takePhoto, 50); lock(); };
   /* 길게 누르기: 포인터를 버튼에 붙잡아 두어 손가락이 살짝 움직여도 놓치지 않는다.
      옆 버튼(mSip)은 누르는 순간 동작하고, 그 결과 숨으면 행동 버튼(mAct)이 그 자리로 밀려온다.
@@ -178,8 +178,8 @@ export function bindInput() {
   bindRange('sens', 'sens', v => v.toFixed(1)); bindRange('sens2', 'sens', v => v.toFixed(1));
   /* 하루 길이: 바꾸는 즉시 시간이 흐르는 속도만 달라진다 (지금 시각은 그대로) */
   const dayMap = { toUI: v => Math.max(0, DAY_LEN.indexOf(v)), fromUI: i => DAY_LEN[i] }, dayFmt = m => m < 60 ? m + '분' : m / 60 + '시간';
-  bindRange('day', 'dayMin', dayFmt, null, dayMap); bindRange('day2', 'dayMin', dayFmt, null, dayMap);
-  bindToggle('flow', 'flow', () => {});
+  bindRange('day', 'dayMin', dayFmt, netWorld, dayMap); bindRange('day2', 'dayMin', dayFmt, netWorld, dayMap);
+  bindToggle('flow', 'flow', netWorld);
   bindToggle('shadow', 'shadow', on => {
     ctx.renderer.shadowMap.enabled = on; ctx.renderer.shadowMap.needsUpdate = true;
     if (ctx.W.sun) ctx.W.sun.castShadow = on;
@@ -202,7 +202,7 @@ export function bindInput() {
   $('#copyLink').onclick = () => copyText($('#copyLink'), inviteLink(session.code));
   $('#pauseCopy').onclick = () => copyText($('#pauseCopy'), session.code);
   const ni = $('#nameInput'); ni.value = state.name;
-  ni.oninput = () => { state.name = ni.value.trim().slice(0, 12); saveSettings(); };
+  ni.oninput = () => { state.name = ni.value.trim().slice(0, 12); saveSettings(); netProfile(); };
   /* 이름을 쓰는 동안 글자가 게임 키(E·V·Enter)로 넘어가지 않게 */
   ni.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') ni.blur(); });
   renderMenu();
@@ -375,6 +375,7 @@ let guideReady = false, guideSess = 0;
 const memoUnread = () => memoFor(state.bg).some(m => !records.memoRead.includes(m.key));
 function refreshGuide() {
   if (!ctx.running || !guideReady || state.mode === 'sleep') { guide(null); return; }
+  const nn = netNotice(); if (nn) { guide(nn); return; }
   if (dreamOn()) { guide(dreamGuide()); return; }
   if (!memoUnread()) { guide(null); return; }
   guide(state.mode === 'seated' && state.seat === 'car' ? '내리기 전에 조수석 메모를 보자' : '차 조수석의 메모를 보자');
@@ -509,6 +510,8 @@ export function itemEmptied() {
 const sleep = { on: false, phase: '', t: 0, from: 0, to: 0, wake: false, dream: false };
 export function startSleep(wake) {
   if (sleep.on) return;
+  /* 멀티: 같이 잠드는 규칙은 5단계에서 만든다. 그때까지는 침낭에 눕지 않는다 (꿈에서 깨는 wake 는 그대로) */
+  if (wake !== true && session.mode !== 'solo') { showToast('멀티 캠핑에서는 아직 잘 수 없다'); return; }
   sleep.wake = wake === true || dreamOn(); sleep.dream = false;
   sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false; anim.roast = false; anim.eatT = null;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
@@ -681,18 +684,20 @@ async function savePhoto(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   showToast('사진을 저장했다');
 }
-function renderMenu() {
+export function renderMenu() {
   const bl = $('#bgList'); bl.innerHTML = '';
-  Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div class="nm">${b.name}</div>`; d.onclick = () => { if (state.bg === b.key) return; sfx('ui'); state.bg = b.key; saveSettings(); renderMenu(); previewRebuild(); }; bl.append(d); });
+  Object.values(BG).forEach(b => { const d = document.createElement('div'); d.className = 'opt' + (state.bg === b.key ? ' sel' : ''); d.innerHTML = `<div class="ic">${b.ic}</div><div class="nm">${b.name}</div>`; d.onclick = () => { if (state.bg === b.key) return; sfx('ui'); state.bg = b.key; saveSettings(); renderMenu(); previewRebuild(); netRoom(); }; bl.append(d); });
   const tl = $('#timeList'); tl.innerHTML = '';
-  Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { sfx('ui'); state.time = t.key; state.clock = t.clock; saveSettings(); renderMenu(); const W = ctx.W; if (W.tm) { W.fireLit = W.tm.stars > 0.1; W.lanternLit = W.tm.lantern > 0.5; W.tentLampLit = W.tm.tentLamp > 0.5; } if (!ctx.running) menuAmbience(state.bg); }; tl.append(d); });
+  Object.values(TIME).forEach(t => { const d = document.createElement('div'); d.className = 'chip' + (state.time === t.key ? ' sel' : ''); d.innerHTML = `<span class="ic">${t.ic}</span>${t.name}`; d.onclick = () => { sfx('ui'); state.time = t.key; state.clock = t.clock; saveSettings(); renderMenu(); const W = ctx.W; if (W.tm) { W.fireLit = W.tm.stars > 0.1; W.lanternLit = W.tm.lantern > 0.5; W.tentLampLit = W.tm.tentLamp > 0.5; } if (!ctx.running) menuAmbience(state.bg); netRoom(); }; tl.append(d); });
   const gear = (id, kind, prop, def = kind) => {
     const box = $('#' + id); if (!box) return; box.innerHTML = '';
-    const cur = GEAR.find(g => g.key === state[prop]) || GEAR.find(g => g.key === GEAR_DEFAULT[def]);
+    /* 친구는 방장의 차·텐트 색을 보여 준다 (session.gear). 재킷은 언제나 내 것 */
+    const sg = session.gear, val = sg && prop === 'carColor' ? sg.car : sg && prop === 'tentColor' ? sg.tent : state[prop];
+    const cur = GEAR.find(g => g.key === val) || GEAR.find(g => g.key === GEAR_DEFAULT[def]);
     GEAR.forEach(g => {
       const b = document.createElement('button'); b.className = 'sw' + (g === cur ? ' sel' : '');
       b.style.setProperty('--c', '#' + g[kind].toString(16).padStart(6, '0')); b.title = g.name; b.setAttribute('aria-label', g.name);
-      b.onclick = () => { if (state[prop] === g.key) return; sfx('ui'); state[prop] = g.key; saveSettings(); applyGear(); renderMenu(); };
+      b.onclick = () => { if (state[prop] === g.key) return; sfx('ui'); state[prop] = g.key; saveSettings(); applyGear(); renderMenu(); netRoom(); };
       box.append(b);
     });
     const lab = $('#' + id + 'Name'); if (lab) lab.textContent = cur.name;
@@ -727,20 +732,31 @@ function resetSceneForStart() {
 }
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
-export function startGame() {
-  /* 친구는 방장이 출발할 때 함께 들어간다 (net.js 에서 이어 붙인다) */
-  if (session.mode === 'guest') return;
+
+/* 출발. 친구는 방장이 출발할 때(net.js 가 startGame(true)) 함께 들어간다.
+   startGen: 들어가는 도중에 방장이 메뉴로 가면(toLobby) 늦게 끝난 빌드가 게임을 시작하지 않게 막는다 */
+let startGen = 0, starting = false;
+export function startGame(fromHost) {
+  if (session.mode === 'guest' && fromHost !== true) return;
+  if (ctx.running || starting) return;
+  const sg = ++startGen; starting = true;
   clearTimeout(rebuildT);
   initAudio(); resumeAudio(); sfx('uiGo');
+  if (session.mode === 'host') netStart();
   const fade = $('#fade'); fade.style.opacity = 1; $('#menu').classList.add('hidden');
   const begin = () => {
-    stashed = null; putBack(); ctx.hand.visible = true; state.mode = 'seated'; state.seat = 'car'; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false; anim.exhale = 0;
-    ctx.camera.position.set(...SEAT.car.pos); ctx.camera.rotation.set(0, 0, 0);
+    if (sg !== startGen) return; starting = false;
+    stashed = null; putBack(); ctx.hand.visible = true; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false; anim.exhale = 0;
+    /* 1인·방장은 운전석에서, 친구는 차 옆에 선 채로 시작한다 (멀티 자리 배치는 5단계) */
+    const spawn = netSpawn();
+    if (spawn) { state.mode = 'walk'; state.seat = null; player.x = spawn[0]; player.z = spawn[1]; ctx.camera.position.set(player.x, floorY(player.x, player.z) + EYE, player.z); }
+    else { state.mode = 'seated'; state.seat = 'car'; ctx.camera.position.set(...SEAT.car.pos); }
+    ctx.camera.rotation.set(0, 0, 0);
     const night = isNightClock(state.clock);
     ctx.W.wasNight = night;
     ctx.W.domeLit = night;
     startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
-    setIndoor(true);
+    setIndoor(!spawn);
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
     guideReady = false; const gs = ++guideSess;
     ctx.running = true; updateHUD(); fade.style.opacity = 0;
@@ -752,6 +768,19 @@ export function startGame() {
   if (sceneReady(state.bg)) setTimeout(() => { if (sceneReady(state.bg)) { resetSceneForStart(); begin(); } else buildWithLoading(begin); }, 520);
   else setTimeout(() => buildWithLoading(begin), 700);
 }
+/* 게임 화면을 정리하고 메뉴 상태로 돌아간다: 잠자기 페이드·꿈·꽂아 둔 스파클라·장작 패기·낚시·열린 창을 정리하고, 자리는 운전석으로 되돌린다
+   (자리가 'dock' 으로 남아 있으면 메뉴 프리뷰에서 밧줄 삐걱 소리가 난다). 맡겨 둔 물건도 버린다.
+   장소 바꾸기·캠핑장 나가기, 그리고 방장이 메뉴로 갔을 때(net.js → toLobby) 쓴다 */
+export function exitGame() {
+  startGen++; starting = false;
+  hidePause(); ctx.running = false; if (document.pointerLockElement) document.exitPointerLock();
+  endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx();
+  $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null);
+  $('#fade').style.opacity = 0;
+  stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); ctx.hand.visible = false; hideJoy();
+}
+/* 방장이 메뉴로 갔다 (net.js): 친구도 게임을 정리하고 대기실(메뉴)로 */
+export function toLobby() { if (ctx.running || starting) exitGame(); openMenu(); }
 
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }

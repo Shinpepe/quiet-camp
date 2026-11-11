@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ctx, state } from './state.js';
+import { ctx, state, session } from './state.js';
 import { GEAR, GEAR_DEFAULT, ROAST } from './data.js';
 import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL, stream } from './util.js';
 import { terrainH } from './terrain.js';
@@ -83,10 +83,11 @@ function paramGeo(nu, nv, fn) {
    텐트는 천마다 원래 주황과의 밝기 비율을 곱해 음영을 유지한다(W.tentMats 의 두 번째 값).
    재질 색은 선형 공간이라 sRGB 밝기 비율을 2.2 제곱한 값을 쓴다 */
 const gearOf = (k, def) => GEAR.find(g => g.key === k) || GEAR.find(g => g.key === def);
+/* 친구는 방장의 차·텐트 색을 쓴다 (net.js 가 session.gear 를 채운다) */
 export function applyGear() {
-  const W = ctx.W;
-  if (W.carBody) W.carBody.color.setHex(gearOf(state.carColor, GEAR_DEFAULT.car).car);
-  if (W.tentMats) { const c = gearOf(state.tentColor, GEAR_DEFAULT.tent).tent; W.tentMats.forEach(([m, k]) => m.color.setHex(c).multiplyScalar(k)); }
+  const W = ctx.W, g = session.gear, car = g ? g.car : state.carColor, tent = g ? g.tent : state.tentColor;
+  if (W.carBody) W.carBody.color.setHex(gearOf(car, GEAR_DEFAULT.car).car);
+  if (W.tentMats) { const c = gearOf(tent, GEAR_DEFAULT.tent).tent; W.tentMats.forEach(([m, k]) => m.color.setHex(c).multiplyScalar(k)); }
 }
 
 /* 차 안 내비 화면: 간단한 지도 */

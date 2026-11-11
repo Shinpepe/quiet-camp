@@ -250,7 +250,7 @@ export function updateMeteors(dt) {
   const W = ctx.W; if (!W.meteors) return;
   /* 꿈속에서 운석을 막는 동안에는 장식용 별똥별을 띄우지 않는다 (쏠 수 없는 것이 섞이면 헷갈린다) */
   const night = W.tm.stars > 0.5 && !W.sunUp && state.mode !== 'shoot';
-  if (night && !ctx.paused && session.mode !== 'guest') {
+  if (night && session.mode !== 'guest' && (!ctx.paused || session.mode === 'host')) {
     W.meteorT -= dt;
     if (W.meteorT <= 0) {
       if (W.meteors.some(m => m.life <= 0)) { const p = rollMeteor(); showMeteor(p); if (meteorHooks.send) meteorHooks.send(p); }

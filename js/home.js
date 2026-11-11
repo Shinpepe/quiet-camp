@@ -3,13 +3,14 @@ import { $, newSeed } from './util.js';
 import { sfx } from './audio.js';
 /* game.js 와 서로 불러오지만, 실행 중에만 부르므로 순환해도 괜찮다 */
 import { openMenu, previewRebuild } from './game.js';
+import { netHost, netJoin, netLeave } from './net.js';
 
 /* ══ 홈 화면 ══
    처음 열면 나오는 화면. 1인 캠핑 / 멀티 캠핑을 고른다.
    멀티 캠핑은 캠핑장 초대하기(방장 — 초대 코드를 새로 만든다) / 캠핑장 놀러가기(친구 — 받은 코드를 넣는다).
    고르고 나면 session(state.js)에 방식과 코드를 적고 메뉴를 연다 (game.js openMenu).
    초대 링크(?code=AB3K9)로 열면 코드가 채워진 채 놀러가기 화면에서 시작한다.
-   아직 연결은 없다 — 친구로 들어가면 대기실에서 방장을 기다리는 상태로 멈춘다 (net.js 에서 이어 붙인다) */
+   초대하기·놀러가기를 고르면 net.js 가 캠핑장을 열거나 찾는다 (netHost·netJoin). 홈으로 돌아오면 연결을 끊는다 (netLeave) */
 
 /* 초대 코드 글자: 헷갈리는 O·I·L·0·1 은 뺀다 (31자 × 5자리 ≈ 2천8백만 가지) */
 const ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -23,16 +24,20 @@ function step(name) {
   document.querySelectorAll('#home .homeStep').forEach(s => s.classList.toggle('on', s.dataset.step === name));
   if (name === 'join') setTimeout(() => $('#hCode').focus(), 60);
 }
-/* 홈으로 돌아온다 (메뉴의 "처음으로", 친구가 캠핑장을 나갈 때). 캠핑 방식은 지운다 */
-export function showHome(at = 'start') {
-  session.mode = 'solo'; session.code = null; session.seed = null;
+/* 홈으로 돌아온다 (메뉴의 "처음으로", 친구가 캠핑장을 나가거나 방장이 떠났을 때). 캠핑장 연결을 끊고 캠핑 방식을 지운다.
+   msg 는 코드 입력 아래 줄에 띄운다 (예: "방장이 캠핑장을 떠났다") */
+export function showHome(at = 'start', msg = '') {
+  netLeave();
+  session.mode = 'solo'; session.code = null; session.seed = null; session.gear = null;
   $('#menu').classList.add('hidden'); $('#home').classList.remove('hidden'); step(at);
+  $('#hErr').textContent = msg;
 }
-/* 방장은 초대할 때 월드 시드를 정하고 프리뷰를 그 월드로 다시 만든다 → 메뉴에서 보는 월드가 친구들이 볼 월드와 같다 */
+/* 방장은 초대할 때 월드 시드를 정하고 프리뷰를 그 월드로 다시 만든 뒤 캠핑장을 연다. 친구는 받은 코드의 캠핑장을 찾는다 */
 function enter(mode, code) {
   session.mode = mode; session.code = code; session.seed = mode === 'host' ? newSeed() : null;
   $('#home').classList.add('hidden'); openMenu();
-  if (mode === 'host') previewRebuild();
+  if (mode === 'host') { previewRebuild(); netHost(); }
+  else if (mode === 'guest') netJoin();
 }
 
 export function bindHome() {
