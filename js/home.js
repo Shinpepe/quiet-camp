@@ -1,8 +1,8 @@
 import { session, state } from './state.js';
-import { $ } from './util.js';
+import { $, newSeed } from './util.js';
 import { sfx } from './audio.js';
 /* game.js 와 서로 불러오지만, 실행 중에만 부르므로 순환해도 괜찮다 */
-import { openMenu } from './game.js';
+import { openMenu, previewRebuild } from './game.js';
 
 /* ══ 홈 화면 ══
    처음 열면 나오는 화면. 1인 캠핑 / 멀티 캠핑을 고른다.
@@ -25,12 +25,14 @@ function step(name) {
 }
 /* 홈으로 돌아온다 (메뉴의 "처음으로", 친구가 캠핑장을 나갈 때). 캠핑 방식은 지운다 */
 export function showHome(at = 'start') {
-  session.mode = 'solo'; session.code = null;
+  session.mode = 'solo'; session.code = null; session.seed = null;
   $('#menu').classList.add('hidden'); $('#home').classList.remove('hidden'); step(at);
 }
+/* 방장은 초대할 때 월드 시드를 정하고 프리뷰를 그 월드로 다시 만든다 → 메뉴에서 보는 월드가 친구들이 볼 월드와 같다 */
 function enter(mode, code) {
-  session.mode = mode; session.code = code;
+  session.mode = mode; session.code = code; session.seed = mode === 'host' ? newSeed() : null;
   $('#home').classList.add('hidden'); openMenu();
+  if (mode === 'host') previewRebuild();
 }
 
 export function bindHome() {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
-import { rnd, smoothM, shadowed, bar } from './util.js';
+import { smoothM, shadowed, bar, stream } from './util.js';
 import { terrainH, WATER_Y } from './terrain.js';
 import { tex } from './textures.js';
 import { makeLantern } from './props.js';
@@ -18,7 +18,7 @@ export const DOCK = { x: 5.7, top: 0.36, z0: -8.2, z1: -19.2, half: 0.78 };
 export const JOURNAL = { x: DOCK.x - 0.5, y: DOCK.top + 0.1, z: DOCK.z1 + 0.75 };
 
 export function makeDock() {
-  const W = ctx.W, cfg = W.cfg, g = new THREE.Group(), X = DOCK.x, TOP = DOCK.top;
+  const W = ctx.W, cfg = W.cfg, g = new THREE.Group(), X = DOCK.x, TOP = DOCK.top, R = stream('dock');
   const beam = smoothM(0x4a3520, Object.assign({ roughness: 0.9 }, tex('wood', 1, 4, 0.3)));
   const post = smoothM(0x4f3a28, Object.assign({ roughness: 0.9 }, tex('bark', 1, 2, 0.4)));
   const wet = smoothM(0x2f3426, { roughness: 1 }), nailM = smoothM(0x2a2622, { metalness: 0.6, roughness: 0.4 });
@@ -48,8 +48,8 @@ export function makeDock() {
   const pm = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.045, 0.18), plankM, planks.length), nm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.012, 0.004, 0.012), nailM, planks.length * 4);
   const d = new THREE.Object3D(), c = new THREE.Color();
   planks.forEach((z, i) => {
-    d.position.set(X + rnd(-0.03, 0.03), TOP - 0.022 + rnd(-0.004, 0.004), z); d.rotation.set(rnd(-0.008, 0.008), rnd(-0.01, 0.01), rnd(-0.012, 0.012)); d.scale.set(1.56 + rnd(-0.05, 0.05), 1, 1); d.updateMatrix();
-    pm.setMatrixAt(i, d.matrix); pm.setColorAt(i, c.setHSL(0.07, rnd(0.3, 0.42), rnd(0.24, 0.32)));
+    d.position.set(X + R.rnd(-0.03, 0.03), TOP - 0.022 + R.rnd(-0.004, 0.004), z); d.rotation.set(R.rnd(-0.008, 0.008), R.rnd(-0.01, 0.01), R.rnd(-0.012, 0.012)); d.scale.set(1.56 + R.rnd(-0.05, 0.05), 1, 1); d.updateMatrix();
+    pm.setMatrixAt(i, d.matrix); pm.setColorAt(i, c.setHSL(0.07, R.rnd(0.3, 0.42), R.rnd(0.24, 0.32)));
     let k = 0; [-0.56, 0.56].forEach(dx => [-0.04, 0.04].forEach(dz => { d.position.set(X + dx, TOP + 0.001, z + dz); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); d.updateMatrix(); nm.setMatrixAt(i * 4 + k++, d.matrix); }));
   });
   g.add(pm, nm);

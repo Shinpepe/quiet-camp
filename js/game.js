@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ctx, state, settings, saveSettings, DAY_LEN, records, session } from './state.js';
 import { bindHome, showHome, inviteLink } from './home.js';
 import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM } from './data.js';
-import { $, clamp, wrapPI, isTouch, rnd, josa } from './util.js';
+import { $, clamp, wrapPI, isTouch, rnd, josa, setSeed, newSeed } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
 import { buildScene, precompileScene, rebakeEnv, compileReflection, applyTime } from './scene.js';
@@ -707,14 +707,17 @@ export function buildWithLoading(after) {
   $('#loading').classList.add('on');
   setTimeout(() => {
     if (gen !== buildGen) return;
-    buildScene(state.bg);
+    /* 월드 시드: 멀티는 방장 시드, 1인은 빌드마다 새로. 씬에 적어 두어 다시 쓸 수 있는지 판단한다 */
+    const seed = session.seed !== null ? session.seed : newSeed();
+    setSeed(seed); buildScene(state.bg); ctx.W.seed = seed;
     const refl = settings.reflect;
     precompileScene().then(() => { if (gen !== buildGen) return; doneGen = gen; builtReflect = refl; $('#loading').classList.remove('on'); after && after(); });
   }, 40);
 }
 function sceneReady(bg) {
   const W = ctx.W;
-  return doneGen === buildGen && !ctx.compiling && !!ctx.scene && !!W.cfg && W.cfg.key === bg && !(settings.reflect && !builtReflect);
+  return doneGen === buildGen && !ctx.compiling && !!ctx.scene && !!W.cfg && W.cfg.key === bg && !(settings.reflect && !builtReflect)
+    && (session.seed === null || W.seed === session.seed);
 }
 /* 프리뷰 씬을 재사용할 때 새로 빌드한 것과 같은 출발점으로 되돌린다 */
 function resetSceneForStart() {

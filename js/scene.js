@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { ctx, state, settings } from './state.js';
+import { ctx, state, settings, session } from './state.js';
 import { BG, ITEMS } from './data.js';
-import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG } from './util.js';
+import { rnd, smooth, std, shadowed, softTex, canvasTex, NOISE_GLSL, SKY_GLSL, FOG, stream } from './util.js';
 import { makeGround, makeWater, terrainH, bakeHeightMap, bakeShoreTex, waterEdge } from './terrain.js';
 import { makeVegetation } from './vegetation.js';
 import { makeTent, makeChair, makeTable, makeFire, makeCar, makeProps, makeSnowCaps, makeLighthouse, makeDriftwood, makeItem, contactShadow, Particles, Smoke, Sparks, Footprints } from './props.js';
@@ -115,24 +115,25 @@ function makeAurora(W, scene) {
         gl_FragColor=vec4(col*a,a);}`,
   });
   W.aurora = [];
+  const R = stream('aurora');
   const palettes = [[0x36e08a, 0x7a3cff], [0x2fd67c, 0xd04cff], [0x4af0a0, 0x3c7cff], [0x6ee89a, 0xff4c8a]];
-  const n = 2 + Math.floor(Math.random() * 3);
+  const n = 2 + Math.floor(R.r() * 3);
   for (let i = 0; i < n; i++) {
-    const span = rnd(1.6, 2.6);
-    const az0 = i === 0 ? -Math.PI / 2 - span * rnd(0.35, 0.65) : rnd(-Math.PI, Math.PI);
-    const R = rnd(1400, 1700), y0 = rnd(600, 1000), H = rnd(500, 850), w1 = rnd(60, 160), w2 = rnd(20, 70), f1 = rnd(3, 8), f2 = rnd(8, 16), ph = rnd(0, 6.3);
+    const span = R.rnd(1.6, 2.6);
+    const az0 = i === 0 ? -Math.PI / 2 - span * R.rnd(0.35, 0.65) : R.rnd(-Math.PI, Math.PI);
+    const Rad = R.rnd(1400, 1700), y0 = R.rnd(600, 1000), H = R.rnd(500, 850), w1 = R.rnd(60, 160), w2 = R.rnd(20, 70), f1 = R.rnd(3, 8), f2 = R.rnd(8, 16), ph = R.rnd(0, 6.3);
     const g = new THREE.PlaneGeometry(1, 1, 128, 12), p = g.attributes.position;
     for (let k = 0; k < p.count; k++) {
       const u = p.getX(k) + 0.5, v = p.getY(k) + 0.5, az = az0 + u * span;
       const y = y0 + Math.sin(u * f1 + ph) * w1 + Math.sin(u * f2 + ph * 2) * w2 + v * H;
-      const r = R + Math.sin(u * f2 * 0.7 + ph) * 40;
+      const r = Rad + Math.sin(u * f2 * 0.7 + ph) * 40;
       p.setXYZ(k, Math.cos(az) * r, y, Math.sin(az) * r);
     }
     g.computeVertexNormals();
     const m = base.clone(); m.uniforms.uTime = W.uTime;
-    const pal = palettes[Math.floor(Math.random() * palettes.length)];
+    const pal = palettes[Math.floor(R.r() * palettes.length)];
     m.uniforms.cA.value.setHex(pal[0]); m.uniforms.cB.value.setHex(pal[1]);
-    m.uniforms.uSeed.value = rnd(0, 50); m.uniforms.uSpd.value = rnd(0.6, 1.5); m.uniforms.uFold.value = rnd(3.5, 7);
+    m.uniforms.uSeed.value = R.rnd(0, 50); m.uniforms.uSpd.value = R.rnd(0.6, 1.5); m.uniforms.uFold.value = R.rnd(3.5, 7);
     const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.userData.noAO = true; scene.add(mesh); W.aurora.push(mesh);
   }
 }
@@ -140,11 +141,12 @@ function makeAurora(W, scene) {
 /* 별: 대부분 작고 소수만 밝게, 미세한 색온도 차이, 밝은 별만 약하게 깜빡임, 지평선 근처는 어둡게 */
 function makeStars(W, scene) {
   const n = 2600, sp = new Float32Array(n * 3), sz = new Float32Array(n), ph = new Float32Array(n), tint = new Float32Array(n * 3);
+  const R = stream('stars');
   for (let i = 0; i < n; i++) {
-    const th = Math.random() * Math.PI * 2, el = Math.acos(Math.random() * 0.97), r = 1700;
+    const th = R.r() * Math.PI * 2, el = Math.acos(R.r() * 0.97), r = 1700;
     sp[i * 3] = r * Math.sin(el) * Math.cos(th); sp[i * 3 + 1] = r * Math.cos(el); sp[i * 3 + 2] = r * Math.sin(el) * Math.sin(th);
-    const q = Math.random(); sz[i] = 0.55 + 2.0 * q * q * q; ph[i] = rnd(0, 6.28);
-    const w = Math.random(), c = w < 0.22 ? [1.0, 0.93, 0.84] : w < 0.78 ? [1, 1, 1] : [0.86, 0.91, 1.0];
+    const q = R.r(); sz[i] = 0.55 + 2.0 * q * q * q; ph[i] = R.rnd(0, 6.28);
+    const w = R.r(), c = w < 0.22 ? [1.0, 0.93, 0.84] : w < 0.78 ? [1, 1, 1] : [0.86, 0.91, 1.0];
     tint[i * 3] = c[0]; tint[i * 3 + 1] = c[1]; tint[i * 3 + 2] = c[2];
   }
   const g = new THREE.BufferGeometry();
@@ -221,24 +223,37 @@ export function applyTime() {
 }
 
 const _r = new THREE.Vector3(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _p = new THREE.Vector3(), _m = new THREE.Matrix4();
-function spawnMeteor(m) {
+/* ── 별똥별: 값 정하기(rollMeteor)와 띄우기(showMeteor)를 나눈다 ──
+   값은 숫자만이라 그대로 보낼 수 있다. 1인·방장은 타이머가 저절로 값을 정해 띄우고, meteorHooks.send 가 있으면(net.js) 친구들에게도 보낸다.
+   친구는 타이머 없이 받은 값만 띄운다 → 모두의 하늘에 같은 순간 같은 자리에 같은 별똥별.
+   별똥별은 월드 원점 기준 하늘 구(1650m) 위에 생기므로 어디에 서 있어도 같은 방향에 보인다. 꼬리를 카메라 쪽으로 돌리는 것만 각자 한다.
+   (연출이라 월드 시드가 아니라 Math.random 을 쓴다) */
+export const meteorHooks = { send: null };
+export function rollMeteor() {
   const az = rnd(0, Math.PI * 2), el = rnd(0.3, 1.22);
   _r.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
-  m.head.copy(_r).multiplyScalar(1650);
-  _x.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)); m.dir.crossVectors(_r, _x).normalize();
-  if (m.dir.y > 0) m.dir.multiplyScalar(-1);
-  if (m.dir.y > -0.3) { m.dir.y -= 0.5; m.dir.normalize(); }
-  m.speed = rnd(320, 520); m.life = rnd(1.2, 2.4); m.t = 0; m.len = rnd(90, 200); m.width = rnd(2.4, 4.5);
-  m.mesh.material.color.setHex(Math.random() < 0.3 ? 0xd8e6ff : 0xf4f6ff); m.mesh.visible = true;
+  _x.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)); _y.crossVectors(_r, _x).normalize();
+  if (_y.y > 0) _y.multiplyScalar(-1);
+  if (_y.y > -0.3) { _y.y -= 0.5; _y.normalize(); }
+  return { az, el, dir: [_y.x, _y.y, _y.z], speed: rnd(320, 520), life: rnd(1.2, 2.4), len: rnd(90, 200), width: rnd(2.4, 4.5), cool: Math.random() < 0.3 };
+}
+/* 받은 값으로 띄운다. 빈자리가 없으면 넘어간다 */
+export function showMeteor(p) {
+  const W = ctx.W; if (!W.meteors) return;
+  const m = W.meteors.find(o => o.life <= 0); if (!m) return;
+  m.head.set(Math.cos(p.el) * Math.cos(p.az), Math.sin(p.el), Math.cos(p.el) * Math.sin(p.az)).multiplyScalar(1650);
+  m.dir.set(p.dir[0], p.dir[1], p.dir[2]);
+  m.speed = p.speed; m.life = p.life; m.t = 0; m.len = p.len; m.width = p.width;
+  m.mesh.material.color.setHex(p.cool ? 0xd8e6ff : 0xf4f6ff); m.mesh.visible = true;
 }
 export function updateMeteors(dt) {
   const W = ctx.W; if (!W.meteors) return;
   /* 꿈속에서 운석을 막는 동안에는 장식용 별똥별을 띄우지 않는다 (쏠 수 없는 것이 섞이면 헷갈린다) */
   const night = W.tm.stars > 0.5 && !W.sunUp && state.mode !== 'shoot';
-  if (night && !ctx.paused) {
+  if (night && !ctx.paused && session.mode !== 'guest') {
     W.meteorT -= dt;
     if (W.meteorT <= 0) {
-      const free = W.meteors.find(m => m.life <= 0); if (free) spawnMeteor(free);
+      if (W.meteors.some(m => m.life <= 0)) { const p = rollMeteor(); showMeteor(p); if (meteorHooks.send) meteorHooks.send(p); }
       W.meteorT = Math.random() < 0.25 ? rnd(0.4, 1.6) : rnd(7, 22);
     }
   }
@@ -315,11 +330,12 @@ export function buildScene(bgKey) {
   if (cfg.key === 'beach') {
     const lh = makeLighthouse(); lh.position.set(-160, 0, -70); scene.add(lh);
     /* 유목 3개: vegetation.js 의 자리 격자(W.space)로 야자수·조개와 겹치지 않게 놓고, 바닥이 3cm 모래에 묻히게 한다 */
+    const R = stream('driftwood');
     for (let i = 0, n = 0; i < 40 && n < 3; i++) {
-      const x = (Math.random() < 0.5 ? -1 : 1) * rnd(7, 18), z = rnd(-7.5, -3), h = terrainH(x, z, cfg); if (h < 0.1) continue;
-      const len = rnd(1.5, 2.6), r = len * 0.5; if (!W.space.fits(x, z, r)) continue;
+      const x = (R.r() < 0.5 ? -1 : 1) * R.rnd(7, 18), z = R.rnd(-7.5, -3), h = terrainH(x, z, cfg); if (h < 0.1) continue;
+      const len = R.rnd(1.5, 2.6), r = len * 0.5; if (!W.space.fits(x, z, r)) continue;
       W.space.add(x, z, r, r);
-      const d = makeDriftwood(len, Math.random()); d.position.set(x, h - 0.03, z); d.rotation.y = rnd(0, Math.PI * 2); scene.add(d); W.trees.push([x, z, 0.9]); n++;
+      const d = makeDriftwood(len, R.r()); d.position.set(x, h - 0.03, z); d.rotation.y = R.rnd(0, Math.PI * 2); scene.add(d); W.trees.push([x, z, 0.9]); n++;
     }
   }
 

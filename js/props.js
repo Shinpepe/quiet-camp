@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ctx, state } from './state.js';
 import { GEAR, GEAR_DEFAULT, ROAST } from './data.js';
-import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL } from './util.js';
+import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL, stream } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex, T } from './textures.js';
 
@@ -288,16 +288,16 @@ export function makeChair() {
   return shadowed(g);
 }
 export function makeTable() {
-  const W = ctx.W, g = new THREE.Group(), frame = METAL();
-  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), wood(new THREE.Color(0x7a5636).multiplyScalar(rnd(0.9, 1.08)), 2, 0.5)); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
+  const W = ctx.W, g = new THREE.Group(), frame = METAL(), R = stream('table');
+  for (let i = 0; i < 5; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), wood(new THREE.Color(0x7a5636).multiplyScalar(R.rnd(0.9, 1.08)), 2, 0.5)); s.position.set(0, 0.5, -0.24 + i * 0.12); g.add(s); }
   [-0.26, 0.26].forEach(x => { g.add(bar([x, 0, -0.22], [x, 0.485, 0.22], 0.012, frame)); g.add(bar([x, 0, 0.22], [x, 0.485, -0.22], 0.012, frame)); });
   g.add(bar([-0.26, 0.24, 0], [0.26, 0.24, 0], 0.012, frame));
   const lamp = makeLantern(W.lanternLit); lamp.position.set(0.05, 0.515, 0); g.add(lamp); W.lanternObj = lamp;
   return shadowed(g);
 }
 export function makeFire() {
-  const W = ctx.W, g = new THREE.Group(), char = smoothM(0x3d2a1c, Object.assign({ roughness: 1 }, tex('bark', 1, 1, 0.5)));
-  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const s = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(0.11, 0.16), 0), 0.3), std(new THREE.Color(0x6f6a64).multiplyScalar(rnd(0.85, 1.1)), tex('rock', 1, 1, 0.45))); s.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5); s.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(s); }
+  const W = ctx.W, g = new THREE.Group(), char = smoothM(0x3d2a1c, Object.assign({ roughness: 1 }, tex('bark', 1, 1, 0.5))), R = stream('fire');
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const s = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(R.rnd(0.11, 0.16), 0), 0.3), std(new THREE.Color(0x6f6a64).multiplyScalar(R.rnd(0.85, 1.1)), tex('rock', 1, 1, 0.45))); s.position.set(Math.cos(a) * 0.5, 0.08, Math.sin(a) * 0.5); s.rotation.set(R.rnd(0, 3), R.rnd(0, 3), 0); g.add(s); }
   for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.3; g.add(bar([Math.cos(a) * 0.32, 0.05, Math.sin(a) * 0.32], [Math.cos(a + 2.4) * 0.05, 0.42, Math.sin(a + 2.4) * 0.05], 0.045, char, 8)); }
   const ash = new THREE.Mesh(new THREE.CircleGeometry(0.34, 14), std(0x2b2724)); ash.rotation.x = -Math.PI / 2; ash.position.y = 0.03; g.add(ash);
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0x2a1c14 })); core.position.y = 0.15; core.scale.y = 0.6; g.add(core); W.emberCore = core;
@@ -620,7 +620,7 @@ function makeBackpack(M) {
 
 /* ── 쿨러, 배낭, 장작더미, 도끼 박힌 그루터기, 잔가지 ── */
 export function makeProps() {
-  const scene = ctx.scene;
+  const scene = ctx.scene, R = stream('props');
   /* 아이스박스: 걸쇠가 있는 앞면이 캠프 가운데를 보도록 돌려 둔다 */
   const cooler = makeCooler({
     body: smoothM(0x3d6f9e, { roughness: 0.55 }), lid: smoothM(0xdde6ee, { roughness: 0.5 }),
@@ -641,8 +641,8 @@ export function makeProps() {
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5))), cut = smoothM(0xc9a97c, Object.assign({ roughness: 0.85 }, tex('wood', 1, 1, 0.3)));
   const pile = new THREE.Group();
   [[-0.24, -0.08, 0.08, 0.24], [-0.16, 0, 0.16], [-0.08, 0.08]].forEach((zs, r) => zs.forEach(z => {
-    const rad = rnd(0.068, 0.082), l = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, rnd(0.5, 0.6), 10), [bark, cut, cut]);
-    l.rotation.set(rnd(0, 6.3), rnd(-0.05, 0.05), Math.PI / 2); l.position.set(rnd(-0.03, 0.03), 0.075 + r * 0.139, z); pile.add(l);
+    const rad = R.rnd(0.068, 0.082), l = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, R.rnd(0.5, 0.6), 10), [bark, cut, cut]);
+    l.rotation.set(R.rnd(0, 6.3), R.rnd(-0.05, 0.05), Math.PI / 2); l.position.set(R.rnd(-0.03, 0.03), 0.075 + r * 0.139, z); pile.add(l);
   }));
   pile.position.set(1.85, 0, -2.55); pile.rotation.y = -0.35; scene.add(shadowed(pile)); contactShadow(1.85, -2.55, 0.95, 0.8, 0.6);
 
@@ -661,8 +661,8 @@ export function makeProps() {
   }
   stump.position.set(2.55, 0, -1.95); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(2.55, -1.95, 0.55, 0.55, 0.6);
 
-  for (let i = 0; i < 6; i++) { const x = rnd(1.5, 2.5), z = rnd(-2.95, -2.15), a = rnd(0, 6.3), L = rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], rnd(0.008, 0.014), bark, 6))); }
-  for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(rnd(0.06, 0.12), 0.012, rnd(0.03, 0.06)), bark); c.position.set(rnd(1.6, 2.6), 0.008, rnd(-2.9, -2.1)); c.rotation.set(rnd(-0.2, 0.2), rnd(0, 6.3), 0); scene.add(shadowed(c)); }
+  for (let i = 0; i < 6; i++) { const x = R.rnd(1.5, 2.5), z = R.rnd(-2.95, -2.15), a = R.rnd(0, 6.3), L = R.rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], R.rnd(0.008, 0.014), bark, 6))); }
+  for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(R.rnd(0.06, 0.12), 0.012, R.rnd(0.03, 0.06)), bark); c.position.set(R.rnd(1.6, 2.6), 0.008, R.rnd(-2.9, -2.1)); c.rotation.set(R.rnd(-0.2, 0.2), R.rnd(0, 6.3), 0); scene.add(shadowed(c)); }
 }
 
 /* ── 해변 유목: 원점 = 바닥 가운데, 길이 방향 = x. scene.js 가 모래 위에 3개 놓는다 ──
@@ -733,10 +733,10 @@ const beamTex = canvasTex(256, 32, (g, w, h) => {
   const v = g.createLinearGradient(0, 0, 0, h); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(0.5, 'rgba(0,0,0,1)'); v.addColorStop(1, 'rgba(0,0,0,0)'); g.globalCompositeOperation = 'destination-in'; g.fillStyle = v; g.fillRect(0, 0, w, h);
 });
 export function makeLighthouse() {
-  const W = ctx.W, g = new THREE.Group();
+  const W = ctx.W, g = new THREE.Group(), R = stream('lighthouse');
   const white = smoothM(0xf2f0ea, { roughness: 0.7 }), red = smoothM(0xb8322a, { roughness: 0.6 }), dark = std(0x2a2c30, { roughness: 0.6 }), concrete = std(0x8d8a82, { roughness: 0.95 });
   const rock = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(13, 1), 0.25), std(0x5a5f66, tex('rock', 3, 3, 0.5))); rock.scale.set(1.3, 0.5, 1); rock.position.y = -2.5; g.add(rock);
-  for (let i = 0; i < 5; i++) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(rnd(2, 4), 0), 0.4), std(0x555a60, tex('rock', 2, 2, 0.5))); const a = rnd(0, 6.3), d = rnd(12, 17); r.position.set(Math.cos(a) * d, rnd(-1.5, 0.5), Math.sin(a) * d * 0.8); r.rotation.set(rnd(0, 3), rnd(0, 3), 0); g.add(r); }
+  for (let i = 0; i < 5; i++) { const r = new THREE.Mesh(jitter(new THREE.DodecahedronGeometry(R.rnd(2, 4), 0), 0.4), std(0x555a60, tex('rock', 2, 2, 0.5))); const a = R.rnd(0, 6.3), d = R.rnd(12, 17); r.position.set(Math.cos(a) * d, R.rnd(-1.5, 0.5), Math.sin(a) * d * 0.8); r.rotation.set(R.rnd(0, 3), R.rnd(0, 3), 0); g.add(r); }
   const top = 4.0;
   const base = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 3.2, 18), concrete); base.position.y = top - 1.4; g.add(base);
   const slab = new THREE.Mesh(new THREE.BoxGeometry(6.2, 3.2, 7.2), concrete); slab.position.set(4.6, top - 1.4, 2.5); g.add(slab);

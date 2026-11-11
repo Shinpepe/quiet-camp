@@ -34,8 +34,9 @@ const bg0 = BG[saved.bg] ? saved.bg : 'lake', time0 = TIME[saved.time] ? saved.t
 /* 목록에 없는 장비 색은 기본색으로 */
 const pickGear = (k, def) => GEAR.some(g => g.key === k) ? k : def;
 
-/* 지금 캠핑 방식 (저장하지 않는다): solo = 1인 캠핑, host = 캠핑장을 연 방장, guest = 놀러 간 친구. code = 초대 코드 */
-export const session = { mode: 'solo', code: null };
+/* 지금 캠핑 방식 (저장하지 않는다): solo = 1인 캠핑, host = 캠핑장을 연 방장, guest = 놀러 간 친구. code = 초대 코드
+   seed = 월드 시드. 방장은 초대할 때 정하고 친구는 연결되면 받는다(net.js). null 이면 빌드마다 새로 (1인) */
+export const session = { mode: 'solo', code: null, seed: null };
 
 /* clock: 하루를 0..1 로 (0 = 자정, 0.5 = 정오). carColor·tentColor·jacketColor 는 GEAR 의 key. name = 멀티 캠핑 이름표 (12자까지) */
 export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: null, mode: 'seated', seat: 'car',

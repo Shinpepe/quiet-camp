@@ -6,13 +6,33 @@ export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 export const wrapPI = a => Math.atan2(Math.sin(a), Math.cos(a));
 export const isTouch = 'ontouchstart' in window && !matchMedia('(pointer:fine)').matches;
+/* textures.js 가 불러올 때 한 번 쓰는 값 (나무껍질·천 같은 무늬). 월드 시드와는 따로다 */
 export const SEED = Math.random() * 100;
 /* 큰 TypedArray 를 spread 로 push 하면 호출 스택 한계에 걸릴 수 있어 루프로 복사한다 */
 export function pushAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); }
 /* 받침 유무로 조사를 고른다: josa('스틱', '을', '를') → '스틱을', josa('커피', '을', '를') → '커피를' */
 export const josa = (w, a, b) => { const c = w.charCodeAt(w.length - 1) - 0xAC00; return w + (c >= 0 && c <= 11171 && c % 28 ? a : b); };
 
-export function hash(x, y) { const n = Math.sin(x * 127.1 + y * 311.7 + SEED) * 43758.5453; return n - Math.floor(n); }
+/* ── 시드 고정 월드 ──
+   setSeed(s): 씬을 만들기 전에 부른다 (game.js buildWithLoading). 지형 노이즈(hash)와 stream 이 이 시드를 따른다.
+   stream(이름): 시드 + 이름으로 시작하는 난수 줄기 { r(): 0..1, rnd(a, b) }.
+     시스템마다 줄기를 따로 쓰므로 한 곳에서 뽑는 횟수가 기기마다 달라도 다른 곳의 결과는 그대로다.
+   월드 생성(지형·식생·소품 배치)만 시드를 쓰고, 불티·연기·새떼·별똥별 같은 연출은 Math.random 그대로 */
+let WSEED = 0, SEEDI = 0;
+export const newSeed = () => Math.floor(Math.random() * 4294967296);
+export function setSeed(s) { WSEED = s >>> 0; SEEDI = Math.imul(WSEED ^ 0x5bd1e995, 0x9e3779b1) | 0; }
+setSeed(newSeed());
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+export function stream(name) { const r = mulberry(Math.imul(WSEED, 0x85ebca6b) ^ strHash(name)); return { r, rnd: (a, b) => a + r() * (b - a) }; }
+/* 정수 격자 해시 0..1 (vnoise·jitter 는 언제나 정수를 넘긴다).
+   삼각함수 없이 정수 곱셈만 쓰므로 어느 브라우저에서도 같은 값이 나온다 → 같은 시드면 같은 지형 */
+export function hash(x, y) {
+  let h = Math.imul(x | 0, 0x27d4eb2d) + Math.imul(y | 0, 0x165667b1) + SEEDI | 0;
+  h = Math.imul(h ^ h >>> 15, 0x2c1b3c6d); h = Math.imul(h ^ h >>> 12, 0x297a2d39); h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
 export function vnoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf); const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
 export function fbm(x, y, o) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < (o || 4); i++) { s += a * vnoise(x * f, y * f); a *= 0.5; f *= 2.1; } return s; }
 export function ridge(x, y) { let s = 0, a = 0.55, f = 1, w = 1; for (let i = 0; i < 5; i++) { let n = 1 - Math.abs(2 * vnoise(x * f + 31, y * f + 17) - 1); n *= n; s += n * a * w; w = clamp(n * 1.2, 0, 1); a *= 0.5; f *= 2.05; } return s; }

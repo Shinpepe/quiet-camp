@@ -106,14 +106,14 @@ function buildAvatar() {
   /* 손에 든 것: mount 는 몸 기준 방향(매 프레임 계산), grip 은 물건별 쥐는 자리 */
   const mount = new THREE.Group(), grip = new THREE.Group(); J.handR.add(mount); mount.add(grip);
   const A = { root, body, J, mat, hatG, mount, grip, cur: {}, curI: new V3(), hy: 0.93, bPos: new V3(), bRx: 0, yaw: 0, t: 0, ph: 0, v: 0, px: 0, pz: 0, dr: 0,
-    item: null, itemFresh: false, key: null, blendT: 0, placed: false, snap: true, tent: null };
+    item: null, itemFresh: false, key: null, blendT: 0, placed: false, snap: true, jacket: null };
   for (const k in J) A.cur[k] = new V3();
   return A;
 }
 function setJacket(A, hex) { const m = A.mat; m.jacket.color.setHex(hex); m.seam.color.setHex(hex).multiplyScalar(0.7); m.pocket.color.setHex(hex).multiplyScalar(0.9); }
 const HAT = { lake: 'cap', beach: 'bucket', snow: 'beanie' }, HAT_COL = { beanie: 0xefe6d1, bucket: 0xb8a57a, cap: 0x34496a };
 function setHat(A, type) {
-  const g = A.hatG, m = A.mat.hat; g.clear(); m.color.setHex(HAT_COL[type] || 0xefe6d1);
+  const g = A.hatG, m = A.mat.hat; g.children.forEach(o => o.geometry.dispose()); g.clear(); m.color.setHex(HAT_COL[type] || 0xefe6d1);
   if (type === 'beanie') {
     const d = mesh(new THREE.SphereGeometry(0.139, 32, 16, 0, PI * 2, 0, PI / 2), m, 0, 0.15, 0); d.scale.y = 1.12; g.add(d);
     const c = mesh(new THREE.TorusGeometry(0.135, 0.024, 10, 40), m, 0, 0.165, 0); c.rotation.x = PI / 2; g.add(c);
@@ -226,7 +226,7 @@ export function updateAvatar(A, S, dt) {
   const W = ctx.W; if (!W.cfg) return;
   A.t += dt; if (A.blendT > 0) A.blendT -= dt;
   const t = A.t, j = {};
-   if (S.jacket !== A.jacket) { A.jacket = S.jacket; const g = GEAR.find(x => x.key === S.jacket) || GEAR.find(x => x.key === GEAR_DEFAULT.jacket); setJacket(A, g.tent); }
+  if (S.jacket !== A.jacket) { A.jacket = S.jacket; const g = GEAR.find(x => x.key === S.jacket) || GEAR.find(x => x.key === GEAR_DEFAULT.jacket); setJacket(A, g.tent); }
   const seat = (S.mode === 'seated' || S.mode === 'memo' || S.mode === 'sleep') ? S.seat : null, sp = seat && SEATP[seat];
   const key = (sp ? seat : 'walk') + ':' + (S.item || '');
   if (key !== A.key) { A.key = key; A.blendT = 0.9; }
@@ -284,7 +284,7 @@ const LS = {};
 /* 게임 상태 → 스냅샷. 멀티에서는 이 값을 그대로 보내면 된다 */
 function localState(o) {
   o.mode = state.mode; o.seat = state.seat; o.x = player.x; o.z = player.z; o.yaw = player.yaw; o.pitch = player.pitch;
-   o.item = state.item; o.jacket = state.jacketColor; o.roll = snowRolling();
+  o.item = state.item; o.jacket = state.jacketColor; o.roll = snowRolling();
   o.sip = anim.sipT !== null ? Math.sin(PI * Math.min(anim.sipT, 1)) : 0;
   o.mouth = anim.sipT !== null && anim.sipT >= 0.5 && anim.holding;
   o.roast = anim.roastK;
