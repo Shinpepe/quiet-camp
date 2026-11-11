@@ -13,12 +13,12 @@ import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHi
 import { showJournal, hideJournal, journalHooks } from './journal.js';
 import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
 import { showMemo, hideMemo, memoHooks } from './memo.js';
-import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman } from './snowman.js';
-import { onMat, resetBeach } from './beach.js';
+import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman, snowHooks } from './snowman.js';
+import { onMat, resetBeach, beachHooks } from './beach.js';
 import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
-import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netSpawn, roomNoteText } from './net.js';
+import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netSpawn, roomNoteText, netBegin, netShare, netFx, netSeatTaken } from './net.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -109,6 +109,10 @@ export function bindInput() {
   document.body.classList.toggle('touch', isTouch);
   chopHooks.stop = endChop; chopHooks.hud = updateHUD;
   fishHooks.hud = updateHUD;
+  /* 멀티: 물고기를 낚으면 모두에게 소식, 파라솔을 접고 펴면 방장을 거쳐 모두에게 */
+  fishHooks.caught = (n, size) => netFx('catch', { n, size });
+  beachHooks.share = () => netShare('parasol');
+  snowHooks.fx = (op, p) => netFx('snow', Object.assign({ op }, p));
   journalHooks.close = closeJournal;
   memoHooks.close = closeMemo;
   /* 첫 입력에서 오디오를 켠다. 터치는 손을 뗄 때(pointerup)부터 소리를 켤 수 있어 둘 다 듣는다.
@@ -251,8 +255,17 @@ export function currentTarget() {
   }
   return best;
 }
+
+/* 멀티: 다른 사람이 이미 차지한 자리면 알려 주고 막는다 (텐트는 안에 앉았거나 누운 사람이 있으면). 자리를 여러 개로 늘리는 건 5단계 */
+const BUSY = { chair: ' 의자에 앉아 있다', car: ' 운전석에 앉아 있다', tent: ' 텐트 안에 있다', dock: ' 부두 끝에서 낚시하는 중이다', mat: ' 돗자리에 누워 있다', stump: ' 장작을 패는 중이다' };
+function seatBusy(id) {
+  const who = netSeatTaken(id === 'tent' ? ['tent', 'bed'] : [id]); if (!who) return false;
+  showToast(josa(who, '이', '가') + BUSY[id]); return true;
+}
+
 function startMove(to, yawTo, pitchTo) { cam.from.copy(ctx.camera.position); cam.to.copy(to); cam.t = 0; cam.yawFrom = wrapPI(player.yaw); cam.yawTo = yawTo; cam.pitchFrom = player.pitch; cam.pitchTo = pitchTo === undefined ? player.pitch : pitchTo; }
 export function sitDown(id, quiet) {
+  if (!quiet && seatBusy(id)) return;
   const st = SEAT[id]; state.mode = 'seated'; state.seat = id;
   /* 부두 끝·돗자리: 물 쪽(정면)을 본다. 돗자리는 하늘을 반쯤 올려다보며 눕는다 */
   const sea = id === 'dock' || id === 'mat';
@@ -277,12 +290,12 @@ function stashHand() {
 }
 /* 부두 끝에 앉으면 손에 든 것을 맡겨 두고 낚싯대를 든다 */
 export function startFishing() {
-  if (!stashHand()) return;
+  if (seatBusy('dock') || !stashHand()) return;
   sitDown('dock'); if (!beginFish()) showToast('여기서는 낚시를 할 수 없다');
 }
 /* 해변 돗자리에 눕는다. 누워서 마시지는 않으므로 손에 든 것은 낚시처럼 맡겨 둔다 */
 export function lieDown() {
-  if (!stashHand()) return;
+  if (seatBusy('mat') || !stashHand()) return;
   sitDown('mat');
 }
 /* 맡겨 둔 물건을 다시 손에 든다. 트렁크에서 꺼낼 때와 달리 붓는 소리·얼음 소리는 내지 않는다 */
@@ -293,9 +306,10 @@ function restoreStashed() {
   state.item = s.type; ctx.hand.add(it); ctx.W.item = it; resetHand();
   showToast(josa(ITEMS[s.type].name, '을', '를') + ' 다시 들었다');
 }
-export function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx(W.fireLit ? 'fireOn' : 'fireOff'); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); }
+/* 불·랜턴은 함께 쓴다: 내 화면에서 바로 바꾸고 net.js 가 방장을 거쳐 모두에게 알린다 */
+export function toggleFire() { const W = ctx.W; W.fireLit = !W.fireLit; sfx(W.fireLit ? 'fireOn' : 'fireOff'); showToast(W.fireLit ? '불을 피웠다' : '불을 껐다'); netShare('fire'); }
 const LAMP = { lantern: { flag: 'lanternLit', name: '랜턴' }, tentLamp: { flag: 'tentLampLit', name: '텐트 랜턴' }, dome: { flag: 'domeLit', name: '실내등' } };
-export function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx(k === 'dome' ? 'ui' : ctx.W[L.flag] ? 'lampOn' : 'lampOff'); showToast(josa(L.name, '을', '를') + (ctx.W[L.flag] ? ' 켰다' : ' 껐다')); }
+export function toggleLamp(k) { const L = LAMP[k]; ctx.W[L.flag] = !ctx.W[L.flag]; sfx(k === 'dome' ? 'ui' : ctx.W[L.flag] ? 'lampOn' : 'lampOff'); showToast(josa(L.name, '을', '를') + (ctx.W[L.flag] ? ' 켰다' : ' 껐다')); netShare(k); }
 
 export function interact() {
   if (cam.t < 1 || ctx.paused || state.mode === 'sleep') return;
@@ -318,6 +332,7 @@ export function interact() {
 
 /* ── 장작 패기: 지금 서 있는 쪽에서 그루터기를 바라보고 선다. 손에 든 것은 잠시 숨긴다 ── */
 export function beginChop() {
+  if (seatBusy('stump')) return;
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
   if (!startChop(player.x, player.z, (x, z) => !blockedAt(x, z))) { showToast('조금 비켜서 다시 해 보자'); return; }
   anim.sipT = null; anim.holding = false; anim.mouth = false; anim.roast = false; anim.roastK = 0; anim.eatT = null;
@@ -385,7 +400,7 @@ function refreshGuide() {
    꺼낼 때 들고 있던 다른 물건은 트렁크에서 고를 때처럼 내려놓는다. 뚜껑이 열렸다 닫힌다 (main.js 가 W.coolerT 동안 연다) ── */
 export function useCooler() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
-  ctx.W.coolerT = 0.7; sfx('cooler'); setTimeout(() => sfx('cooler', 'close'), 1100);
+  ctx.W.coolerT = 0.7; netFx('cooler'); sfx('cooler'); setTimeout(() => sfx('cooler', 'close'), 1100);
   if (state.item === 'marsh') { putBack(); showToast('꼬치를 넣었다'); } else pickItem('marsh');
 }
 
@@ -477,23 +492,30 @@ function igniteSparkler() {
   ud.igniting = true; sfx('lighter');
   setTimeout(() => { if (ctx.W.item !== it || !ctx.running) return; ud.igniting = false; ud.setLit(true); sfx('sparkOn'); updateHUD(); }, 450);
 }
+
+const _UP = new THREE.Vector3(0, 1, 0), _nrm = new THREE.Vector3(), _pq = new THREE.Quaternion(), _ry = new THREE.Quaternion();
+/* 꽂힌 스파클라 하나를 세운다. p = { x, y, z, q: 그룹 회전 [x,y,z,w], s: 스틱 기울기 [x,z], am: 남은 양 }
+   내가 꽂을 때, 그리고 다른 사람이 꽂았다는 소식을 받을 때(net.js) 같은 값으로 세우므로 모두의 화면에서 같은 모양이다 */
+export function spawnPlanted(p) {
+  const g = makeItem('sparkler'), nu = g.userData; nu.amount = clamp(+p.am || 0, 0, 1); nu.setAmount(nu.amount); nu.setLit(true);
+  g.position.set(p.x, p.y, p.z); g.quaternion.set(p.q[0], p.q[1], p.q[2], p.q[3]).normalize();
+  nu.stick.rotation.set(p.s[0] || 0, 0, p.s[1] || 0);
+  ctx.scene.add(g); ctx.W.planted.push({ g, ud: nu, doneT: -1 });
+}
 /* 타는 스파클라를 앞쪽 땅에 꽂는다 (서 있을 때만). 남은 양을 이어받아 계속 탄다.
-   그룹은 지면 기울기에 맞춰 세우고(발밑 데칼이 땅에 붙게), 스틱만 살짝 비뚤게 */
-const _UP = new THREE.Vector3(0, 1, 0), _nrm = new THREE.Vector3();
+   그룹은 지면 기울기에 맞춰 세우고(발밑 데칼이 땅에 붙게), 스틱만 살짝 비뚤게. 멀티면 같은 값을 모두에게 알린다 */
 function plantSparkler() {
   const it = ctx.W.item, ud = it.userData; if (!ud.lit) return;
   if (state.mode !== 'walk') { showToast('일어서서 꽂자'); return; }
   const s = Math.sin(player.yaw), c = Math.cos(player.yaw);
   let px = player.x - s * 0.75, pz = player.z - c * 0.75;
   if (blockedAt(px, pz)) { px = player.x + c * 0.4; pz = player.z - s * 0.4; }
-  const g = makeItem('sparkler'), nu = g.userData; nu.amount = ud.amount; nu.setAmount(nu.amount); nu.setLit(true);
   const cfg = ctx.W.cfg;
   if (onPlatform(px, pz)) _nrm.copy(_UP);
   else _nrm.set(-(terrainH(px + 0.3, pz, cfg) - terrainH(px - 0.3, pz, cfg)) / 0.6, 1, -(terrainH(px, pz + 0.3, cfg) - terrainH(px, pz - 0.3, cfg)) / 0.6).normalize();
-  g.position.set(px, floorY(px, pz) - 0.03, pz);
-  g.quaternion.setFromUnitVectors(_UP, _nrm); g.rotateY(rnd(0, 6.3));
-  nu.stick.rotation.set(rnd(-0.15, 0.15), 0, rnd(-0.15, 0.15));
-  ctx.scene.add(g); ctx.W.planted.push({ g, ud: nu, doneT: -1 });
+  _pq.setFromUnitVectors(_UP, _nrm).multiply(_ry.setFromAxisAngle(_UP, rnd(0, 6.3)));
+  const p = { x: px, y: floorY(px, pz) - 0.03, z: pz, q: [_pq.x, _pq.y, _pq.z, _pq.w], s: [rnd(-0.15, 0.15), rnd(-0.15, 0.15)], am: ud.amount };
+  spawnPlanted(p); netFx('plant', p);
   ud.setLit(false); putBack(); sfx('plant', surfaceAt(px, pz)); showToast('스파클라를 땅에 꽂았다'); updateHUD();
 }
 export function itemEmptied() {
@@ -755,6 +777,8 @@ export function startGame(fromHost) {
     const night = isNightClock(state.clock);
     ctx.W.wasNight = night;
     ctx.W.domeLit = night;
+    /* 멀티: 방장은 지금 불·랜턴 상태를 알리고, 친구는 받아 둔 상태로 맞춘다 */
+    netBegin();
     startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
     setIndoor(!spawn);
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
@@ -785,7 +809,7 @@ export function toLobby() { if (ctx.running || starting) exitGame(); openMenu();
 function onPlatform(x, z) { return ctx.W.platforms.find(p => x > p.x[0] && x < p.x[1] && z > p.z[0] && z < p.z[1]); }
 export function floorY(x, z) { const p = onPlatform(x, z); return p ? p.y : terrainH(x, z, ctx.W.cfg); }
 /* 발밑 바닥: 부두 판자 · 돗자리 · 젖은 물가 · 숲의 길(낙엽 없는 흙) · 장소의 바닥 */
-function surfaceAt(x, z) {
+export function surfaceAt(x, z) {
   const cfg = ctx.W.cfg;
   if (onPlatform(x, z)) return 'wood';
   if (onMat(x, z)) return 'mat';

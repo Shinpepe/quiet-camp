@@ -5,7 +5,7 @@ import { smoothM, std, softTex, clamp, smooth, rnd, NOISE_GLSL } from './util.js
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
 import { applyGear } from './props.js';
-import { sfx, setSnowRoll } from './audio.js';
+import { sfx, sfxAt, setSnowRoll } from './audio.js';
 import { toast } from './gauge.js';
 /* game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 (scene.js 와 같은 방식) */
 import { player, updateHUD } from './game.js';
@@ -17,7 +17,10 @@ import { player, updateHUD } from './game.js';
    크기: 최소 SNOW.min (이보다 작으면 눈사람이 안 된다) · 최대 SNOW.max (머리·몸통 같다. 최대가 되면 더 커지지 않고 천천히 굴러간다).
    눈사람이 되면 돌 눈·당근 코·잔가지 팔·단추 두 개·텐트 색 목도리가 크기에 맞춰 톡톡 붙는다.
    내려놓은 눈덩이와 눈사람은 W.trees(걷기 충돌)와 W.interact(조준)에 들어간다.
-   굴린 자국은 하나로 이어진 띠(Track) — 바닥 색에 배율을 곱해 조명을 그대로 따르고, SNOW.trackLife 초 뒤 사라진다 ── */
+   굴린 자국은 하나로 이어진 띠(Track) — 바닥 색에 배율을 곱해 조명을 그대로 따르고, SNOW.trackLife 초 뒤 사라진다.
+   멀티: 눈덩이·눈사람은 누가 만들었든 모두가 굴리고 부술 수 있다. 내 행동은 snowHooks.fx 로 알리고(net.js 가 모두에게),
+   다른 사람의 행동은 snowRemote 가 받는다. 다른 사람이 굴리는 눈덩이는 스냅샷의 위치·크기로 remoteRoll 이 따라 그린다.
+   id 는 창마다 다른 앞글자(PFX) + 번호라 여러 사람이 만들어도 겹치지 않는다 ── */
 
 const V3 = THREE.Vector3, UP = new V3(0, 1, 0), FWD = new V3(0, 0, 1);
 const spw = (v, p) => Math.sign(v) * Math.pow(Math.abs(v), p);
@@ -30,9 +33,14 @@ const groundAt = (x, z) => terrainH(x, z, ctx.W.cfg);
 const disposeGeo = o => o.traverse(c => { if (c.geometry && !c.geometry.userData.shared) c.geometry.dispose(); });
 const shade = (g, v) => { g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(g.attributes.position.count * 3).fill(v), 3)); return g; };
 
-/* 모듈 상태: buildSnowman 이 씬마다 새로 채운다 */
-const S = { on: false, balls: [], men: [], active: null, mounds: [], track: null, fx: null };
+/* 모듈 상태: buildSnowman 이 씬마다 새로 채운다. remote = 다른 사람이 굴리는 눈덩이 (net.js 의 사람 id → 눈덩이) */
+const S = { on: false, balls: [], men: [], active: null, mounds: [], track: null, fx: null, remote: new Map() };
 let M = null, seq = 0;
+const PFX = Math.random().toString(36).slice(2, 6);
+const newId = () => PFX + (++seq);
+/* game.js 가 연결한다: fx(op, 값) = 내가 한 일을 모두에게 알린다 (멀티) */
+export const snowHooks = { fx: null };
+const emit = (op, p) => { if (snowHooks.fx) snowHooks.fx(op, p); };
 
 /* ── 공유 지오메트리 (씬이 바뀌어도 재사용 — userData.shared 라 scene.js 의 정리에서 빠진다) ── */
 let G = null;
@@ -200,7 +208,7 @@ class SnowBurst {
 /* ── 씬마다: 재질·자국·눈가루를 만들고, 셰이더를 미리 만들 견본을 숨겨 둔다 ──
    scene.js 의 buildScene 이 장소와 상관없이 부른다 (설산이 아니면 상태만 비운다) */
 export function buildSnowman(cfg) {
-  S.on = false; S.balls = []; S.men = []; S.active = null; S.mounds = []; S.track = null; S.fx = null;
+  S.on = false; S.balls = []; S.men = []; S.active = null; S.mounds = []; S.track = null; S.fx = null; S.remote = new Map();
   if (!cfg.snow) return;
   const W = ctx.W, scene = ctx.scene; geos(); M = makeMats();
   W.tentMats.push([M.scarf, 1]); applyGear();
@@ -214,7 +222,7 @@ export function buildSnowman(cfg) {
   scene.add(warm);
   S.on = true;
 }
-/* 메뉴로 나가거나 같은 씬으로 다시 시작할 때: 눈덩이·눈사람·자국을 모두 치운다 */
+/* 메뉴로 나가거나 같은 씬으로 다시 시작할 때: 눈덩이·눈사람·자국·다른 사람이 굴리던 눈덩이를 모두 치운다 */
 export function clearSnowman() {
   if (!S.on) return;
   const W = ctx.W, sc = ctx.scene;
@@ -226,15 +234,16 @@ export function clearSnowman() {
   });
   S.men = [];
   if (S.active) { sc.remove(S.active.mesh); disposeGeo(S.active.mesh); S.active = null; }
+  S.remote.forEach(o => { sc.remove(o.mesh); disposeGeo(o.mesh); }); S.remote.clear();
   S.mounds.forEach(o => sc.remove(o.m)); S.mounds = [];
   S.track.clear(); S.fx.clear(); setSnowRoll(0);
 }
 
 /* ── 눈덩이 ── */
 function place(b) { b.mesh.scale.setScalar(b.r); b.mesh.position.set(b.x, groundAt(b.x, b.z) + b.r - sinkOf(b.r), b.z); }
-function newBall(r, x, z) {
+function newBall(r, x, z, id) {
   const m = new THREE.Mesh(ballGeo(), M.snow); m.castShadow = m.receiveShadow = true;
-  const b = { kind: 'ball', id: ++seq, mesh: m, r, x, z, slot: null, it: null, attachT: 0, tx: x, tz: z, trackNew: true };
+  const b = { kind: 'ball', id: id || newId(), mesh: m, r, x, z, slot: null, it: null, attachT: 0, tx: x, tz: z, trackNew: true };
   place(b); ctx.scene.add(m); return b;
 }
 /* 바닥에 내려놓은 눈덩이: 걷기 충돌(W.trees)과 조준(W.interact)에 넣는다 */
@@ -242,7 +251,7 @@ function register(b) {
   const W = ctx.W;
   b.slot = [b.x, b.z, b.r]; W.trees.push(b.slot);
   b.it = { id: 'snowball' + b.id, pos: [b.x, groundAt(b.x, b.z) + b.r, b.z], r: b.r + 1.6, hit: b.r, from: ['walk'],
-    label: () => '굴리기', act: () => grab(b), click: () => breakBall(b), clickLabel: () => '부수기' };
+    label: () => '굴리기', act: () => grab(b), click: () => smashBall(b, false), clickLabel: () => '부수기' };
   W.interact.push(b.it); S.balls.push(b);
 }
 function unregister(b) { const W = ctx.W; remove(W.trees, b.slot); remove(W.interact, b.it); remove(S.balls, b); b.slot = b.it = null; }
@@ -285,6 +294,7 @@ function grab(b) {
   if (handsFull()) return;
   unregister(b); b.attachT = 0.35; b.trackNew = true; S.active = b;
   sfx('snowPack', 'grab'); if (isMax(b)) toast('눈덩이가 너무 무겁다'); updateHUD();
+  emit('grab', { id: b.id });
 }
 function nearBall() {
   const a = S.active; if (!a) return null; let best = null, gap = SNOW.near;
@@ -299,30 +309,41 @@ export function rollAct() {
   if (nb && S.men.length < SNOW.maxMen) combine(nb);
   else { dropBall(); if (nb) toast('눈사람은 세 개까지 만들 수 있다'); }
 }
-function dropBall() { const b = S.active; S.active = null; register(b); sfx('snowDrop', b.r); toast('눈덩이를 내려놓았다'); updateHUD(); }
+function dropBall() {
+  const b = S.active; S.active = null; register(b); sfx('snowDrop', b.r); toast('눈덩이를 내려놓았다'); updateHUD();
+  emit('drop', { id: b.id, x: b.x, z: b.z, r: b.r, q: b.mesh.quaternion.toArray() });
+}
 function combine(body) {
   const head = S.active;
   if (S.men.length >= SNOW.maxMen) { toast('눈사람은 세 개까지 만들 수 있다'); return; }
   if (head.r < SNOW.min || body.r < SNOW.min) { toast('눈덩이가 너무 작다'); return; }
-  unregister(body); S.active = null; S.men.push(buildMan(body, head));
+  unregister(body); S.active = null;
+  const m = buildMan(body, head); S.men.push(m);
   sfx('snowLift'); toast('눈사람을 만들었다'); updateHUD();
+  emit('man', { id: m.id, body: body.id, x: body.x, z: body.z, rb: body.r, rh: head.r, hx: head.x, hz: head.z, yaw: m.group.rotation.y });
 }
-function breakBall(b) {
+/* 눈덩이를 부순다. 다른 사람이 부순 것(remote)은 그 자리에서 소리만 내고, 내가 부순 것은 소식을 띄우고 모두에게 알린다 */
+function smashBall(b, remote) {
   unregister(b); S.fx.spawn(b.mesh.position, b.r); addMound(b.x, b.z, b.r);
   ctx.scene.remove(b.mesh); disposeGeo(b.mesh);
+  if (remote) { sfxAt('snowBreak', b.x, groundAt(b.x, b.z) + b.r, b.z, b.r); return; }
   sfx('snowBreak', b.r); toast('눈덩이를 부쉈다'); updateHUD();
+  emit('break', { id: b.id });
 }
 
 /* ── 눈사람: 몸통 그룹을 만들고, 머리는 0.55초 동안 호를 그리며 올라간 뒤 그룹에 붙는다.
-   장식은 0.5초부터 차례로 톡톡 커진다. 앞(+z)이 만든 사람을 본다 ── */
-function buildMan(body, head) {
+   장식은 0.5초부터 차례로 톡톡 커진다. 앞(+z)이 만든 사람을 본다.
+   opt: yaw = 바라보는 방향(다른 사람이 만든 것은 받은 값), id = 받은 id, remote = 다른 사람이 만든 것(소리를 그 자리에서),
+        instant = 움직임·소리 없이 다 만들어진 상태로 (중간에 들어올 때) ── */
+function buildMan(body, head, opt = {}) {
   const rb = body.r, rh = head.r, ov = 0.15 * Math.min(rb, rh), d = rb + rh - ov, by = rb - sinkOf(rb);
   const g = new THREE.Group(), decor = [], W = ctx.W;
-  g.position.set(body.x, groundAt(body.x, body.z), body.z); g.rotation.y = Math.atan2(player.x - body.x, player.z - body.z);
+  g.position.set(body.x, groundAt(body.x, body.z), body.z);
+  g.rotation.y = typeof opt.yaw === 'number' ? opt.yaw : Math.atan2(player.x - body.x, player.z - body.z);
   ctx.scene.add(g); g.updateMatrixWorld(true);
   g.add(body.mesh); body.mesh.position.set(0, by, 0);
   const bc = new V3(0, by, 0), hc = new V3(0, by + d, 0);
-  const add = (m, delay, sound) => { m.userData.s0 = m.scale.clone(); m.scale.setScalar(1e-4); g.add(m); decor.push({ m, delay, sound, popped: false }); return m; };
+  const add = (m, delay, sound) => { m.userData.s0 = m.scale.clone(); m.scale.setScalar(1e-4); g.add(m); decor.push({ m, delay, sound, popped: !!opt.instant }); return m; };
 
   /* 눈: 납작한 조약돌 두 개 */
   [-1, 1].forEach((s, i) => {
@@ -381,24 +402,33 @@ function buildMan(body, head) {
     k.scale.set(1.25, 0.9, 0.75); k.quaternion.setFromUnitVectors(FWD, out); k.position.copy(bc).addScaledVector(out, rb + t * 1.5); add(k, 0.54); }
 
   g.traverse(c => { if (c.isMesh) c.castShadow = c.receiveShadow = true; });
-  const m = { kind: 'man', id: ++seq, group: g, body, head, x: body.x, z: body.z, rb, rh, hH: by + d + rh, slot: [body.x, body.z, Math.max(rb, rh * 0.9)], it: null,
-    anim: { t: 0, from: head.mesh.position.clone(), to: g.localToWorld(hc.clone()), decor, attached: false } };
+  const m = { kind: 'man', id: opt.id || newId(), remote: !!opt.remote, group: g, body, head, x: body.x, z: body.z, rb, rh, hH: by + d + rh, slot: [body.x, body.z, Math.max(rb, rh * 0.9)], it: null,
+    anim: { t: opt.instant ? 10 : 0, quiet: !!opt.instant, from: head.mesh.position.clone(), to: g.localToWorld(hc.clone()), decor, attached: false } };
   W.trees.push(m.slot);
   return m;
 }
 /* 다 만들어진 뒤에야 조준에 넣는다 (만드는 도중에는 부술 수 없다). E 는 아무 일도 하지 않고, 빈손 클릭으로 부순다 */
 function regMan(m) {
   m.it = { id: 'snowman' + m.id, pos: [m.x, groundAt(m.x, m.z) + m.hH * 0.5, m.z], r: Math.max(m.rb, m.rh) + 1.7, hit: m.hH * 0.45, from: ['walk'],
-    label: () => null, act: () => {}, click: () => breakMan(m), clickLabel: () => '눈사람 부수기' };
+    label: () => null, act: () => {}, click: () => smashMan(m, false), clickLabel: () => '눈사람 부수기' };
   ctx.W.interact.push(m.it);
 }
-function breakMan(m) {
+/* 눈사람을 부순다 (remote 는 smashBall 과 같은 뜻) */
+function smashMan(m, remote) {
   const W = ctx.W, c1 = new V3(), c2 = new V3();
   remove(W.trees, m.slot); remove(W.interact, m.it); remove(S.men, m);
   m.body.mesh.getWorldPosition(c1); m.head.mesh.getWorldPosition(c2);
   S.fx.spawn(c1, m.rb); S.fx.spawn(c2, m.rh); addMound(m.x, m.z, m.rb * 1.15);
+  if (m.head.mesh.parent === ctx.scene) { ctx.scene.remove(m.head.mesh); disposeGeo(m.head.mesh); }
   ctx.scene.remove(m.group); disposeGeo(m.group);
+  if (remote) { sfxAt('snowBreak', m.x, groundAt(m.x, m.z) + m.rb, m.z, Math.max(m.rb, m.rh)); return; }
   sfx('snowBreak', Math.max(m.rb, m.rh)); toast('눈사람을 부쉈다'); updateHUD();
+  emit('unman', { id: m.id });
+}
+/* 눈사람 만드는 소리: 내 것은 내 손 소리로, 다른 사람 것은 그 자리에서. 중간에 들어와 한꺼번에 세운 것은 조용히 */
+function manSound(m, type, arg) {
+  if (m.anim && m.anim.quiet) return;
+  if (m.remote) sfxAt(type, m.x, groundAt(m.x, m.z) + m.hH * 0.6, m.z, arg); else sfx(type, arg);
 }
 function updateMen(dt) {
   for (const m of S.men) {
@@ -406,11 +436,11 @@ function updateMen(dt) {
     a.t += dt; const k = Math.min(1, a.t / 0.55), e = k * k * (3 - 2 * k);
     if (!a.attached) {
       m.head.mesh.position.lerpVectors(a.from, a.to, e); m.head.mesh.position.y += Math.sin(Math.PI * k) * 0.35;
-      if (k >= 1) { a.attached = true; m.group.attach(m.head.mesh); sfx('snowDrop', m.rh); }
+      if (k >= 1) { a.attached = true; m.group.attach(m.head.mesh); manSound(m, 'snowDrop', m.rh); }
     }
     for (const dc of a.decor) {
       const q = clamp((a.t - 0.5 - dc.delay) / 0.25, 0, 1);
-      if (q > 0 && !dc.popped) { dc.popped = true; if (dc.sound) sfx('snowPop'); }
+      if (q > 0 && !dc.popped) { dc.popped = true; if (dc.sound) manSound(m, 'snowPop'); }
       dc.m.scale.copy(dc.m.userData.s0).multiplyScalar(q <= 0 ? 1e-4 : backOut(q));
     }
     if (a.t > 1.6) { a.decor.forEach(dc => dc.m.scale.copy(dc.m.userData.s0)); m.anim = null; regMan(m); }
@@ -436,14 +466,16 @@ function rollTo(o, nx, nz, grow) {
   _ax.set(dz, 0, -dx).divideScalar(ds); _q.setFromAxisAngle(_ax, ds / o.r); o.mesh.quaternion.premultiply(_q);
   if (grow) { const was = isMax(o); o.r = Math.min(SNOW.max, Math.sqrt(o.r * o.r + 2 * SNOW.grow * ds)); if (!was && isMax(o)) toast('눈덩이가 너무 무겁다'); }
   o.x = nx; o.z = nz; place(o);
-  if (grow) {
-    const tdx = nx - o.tx, tdz = nz - o.tz;
-    if (o.trackNew || Math.hypot(tdx, tdz) > 0.06) {
-      S.track.push(nx, nz, o.trackNew ? dx : tdx, o.trackNew ? dz : tdz, o.r * 0.6 * rnd(0.94, 1.06), !o.trackNew);
-      o.trackNew = false; o.tx = nx; o.tz = nz;
-    }
-  }
+  if (grow) trackAt(o, nx, nz, dx, dz);
   return ds;
+}
+/* 굴린 자국 한 칸: 6cm 넘게 움직였을 때만 (새로 굴리기 시작한 첫 칸은 앞 칸과 잇지 않는다) */
+function trackAt(o, nx, nz, dx, dz) {
+  const tdx = nx - o.tx, tdz = nz - o.tz;
+  if (o.trackNew || Math.hypot(tdx, tdz) > 0.06) {
+    S.track.push(nx, nz, o.trackNew ? dx : tdx, o.trackNew ? dz : tdz, o.r * 0.6 * rnd(0.94, 1.06), !o.trackNew);
+    o.trackNew = false; o.tx = nx; o.tz = nz;
+  }
 }
 
 /* ── 매 프레임 (main.js). 멈춘 동안에는 dt = 0 으로 불러 굴리는 소리도 잦아든다 ── */
@@ -462,5 +494,71 @@ export function updateSnowman(dt) {
   updateMen(dt); updateMounds(dt); S.fx.update(dt);
 }
 
-/* 눈덩이가 굴러가거나 눈사람이 만들어지는 중 — main.js 가 그동안 그림자맵을 매 프레임 갱신한다 */
-export const snowMoving = () => !!S.active || S.men.some(m => m.anim);
+/* 눈덩이가 굴러가거나(다른 사람 것 포함) 눈사람이 만들어지는 중 — main.js 가 그동안 그림자맵을 매 프레임 갱신한다 */
+export const snowMoving = () => !!S.active || S.remote.size > 0 || S.men.some(m => m.anim);
+
+/* ══ 멀티 (net.js) ══ */
+/* 내가 굴리는 눈덩이 — 스냅샷에 실어 보낸다 */
+export function rollState() { const a = S.active; return a ? { x: a.x, z: a.z, r: a.r } : null; }
+/* 다른 사람이 굴리는 눈덩이: key = 그 사람, x = null 이면 치운다. 굴러간 만큼 돌고, 자국을 남긴다. 1.5m 넘게 튀면 그 자리로 옮기기만 한다 */
+export function remoteRoll(key, x, z, r) {
+  if (!S.on) return;
+  let o = S.remote.get(key);
+  if (x === null || x === undefined) { if (o) { ctx.scene.remove(o.mesh); disposeGeo(o.mesh); S.remote.delete(key); } return; }
+  r = clamp(r, 0.05, SNOW.max);
+  if (!o) { o = newBall(r, x, z); S.remote.set(key, o); return; }
+  const dx = x - o.x, dz = z - o.z; o.r = r;
+  if (Math.hypot(dx, dz) > 1.5) { o.x = x; o.z = z; o.trackNew = true; place(o); return; }
+  if (rollTo(o, x, z, false) > 0) trackAt(o, x, z, dx, dz); else place(o);
+}
+/* 다른 사람이 한 일: drop(내려놓음) · grab(다시 굴리려고 집음) · break(부숨) · man(눈사람을 만듦) · unman(눈사람을 부숨) */
+export function snowRemote(d) {
+  if (!S.on || !d || typeof d.id !== 'string') return;
+  const num = v => typeof v === 'number' && Number.isFinite(v), find = id => S.balls.find(b => b.id === id);
+  if (d.op === 'drop' && num(d.x) && num(d.z) && num(d.r)) {
+    const old = find(d.id); if (old) { unregister(old); ctx.scene.remove(old.mesh); disposeGeo(old.mesh); }
+    const b = newBall(clamp(d.r, 0.05, SNOW.max), d.x, d.z, d.id);
+    if (Array.isArray(d.q) && d.q.length === 4 && d.q.every(num)) b.mesh.quaternion.fromArray(d.q).normalize();
+    register(b); sfxAt('snowDrop', b.x, groundAt(b.x, b.z) + b.r, b.z, b.r);
+  } else if (d.op === 'grab') {
+    const b = find(d.id); if (!b) return;
+    unregister(b); ctx.scene.remove(b.mesh); disposeGeo(b.mesh);
+    sfxAt('snowPack', b.x, groundAt(b.x, b.z) + b.r, b.z, 'grab');
+  } else if (d.op === 'break') {
+    const b = find(d.id); if (b) smashBall(b, true);
+  } else if (d.op === 'man' && num(d.x) && num(d.z) && num(d.rb) && num(d.rh) && num(d.yaw)) {
+    if (S.men.some(m => m.id === d.id)) return;
+    let body = typeof d.body === 'string' ? find(d.body) : null;
+    if (body) unregister(body); else body = newBall(d.rb, d.x, d.z);
+    body.r = clamp(d.rb, 0.05, SNOW.max); body.x = d.x; body.z = d.z; place(body);
+    const head = newBall(clamp(d.rh, 0.05, SNOW.max), num(d.hx) ? d.hx : d.x, num(d.hz) ? d.hz : d.z);
+    S.men.push(buildMan(body, head, { yaw: d.yaw, id: d.id, remote: true }));
+    sfxAt('snowLift', d.x, groundAt(d.x, d.z) + d.rb, d.z);
+  } else if (d.op === 'unman') {
+    const m = S.men.find(o => o.id === d.id); if (m) smashMan(m, true);
+  }
+}
+/* 지금 있는 눈덩이·눈사람 목록 (방장이 중간에 들어온 친구에게 보낸다) */
+export function snowList() {
+  if (!S.on) return null;
+  return {
+    balls: S.balls.map(b => ({ id: b.id, x: b.x, z: b.z, r: b.r, q: b.mesh.quaternion.toArray() })),
+    men: S.men.map(m => ({ id: m.id, x: m.x, z: m.z, rb: m.rb, rh: m.rh, yaw: m.group.rotation.y })),
+  };
+}
+/* 받은 목록을 세운다. 눈사람은 움직임·소리 없이 다 만들어진 상태로 */
+export function snowLoad(L) {
+  if (!S.on || !L) return;
+  const num = v => typeof v === 'number' && Number.isFinite(v);
+  (Array.isArray(L.balls) ? L.balls : []).forEach(d => {
+    if (typeof d.id !== 'string' || !num(d.x) || !num(d.z) || !num(d.r) || S.balls.some(b => b.id === d.id)) return;
+    const b = newBall(clamp(d.r, 0.05, SNOW.max), d.x, d.z, d.id);
+    if (Array.isArray(d.q) && d.q.length === 4 && d.q.every(num)) b.mesh.quaternion.fromArray(d.q).normalize();
+    register(b);
+  });
+  (Array.isArray(L.men) ? L.men : []).forEach(d => {
+    if (typeof d.id !== 'string' || !num(d.x) || !num(d.z) || !num(d.rb) || !num(d.rh) || !num(d.yaw) || S.men.some(m => m.id === d.id)) return;
+    const body = newBall(clamp(d.rb, 0.05, SNOW.max), d.x, d.z), head = newBall(clamp(d.rh, 0.05, SNOW.max), d.x, d.z);
+    S.men.push(buildMan(body, head, { yaw: d.yaw, id: d.id, remote: true, instant: true }));
+  });
+}

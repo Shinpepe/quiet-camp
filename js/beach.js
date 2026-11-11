@@ -193,11 +193,23 @@ export function updateBeach(dt) {
 }
 
 /* ── game.js·scene.js·main.js 가 부르는 것 ── */
+/* game.js 가 연결한다: share = 내가 파라솔을 접거나 폈을 때 (멀티면 net.js 가 방장을 거쳐 모두에게 알린다) */
+export const beachHooks = { share: null };
 /* 접고 펴는 도중에 다시 누르면 지금 자리에서 반대로 움직인다 */
 export function toggleParasol() {
   if (!B.on) return;
   const to = B.to > 0.5 ? 0 : 1; B.from = B.k; B.to = to; B.p = 0;
   sfx(to ? 'parasolOpen' : 'parasolClose'); toast(to ? '파라솔을 폈다' : '파라솔을 접었다');
+  if (beachHooks.share) beachHooks.share();
+}
+/* 정한 상태로 맞춘다 (멀티: 다른 사람이 바꿨을 때 net.js — 소리는 net.js 가 그 자리에서 낸다).
+   now = 움직임 없이 바로 (중간에 들어올 때) */
+export function setParasol(open, now) {
+  if (!B.on) return;
+  const to = open ? 1 : 0;
+  if (now) { B.k = B.from = B.to = to; B.p = 1; shape(0.4); return; }
+  if (B.to === to) return;
+  B.from = B.k; B.to = to; B.p = 0;
 }
 export const parasolOpen = () => B.on && B.to > 0.5;
 /* 접고 펴는 중 — main.js 가 그동안 그림자맵을 매 프레임 갱신한다 */

@@ -30,8 +30,8 @@ function n3(x, y, z) {
 }
 const hx = h => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; }, mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
 
-/* game.js 가 연결한다: hud = 낚시 상태가 바뀔 때마다 안내 갱신 */
-export const fishHooks = { hud: null };
+/* game.js 가 연결한다: hud = 낚시 상태가 바뀔 때마다 안내 갱신, caught = 물고기를 잡았을 때 (멀티면 모두에게 소식) */
+export const fishHooks = { hud: null, caught: null };
 
 /* ── 물고기 8종: 몸 비율·색·무늬·지느러미. s = 크기 범위(cm) ── */
 export const FISH_SPECIES = [
@@ -211,6 +211,7 @@ function catchCard(c) {
   if (!r) records.fish[c.sp.n] = { best: c.size, count: 1, first: { bg: ctx.W.cfg.key, clock: state.clock } };
   else { r.count++; if (rec) r.best = c.size; }
   saveSettings();
+  if (fishHooks.caught) fishHooks.caught(c.sp.n, c.size);
   const note = !r ? '처음 잡았다. 도감에 기록했다' : rec ? `새 기록, 이전 ${prev}cm` : `최고 ${prev}cm`;
   showCard(`<div style="font-family:var(--serif);font-size:18px;letter-spacing:.04em">${c.sp.n} ${c.size}cm</div><div style="font-size:12px;color:${rec ? 'var(--accent)' : 'var(--mute)'};margin-top:3px">${note}</div>`);
 }

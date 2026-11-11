@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx, state, settings, session } from './state.js';
-import { updateNet, clockRule, netBusy } from './net.js';
+import { updateNet, clockRule, netBusy, netTrunk, netSparks } from './net.js';
 import { $, rnd, smooth, clamp, wrapPI } from './util.js';
 import { applyTime, rebakeEnv, updateMeteors } from './scene.js';
 import { paramsAt } from './time.js';
@@ -105,6 +105,7 @@ function assignSparkLights(W) {
   };
   if (W.item && W.item.userData.lit) each(W.item.userData);
   for (const s of W.planted) if (s.ud.lit) each(s.ud);
+  for (const ud of netSparks()) each(ud);
   for (const g of groups) g.d = g.p.distanceToSquared(camera.position);
   groups.sort((a, b) => a.d - b.d);
   for (let i = 0; i < W.sparkLights.length; i++) {
@@ -207,7 +208,7 @@ function loop(now) {
   W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving() || viewThird() || netBusy()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
   /* 트렁크 뚜껑: 트렁크 창이 열린 동안, 또는 꿈속에서 총을 꺼낼 때 W.trunkT 동안 열린다 */
-  if (W.trunkLid) { W.trunkT = Math.max(0, (W.trunkT || 0) - dt); const tgt = state.mode === 'trunk' || W.trunkT > 0 ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
+  if (W.trunkLid) { W.trunkT = Math.max(0, (W.trunkT || 0) - dt); const tgt = state.mode === 'trunk' || W.trunkT > 0 || netTrunk() ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }
   /* 아이스박스 뚜껑: 꼬치를 꺼내거나 넣을 때 W.coolerT 동안 80° 까지 열렸다가 바로 닫힌다 */
   if (W.coolerLid) { W.coolerT = Math.max(0, (W.coolerT || 0) - dt); const tgt = W.coolerT > 0 ? -1.4 : 0; W.coolerLid.rotation.x += (tgt - W.coolerLid.rotation.x) * Math.min(1, dt * 6); }
   if (W.snow) { const p = W.snow.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.array[i * 3 + 1] - dt * 1.1; p.array[i * 3] += Math.sin(T * 0.8 + i) * 0.4 * dt; if (y < -1) { y = 30; p.array[i * 3] = camera.position.x + rnd(-35, 35); p.array[i * 3 + 2] = camera.position.z + rnd(-40, 20); } p.array[i * 3 + 1] = y; } p.needsUpdate = true; }
@@ -217,10 +218,10 @@ function loop(now) {
   updateMeteors(dt);
   updateLighthouse(T);
   if (!ctx.paused) updateChop(dt);
-  /* 눈사람: 멈춘 동안·메뉴에서는 dt 0 (굴리는 소리도 잦아든다) */
-  updateSnowman(ctx.running && !ctx.paused ? dt : 0);
-  /* 해변 파라솔·랜턴 (멈춘 동안에는 움직이지 않는다) */
-  updateBeach(ctx.paused ? 0 : dt);
+  /* 눈사람: 메뉴에서는 dt 0. 1인은 멈춘 동안에도 0 (굴리는 소리도 잦아든다), 멀티는 세계가 멈추지 않는다 */
+  updateSnowman(ctx.running && (!ctx.paused || session.mode !== 'solo') ? dt : 0);
+  /* 해변 파라솔·랜턴 (1인은 멈춘 동안 움직이지 않는다) */
+  updateBeach(ctx.paused && session.mode === 'solo' ? 0 : dt);
   /* 꿈: 운석·총의 반동·번쩍임·남은 시간 (멈춘 동안·메뉴에서는 dt 0) */
   updateDream(ctx.running && !ctx.paused ? dt : 0);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
@@ -272,7 +273,7 @@ function loop(now) {
   if (W.item && ctx.running && state.mode !== 'chop') {
     const type = state.item, ud = W.item.userData;
     if (type === 'sparkler') {
-      if (ud.lit && !ctx.paused) { burnSparkler(W, ud, dt); if (ud.amount === 0) { ud.setLit(false); itemEmptied(); } }
+      if (ud.lit && (!ctx.paused || session.mode !== 'solo')) { burnSparkler(W, ud, dt); if (ud.amount === 0) { ud.setLit(false); itemEmptied(); } }
     } else if (type === 'marsh') updateMarsh(W, ud, dt);
     else if (type !== 'gun') {
       if (anim.sipT !== null) {
@@ -328,7 +329,7 @@ function loop(now) {
   for (const s of W.planted) {
     const ud = s.ud;
     if (ud.lit) {
-      if (!ctx.paused) {
+      if (!ctx.paused || session.mode !== 'solo') {
         burnSparkler(W, ud, dt);
         sparkLv = Math.max(sparkLv, 1 / (1 + 0.35 * tmpV.distanceToSquared(camera.position)));
         if (ud.amount === 0) { ud.setLit(false); s.doneT = 0; sfx('sparkOff'); }
@@ -340,6 +341,8 @@ function loop(now) {
     }
   }
   if (W.planted.length) W.planted = W.planted.filter(s => !s.gone);
+  /* 다른 사람 손에서 타는 스파클라도 가까우면 치익 소리가 커진다 */
+  for (const ud of netSparks()) { ud.emitter.getWorldPosition(tmpV); sparkLv = Math.max(sparkLv, 1 / (1 + 0.35 * tmpV.distanceToSquared(camera.position))); }
   if (W.sparkLights) assignSparkLights(W);
   /* 스파클라 소리는 게임 중에만 */
   const sparkOn = ctx.running && sparkLv > 0;

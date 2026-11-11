@@ -738,7 +738,7 @@ function footstep(surface) {
       grains(5, 0.25, false, 'bandpass', 4200, 2, 0.02, 0.03, t0 + 0.05); burst(pan, false, 'bandpass', 500, 3, 0.03, 0.03 * v, 0.12, t0 + 0.12, 900, 0.12);
     }
   }
-  if (state.item === 'whisky' && Math.random() < 0.15) ice(0.35, t0 + rnd(0.05, 0.15));
+  if (!remote && state.item === 'whisky' && Math.random() < 0.15) ice(0.35, t0 + rnd(0.05, 0.15));
 }
 
 /* ── 장작 패기 숨소리: 힘을 모을 때 들숨(0.65초), 내려칠 때 날숨.
@@ -767,6 +767,18 @@ function chopWhoosh(arg, t) {
   g.gain.exponentialRampToValueAtTime(pk, t + d * 0.95); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.05);
   s.start(t, off()); s.stop(t + d + 0.08);
   s.onended = () => { try { f.disconnect(); g.disconnect(); } catch (e) {} };
+}
+
+/* ── 다른 사람이 낸 소리 (net.js): 그 자리의 위치 음원으로 낸다 ──
+   손·몸 효과음(sfx)을 그대로 쓰되, 부르는 동안만 sfxBus·dryBus 를 그 자리의 패너로 바꿔 끼운다.
+   (효과음은 모두 부르는 순간 예약되므로 곧바로 되돌려도 된다.) 패너는 world 버스로 나가 공간 잔향·실내 필터를 탄다 */
+let remote = false;
+export function sfxAt(type, x, y, z, arg) {
+  if (!AC) return;
+  const p = panner(x, y, z, 1.2, 40, 1.3), s = sfxBus, d = dryBus;
+  sfxBus = dryBus = p; remote = true;
+  try { sfx(type, arg); } finally { sfxBus = s; dryBus = d; remote = false; }
+  setTimeout(() => kill([p]), 4000);
 }
 
 /* ── 손·몸 효과음 ── */
