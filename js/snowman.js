@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ctx, state } from './state.js';
-import { SNOW, BLOCKS } from './data.js';
+import { SNOW } from './data.js';
+import { blocks } from './camp.js';
 import { smoothM, std, softTex, clamp, smooth, rnd, NOISE_GLSL } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
@@ -259,7 +260,7 @@ function unregister(b) { const W = ctx.W; remove(W.trees, b.slot); remove(W.inte
 function blockedFor(x, z, r) {
   const W = ctx.W;
   if (Math.hypot(x, z) > SNOW.range) return true;
-  for (const b of BLOCKS) {
+  for (const b of blocks()) {
     if (b.round) { const rr = (b.x[1] - b.x[0]) / 2; if (Math.hypot(x - b.x[0] - rr, z - b.z[0] - rr) < rr + r) return true; continue; }
     const dx = Math.max(b.x[0] - x, 0, x - b.x[1]), dz = Math.max(b.z[0] - z, 0, z - b.z[1]);
     if (dx * dx + dz * dz < r * r) return true;

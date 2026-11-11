@@ -8,6 +8,7 @@ import { DOCK } from './dock.js';
 import { player, anim } from './game.js';
 import { snowRolling } from './snowman.js';
 import { makeItem } from './props.js';
+import { seatOf, seatKind } from './camp.js';
 
 /* ══ 아바타 ══
    원점 = 발바닥 가운데, 앞 = −z (카메라와 같은 방향). 키 약 1.72m, 눈높이 1.6m (data.js EYE 와 같다).
@@ -197,23 +198,21 @@ function walkPose(j, ph, amp, t) {
 const SEATP = {
   chair: { hipsY: 0.55, j: { spine: [0.16, 0, 0], legL: [1.5, 0, -0.08], legR: [1.48, 0, 0.08], kneeL: [-1.48, 0, 0], kneeR: [-1.42, 0, 0], footL: [-0.02, 0, 0], footR: [-0.06, 0, 0], armL: [0.25, 0, -0.18], armR: [0.25, 0, 0.18], elbowL: [1.15, 0, 0], elbowR: [1.15, 0, 0] } },
   car: { hipsY: 0.86, j: { spine: [0.14, 0, 0], legL: [1.35, 0, -0.05], legR: [1.35, 0, 0.05], kneeL: [-0.25, 0, 0], kneeR: [-0.3, 0, 0], footL: [-0.8, 0, 0], footR: [-0.75, 0, 0], armL: [0.8, 0, -0.05], armR: [0.8, 0, 0.05], elbowL: [0.6, 0, 0], elbowR: [0.6, 0, 0] } },
+  /* 조수석: 다리는 운전석과 같고 손은 무릎에 / 뒷좌석: 앞좌석 등받이에 다리가 끼지 않게 무릎을 굽힌다 (발은 차 바닥 0.51 에) */
+  carPass: { hipsY: 0.86, j: { spine: [0.14, 0, 0], legL: [1.35, 0, -0.05], legR: [1.35, 0, 0.05], kneeL: [-0.25, 0, 0], kneeR: [-0.3, 0, 0], footL: [-0.8, 0, 0], footR: [-0.75, 0, 0], armL: [0.35, 0, -0.15], armR: [0.35, 0, 0.15], elbowL: [1.1, 0, 0], elbowR: [1.1, 0, 0] } },
+  carRear: { hipsY: 0.86, j: { spine: [0.12, 0, 0], legL: [1.7, 0, -0.06], legR: [1.7, 0, 0.06], kneeL: [-1.25, 0, 0], kneeR: [-1.25, 0, 0], footL: [-0.45, 0, 0], footR: [-0.45, 0, 0], armL: [0.35, 0, -0.15], armR: [0.35, 0, 0.15], elbowL: [1.1, 0, 0], elbowR: [1.1, 0, 0] } },
   tent: { hipsY: 0.14, j: { spine: [-0.25, 0, 0], legL: [1.95, 0, -0.12], legR: [1.95, 0, 0.12], kneeL: [-2.6, 0, 0], kneeR: [-2.6, 0, 0], footL: [0.5, 0, 0], footR: [0.5, 0, 0], armL: [0.95, 0, -0.12], armR: [0.95, 0, 0.12], elbowL: [0.85, 0, 0], elbowR: [0.85, 0, 0] } },
   dock: { hipsY: 0.46, bz: 0.08, kick: 1, j: { spine: [-0.12, 0, 0], legL: [1.38, 0, -0.06], legR: [1.38, 0, 0.06], kneeL: [-1.2, 0, 0], kneeR: [-1.25, 0, 0], footL: [-0.2, 0, 0], footR: [-0.2, 0, 0], armR: [0.62, 0, -0.12], elbowR: [0.95, 0, 0], armL: [0.78, 0, 0.32], elbowL: [0.95, 0, 0] } },
   mat: { hipsY: 0.93, rx: PI / 2, by: 0.135, bz: -1.62, lie: 1, j: { spine: [0, 0, 0], legL: [0.05, 0, -0.1], kneeL: [-0.05, 0, 0], footL: [-0.4, 0, 0], legR: [0.9, 0, 0.06], kneeR: [-2.05, 0, 0], footR: [-0.42, 0, 0], armL: [2.75, 0, -0.35], elbowL: [1.95, 0, 0], armR: [0.12, 0, 0.22], elbowR: [0.2, 0, 0] } },
   bed: { hipsY: 0.93, rx: PI / 2, by: 0.13, bz: -1.62, lie: 1, j: { spine: [0, 0, 0], legL: [0.03, 0, -0.05], legR: [0.03, 0, 0.05], kneeL: [-0.05, 0, 0], kneeR: [-0.05, 0, 0], footL: [-0.35, 0, 0], footR: [-0.35, 0, 0], armL: [0.1, 0, -0.2], armR: [0.1, 0, 0.2], elbowL: [0.3, 0, 0], elbowR: [0.3, 0, 0] } },
 };
-/* 자리마다 몸을 놓을 곳 [x, y, z, 몸 방향]. 모두 −z 를 본다 (scene.js·props.js 의 의자·차·텐트·부두·돗자리 자리와 맞춘다) */
+/* 자리마다 몸을 놓을 곳 [x, y, z, 몸 방향]: 배치표의 at (의자·차·텐트·침낭 — 멀티의 의자는 모닥불 쪽으로 돌아 있다).
+   부두 끝·돗자리는 dock.js·beach.js 의 자리. 자세는 배치표의 pose, 없으면 자리 종류 */
+const poseOf = s => { const d = seatOf(s); return (d && d.pose) || seatKind(s); };
 function anchor(seat) {
-  const cfg = ctx.W.cfg;
-  switch (seat) {
-    case 'chair': return [1.5, 0, 0.84, 0];
-    case 'car': return [-0.45, 0, 8.08, 0];
-    case 'tent': return [-1.6, 0.05, 1.7, 0];
-    case 'bed': return [-1.1, 0.17, 2.0, 0];
-    case 'dock': return [DOCK.x, 0, DOCK.z1, 0];
-    case 'mat': { const [x, z] = BEACH.head; return [x, terrainH(x, z, cfg) + 0.012, z, 0]; }
-  }
-  return null;
+  if (seat === 'dock') return [DOCK.x, 0, DOCK.z1, 0];
+  if (seat === 'mat') { const [x, z] = BEACH.head; return [x, terrainH(x, z, ctx.W.cfg) + 0.012, z, 0]; }
+  const d = seatOf(seat); return d && d.at ? d.at : null;
 }
 function floorAt(x, z) {
   const W = ctx.W;
@@ -228,12 +227,13 @@ export function updateAvatar(A, S, dt) {
   A.t += dt; if (A.blendT > 0) A.blendT -= dt;
   const t = A.t, j = {};
   if (S.jacket !== A.jacket) { A.jacket = S.jacket; const g = GEAR.find(x => x.key === S.jacket) || GEAR.find(x => x.key === GEAR_DEFAULT.jacket); setJacket(A, g.tent); }
-  const seat = (S.mode === 'seated' || S.mode === 'memo' || S.mode === 'sleep') ? S.seat : null, sp = seat && SEATP[seat];
+  /* 모르는 자리(버전이 다른 사람 등)면 서 있는 자세로 */
+  const seat = (S.mode === 'seated' || S.mode === 'memo' || S.mode === 'sleep') ? S.seat : null, an = seat ? anchor(seat) : null, sp = an && SEATP[poseOf(seat)];
   const key = (sp ? seat : 'walk') + ':' + (S.item || '');
   if (key !== A.key) { A.key = key; A.blendT = 0.9; }
   let tx, ty, tz, yaw, hipsY, by = 0, bz = 0, rx = 0, look = clamp(S.pitch, -0.6, 0.6);
   if (sp) {
-    [tx, ty, tz, yaw] = anchor(seat);
+    [tx, ty, tz, yaw] = an;
     Object.assign(j, sp.j); hipsY = sp.hipsY; by = sp.by || 0; bz = sp.bz || 0; rx = sp.rx || 0;
     j.spine = [j.spine[0] + 0.012 * Math.sin(t * 1.4), 0, 0];
     if (sp.kick) { j.kneeL = [j.kneeL[0] + 0.12 * Math.sin(t * 1.1), 0, 0]; j.kneeR = [j.kneeR[0] + 0.12 * Math.sin(t * 1.1 + 1.7), 0, 0]; }

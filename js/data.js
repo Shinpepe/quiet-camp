@@ -63,10 +63,10 @@ export const ITEMS = {
   gun:      { name: '총', ic: ICON.gun, act: '쏘기', hold: false, ds: '꿈속에서만 보이는 총', trunk: false },
 };
 
-/* 캠핑 메모(조수석 담요 위의 줄노트)에 적힌 할 일
+/* 캠핑 메모에 적힌 할 일. 1인은 조수석 담요 위, 멀티는 운전석·조수석 사이 가운데 팔걸이 위의 줄노트
    key: 읽음 기록(state.js 의 records.memoRead)에 남는 이름표 — 한 번 정하면 바꾸지 않는다
    only: 이 장소에서만 메모에 적힌다 (없으면 모든 장소)
-   새 콘텐츠를 넣을 때 여기에 한 줄 더하면, 그 장소 메모에 안 읽은 줄이 생겨 "조수석 메모를 보자" 안내가 다시 뜬다 */
+   새 콘텐츠를 넣을 때 여기에 한 줄 더하면, 그 장소 메모에 안 읽은 줄이 생겨 메모를 보자는 안내가 다시 뜬다 */
 export const MEMO = [
   { key: 'trunk', text: '차 트렁크를 열어 짐 꺼내기' },
   { key: 'chop',  text: '모닥불 옆 장작 패기' },
@@ -90,7 +90,7 @@ export const memoFor = bg => MEMO.filter(m => !m.only || m.only.includes(bg));
 export const SNOW = { start: 0.08, min: 0.18, max: 0.45, grow: 0.0039, near: 0.35, slow: 0.3, maxBalls: 6, maxMen: 3, trackLife: 30, range: 45 };
 
 /* 마시멜로 굽기
-   fire: 꼬치 끝이 닿을 불꽃 자리 — 모닥불 가운데 x·z(scene.js 의 모닥불 위치)와 불꽃 높이 y
+   fire: 꼬치 끝이 닿을 불꽃 자리 — 1인 모닥불 가운데 x·z 와 불꽃 높이 y (멀티는 CAMP.multi.fire 의 x·z 에 같은 높이)
    near: 모닥불 가운데까지 수평 거리가 이 안이어야 굽는다 (m). 모닥불 충돌 때문에 가장 가까이 서도 약 1.05m
    aim: 시선과 불꽃 자리 사이 각도가 이보다 작으면 "불을 바라본다" (rad)
    at: 익음 단계가 바뀌는 시각(불에 댄 초) — 덜 익음 < 4 ≤ 잘 익음 < 8 ≤ 완벽 < 11 ≤ 탐. 11초를 넘겨 불에 대고 있으면 불이 붙는다
@@ -111,12 +111,15 @@ export const BEACH = {
   head: [5.5, -4.8], eye: 0.32, lie: 0.9, look: [1.75, -0.1, 1.3], lantern: [4.72, -4.65],
 };
 
-/* 부두 끝 자리는 dock.js 의 DOCK(끝 z −19.2, 윗면 0.36)에 맞춘다: 끝 판자 가장자리에 걸터앉은 눈높이 */
+/* 1인 캠핑의 자리.
+   pos: 앉은 눈 위치 · stand: 일어나 서는 자리 [x, z] · at: 아바타가 앉는 자리 [x, y, z, 몸 방향]
+   부두 끝 자리는 dock.js 의 DOCK(끝 z −19.2, 윗면 0.36)에 맞춘다: 끝 판자 가장자리에 걸터앉은 눈높이
+   멀티의 자리는 아래 캠프 배치표가 만든다 (CAMP.multi.seats) */
 export const SEAT = {
-  car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기' },
-  chair: { pos: [1.5, 1.05, 0.95], stand: [1.5, -0.1], name: '의자', up: '일어나기' },
-  tent:  { pos: [-1.6, 0.72, 1.85], stand: [-1.6, -1.3], name: '텐트 안', up: '텐트에서 나가기' },
-  bed:   { pos: [-1.1, 0.45, 1.95], yaw: Math.PI, pitch: 1.15, stand: [-1.6, -1.3], name: '침낭', up: '일어나기' },
+  car:   { pos: [-0.45, 1.28, 8.15], stand: [-2.1, 8.2], name: '운전석', up: '차에서 내리기', at: [-0.45, 0, 8.08, 0] },
+  chair: { pos: [1.5, 1.05, 0.95], stand: [1.5, -0.1], name: '의자', up: '일어나기', at: [1.5, 0, 0.84, 0] },
+  tent:  { pos: [-1.6, 0.72, 1.85], stand: [-1.6, -1.3], name: '텐트 안', up: '텐트에서 나가기', at: [-1.6, 0.05, 1.7, 0] },
+  bed:   { pos: [-1.1, 0.45, 1.95], yaw: Math.PI, pitch: 1.15, stand: [-1.6, -1.3], name: '침낭', up: '일어나기', at: [-1.1, 0.17, 2.0, 0] },
   dock:  { pos: [5.7, 1.12, -18.95], stand: [5.7, -17.8], name: '부두 끝', up: '일어나기' },
   /* 해변 돗자리: pos 는 beach.js 가 땅 높이에 맞춰 채운다 */
   mat:   { pos: [5.5, 0.4, -4.8], stand: [4.6, -5.3], name: '돗자리', up: '일어나기' },
@@ -126,26 +129,113 @@ export const SEAT = {
    플레이어는 몸 반지름 PR(0.35m)만큼 떨어져 멈추고 네모의 모서리는 둥글게 돌아 나간다(game.js blockedAt)
    → 어떤 사물이든 보이는 표면에서 약 0.4m 앞에 선다.
    원도 x·z 범위로 적어 두어 풀 배치(vegetation.js)는 지금처럼 네모로 읽는다.
-   부두 소품처럼 한 맵에만 있는 것은 scene.js 가 W.trees 에 원으로 넣는다 */
+   부두 소품처럼 한 맵에만 있는 것은 scene.js 가 W.trees 에 원으로 넣는다.
+   캠프 소품의 충돌은 아래 캠프 배치표에서 만든다 (campBlocks) */
 const circle = (cx, cz, r) => ({ x: [cx - r, cx + r], z: [cz - r, cz + r], round: true });
-export const BLOCKS = [
-  /* 자동차: 차체·범퍼 (바퀴는 옆으로 1.13m 까지 나오지만 서 있는 눈높이에서는 닿지 않는다) */
-  { x: [-0.98, 0.98], z: [5.52, 10.5] },
-  /* 텐트: 플라이 양옆 + 뒤 플라이 끝. 앞은 문(z −0.13)에서 약 0.4m 앞에 서도록 */
-  { x: [-2.95, -0.25], z: [-0.18, 2.73] },
-  /* 의자(등받이 꼭대기까지) · 테이블 · 아이스박스(돌려 놓은 모양 그대로) · 장작더미 */
-  { x: [1.15, 1.85], z: [0.5, 1.22] }, { x: [0.26, 0.94], z: [0.18, 0.82] },
-  { x: [2.12, 2.68], z: [0.24, 0.96] }, { x: [1.43, 2.27], z: [-2.97, -2.13] },
+
+/* ══ 캠프 배치표: 1인(solo) · 멀티(multi) ══
+   좌표는 [x, z] — x 는 오른쪽, −z 는 물(호수·바다) 쪽, +z 는 차 쪽.
+   yaw 는 −z 를 보던 물건을 돌린 각 (three.js 의 rotation.y 와 같다).
+   1인 값은 예전에 여러 파일에 흩어져 있던 숫자 그대로다 — 1인 캠핑은 바뀌지 않는다.
+   멀티: 큰 텐트(침낭 4개)를 왼쪽에, 모닥불을 텐트에서 오른쪽 앞으로 띄우고,
+         의자 4개를 불 뒤쪽(차 쪽)에 반원으로 붙여 모두 불 너머 물 쪽을 보게 한다.
+         탁자·랜턴은 의자 줄 오른쪽 끝(의자와 0.85m 띄워 차에서 불가로 가는 통로를 남긴다),
+         아이스박스·배낭은 탁자 뒤, 장작 패기 자리는 더 오른쪽.
+   tent: 가운데 x·z, 폭 w, 높이 h, 길이 l, 말뚝 자리 stake [좌우, 앞뒤](가운데에서),
+         sit: 안에 앉는 자리들의 x(가운데에서), bags: 침낭들의 x(가운데에서)
+   chairs: [x, z, yaw] — 의자 모델의 자리와 방향
+   table · cooler · pack(배낭) · stump(그루터기) · pile(장작더미): 가운데 [x, z]
+   memo · blanket: 멀티의 차 안 메모·담요 자리 (월드 좌표 [x, y, z]) */
+const DEG = Math.PI / 180;
+/* 모닥불 c 를 가운데 두고 반지름 r 의 호 위에 의자를 놓는다 (각도: 0° = +x 오른쪽, 90° = 차 쪽). 모두 불을 바라본다 */
+const arc = (c, r, degs) => degs.map(a => {
+  const x = c[0] + Math.cos(a * DEG) * r, z = c[1] + Math.sin(a * DEG) * r;
+  return [+x.toFixed(3), +z.toFixed(3), Math.atan2(x - c[0], z - c[1])];
+});
+/* 자리 p 에서 yaw 만큼 돌린 물건의 몸 기준 (lx, lz) 가 월드에서 어디인지 */
+const turn = (p, yaw, lx, lz) => [p[0] + lx * Math.cos(yaw) + lz * Math.sin(yaw), p[1] - lx * Math.sin(yaw) + lz * Math.cos(yaw)];
+
+/* lamp: 텐트 랜턴 자리 [x, z](텐트 가운데에서) · memo: 차 안 메모의 상호작용 자리 (월드 [x, y, z]) */
+const SOLO = {
+  multi: false,
+  tent: { x: -1.6, z: 1.2, w: 2.4, h: 1.7, l: 2.6, stake: [1.95, 1.75], sit: [0], bags: [0.5], lamp: [-0.75, 0.9] },
+  fire: [0.3, -1.4],
+  chairs: [[1.5, 0.8, 0]],
+  table: [0.6, 0.5], cooler: [2.4, 0.6], pack: [3.05, 0.15], stump: [2.55, -1.95], pile: [1.85, -2.55],
+  memo: [0.43, 0.83, 8.05],
+};
+const MULTI_FIRE = [1.0, -2.0];
+const MULTI = {
+  multi: true,
+  tent: { x: -2.9, z: 1.2, w: 3.6, h: 2.0, l: 2.8, stake: [2.1, 1.85], sit: [-0.66, -0.22, 0.22, 0.66], bags: [-1.08, -0.36, 0.36, 1.08], lamp: [0, 1.24] },
+  fire: MULTI_FIRE,
+  /* 반지름 1.9m, 왼쪽부터 129° · 103° · 77° · 51° — 의자 사이 약 0.2m */
+  chairs: arc(MULTI_FIRE, 1.9, [129, 103, 77, 51]),
+  table: [3.75, -0.6], cooler: [3.75, 0.25], pack: [4.6, 0.2], stump: [5.0, -2.2], pile: [5.6, -2.9],
+  memo: [0, 0.83, 8.3], blanket: [0, 0.78, 9.3],
+};
+
+/* 배치표 → 걷기 충돌. 1인 배치표로 만들면 예전 BLOCKS 와 같은 값이 나온다 */
+function campBlocks(L) {
+  const t = L.tent, hw = t.w / 2 + 0.15, box = (p, hx, hz) => ({ x: [p[0] - hx, p[0] + hx], z: [p[1] - hz, p[1] + hz] });
+  const out = [
+    /* 자동차: 차체·범퍼 (바퀴는 옆으로 1.13m 까지 나오지만 서 있는 눈높이에서는 닿지 않는다) */
+    { x: [-0.98, 0.98], z: [5.52, 10.5] },
+    /* 텐트: 플라이 양옆 + 뒤 플라이 끝. 앞은 문에서 약 0.4m 앞에 서도록 */
+    { x: [t.x - hw, t.x + hw], z: [t.z - t.l / 2 - 0.08, t.z + t.l / 2 + 0.23] },
+  ];
+  /* 의자(등받이 꼭대기까지): 돌리지 않은 의자는 네모, 돌린 의자는 원 */
+  L.chairs.forEach(([x, z, yaw]) => {
+    if (!yaw) out.push({ x: [x - 0.35, x + 0.35], z: [z - 0.3, z + 0.42] });
+    else { const c = turn([x, z], yaw, 0, 0.06); out.push(circle(c[0], c[1], 0.38)); }
+  });
+  /* 테이블 · 아이스박스 · 장작더미 */
+  out.push(box(L.table, 0.34, 0.32), box(L.cooler, 0.28, 0.36), box(L.pile, 0.42, 0.42));
   /* 둥근 것: 모닥불(돌 둘레·삼각대 다리) · 그루터기 · 박힌 도끼 자루(무릎 높이) · 배낭(머그·물병 포함) */
-  circle(0.3, -1.4, 0.7), circle(2.55, -1.95, 0.22), circle(2.9, -1.95, 0.2), circle(3.05, 0.15, 0.32),
+  out.push(circle(L.fire[0], L.fire[1], 0.7), circle(L.stump[0], L.stump[1], 0.22), circle(L.stump[0] + 0.35, L.stump[1], 0.2), circle(L.pack[0], L.pack[1], 0.32));
   /* 텐트 말뚝 네 개 (줄은 통과한다) */
-  circle(0.35, -0.55, 0.06), circle(-3.55, -0.55, 0.06), circle(0.35, 2.95, 0.06), circle(-3.55, 2.95, 0.06),
-];
+  for (const a of [1, -1]) for (const b of [-1, 1]) out.push(circle(t.x + a * t.stake[0], t.z + b * t.stake[1], 0.06));
+  return out;
+}
+
+/* 멀티의 자리. 같은 종류는 이름 뒤에 번호를 붙인다 (chair, chair2, chair3, chair4 …)
+   차: car 운전석 · car2 조수석 · car3 뒷좌석 왼쪽 · car4 뒷좌석 오른쪽 (뒷좌석은 무릎을 굽힌 자세 pose: 'carRear')
+   의자: 불을 바라보는 방향 yaw 로 앉는다. 일어나면 의자 앞(불 쪽) 0.8m 에 선다
+   텐트: tentN 은 앉는 자리, bedN 은 그 앞의 침낭. 텐트에서 나오면 모두 문 앞에 선다
+   부두·돗자리는 하나뿐이라 1인과 같은 자리를 쓴다 */
+function campSeats(L) {
+  const S = {}, t = L.tent, n = i => i ? String(i + 1) : '', out = [t.x, t.z - t.l / 2 - 1.2];
+  S.car = SEAT.car;
+  S.car2 = { pos: [0.45, 1.28, 8.15], stand: [2.1, 8.2], name: '조수석', up: '차에서 내리기', at: [0.45, 0, 8.08, 0], pose: 'carPass' };
+  S.car3 = { pos: [-0.4, 1.28, 9.37], stand: [-2.1, 9.4], name: '뒷좌석', up: '차에서 내리기', at: [-0.4, 0, 9.3, 0], pose: 'carRear' };
+  S.car4 = { pos: [0.4, 1.28, 9.37], stand: [2.1, 9.4], name: '뒷좌석', up: '차에서 내리기', at: [0.4, 0, 9.3, 0], pose: 'carRear' };
+  L.chairs.forEach(([x, z, yaw], i) => {
+    const e = turn([x, z], yaw, 0, 0.15), a = turn([x, z], yaw, 0, 0.04);
+    S['chair' + n(i)] = { pos: [e[0], 1.05, e[1]], stand: turn([x, z], yaw, 0, -0.8), yaw, name: '의자', up: '일어나기', at: [a[0], 0, a[1], yaw] };
+  });
+  t.sit.forEach((sx, i) => {
+    S['tent' + n(i)] = { pos: [t.x + sx, 0.72, t.z + 0.35], stand: out, name: '텐트 안', up: '텐트에서 나가기', at: [t.x + sx, 0.05, t.z + 0.2, 0] };
+  });
+  t.bags.forEach((bx, i) => {
+    S['bed' + n(i)] = { pos: [t.x + bx, 0.45, t.z + 0.75], yaw: Math.PI, pitch: 1.15, stand: out, name: '침낭', up: '일어나기', at: [t.x + bx, 0.17, t.z + 0.8, 0] };
+  });
+  S.dock = SEAT.dock; S.mat = SEAT.mat;
+  return S;
+}
+
+SOLO.blocks = campBlocks(SOLO); SOLO.seats = SEAT;
+MULTI.blocks = campBlocks(MULTI); MULTI.seats = campSeats(MULTI);
+/* 지금 쓰는 배치표는 camp.js 의 camp() 로 읽는다 */
+export const CAMP = { solo: SOLO, multi: MULTI };
+/* 1인 캠핑의 걷기 충돌 (예전 이름 그대로 남겨 둔다) */
+export const BLOCKS = SOLO.blocks;
+
 export const EYE = 1.6, PR = 0.35;
 /* 텐트에서 자고 일어나는 시각 (아침 7시) */
 export const WAKE = 7 / 24;
-/* 장작 패기: 그루터기 위치, 서는 거리(그루터기에서 플레이어 쪽으로 1.2m — 방향은 E 를 누른 자리에서 정한다),
-   다음 장작을 집어 오는 장작더미, 내려다보는 각도, 시선 허용 범위(좌우·상하 rad) */
+/* 장작 패기: 1인의 그루터기 위치, 서는 거리(그루터기에서 플레이어 쪽으로 1.2m — 방향은 E 를 누른 자리에서 정한다),
+   다음 장작을 집어 오는 장작더미, 내려다보는 각도, 시선 허용 범위(좌우·상하 rad)
+   멀티는 그루터기·장작더미 자리만 CAMP.multi 의 stump·pile 을 쓴다 */
 export const CHOP = { stump: [2.55, -1.95], dist: 1.2, pile: [1.85, -2.55], pitch: -0.64, look: [0.32, 0.22] };
 /* 장작 패기 게이지: 삼각형 속도(초당 막대 비율), 성공·대성공 구간 폭, 쪼개는 데 필요한 성공 횟수 */
 export const CHOP_GAUGE = { speed: 1.15, ok: 0.34, great: 0.08, hits: 3 };

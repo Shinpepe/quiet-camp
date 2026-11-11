@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ctx } from './state.js';
-import { BLOCKS } from './data.js';
+import { blocks } from './camp.js';
 import { fbm, std, smoothM, shadowed, jitter, mergeParts, pushAll, isTouch, stream, hash } from './util.js';
 import { terrainH, slopeUp, shoreOff, campDirt, WATER_Y } from './terrain.js';
 import { tex } from './textures.js';
@@ -586,7 +586,7 @@ export function makeVegetation(cfg) {
     const a = rnd(0, Math.PI * 2), r = 3.5 + 44 * Math.pow(rand(), 0.7), x = Math.cos(a) * r, z = 3 + Math.sin(a) * r;
     if (z < gr.zmin || Math.hypot(x, z) > 48) continue;
     if (campDirt(x, z) > 0.35) continue;
-    if (BLOCKS.some(b => x > b.x[0] - 0.2 && x < b.x[1] + 0.2 && z > b.z[0] - 0.2 && z < b.z[1] + 0.2)) continue;
+    if (blocks().some(b => x > b.x[0] - 0.2 && x < b.x[1] + 0.2 && z > b.z[0] - 0.2 && z < b.z[1] + 0.2)) continue;
     if (cfg.dock && x > 4.6 && x < 6.8 && z < -7.5) continue;
     if (onRoad(x, z, 0.1)) continue;
     const cl = fbm(x * 0.11 + 3, z * 0.11 + 8, 3); if (cl < 0.42 && rand() > (cl - 0.25) * 2) continue;

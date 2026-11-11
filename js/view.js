@@ -3,6 +3,7 @@ import { ctx, state, settings, saveSettings } from './state.js';
 import { clamp } from './util.js';
 import { terrainH } from './terrain.js';
 import { fishActive } from './fish.js';
+import { camp, seatKind } from './camp.js';
 /* game.js 와 서로 불러오지만, 실행 중에만 부르므로 순환해도 괜찮다 */
 import { showToast } from './game.js';
 import { mountItem, updateLocalAvatar } from './avatar.js';
@@ -12,6 +13,7 @@ import { mountItem, updateLocalAvatar } from './avatar.js';
    3인칭은 그리기 직전에만 카메라를 눈 뒤로 빼고(beginView), 그린 뒤 되돌린다(endView).
    뒤로 뺀 카메라는 눈 앞 8m 지점을 바라보므로 화면 가운데 조준점이 1인칭 시선과 거의 같은 곳을 가리킨다.
    장작 패기·낚시·꿈속 총·잠·차 안·텐트 안·부두 끝에서는 저절로 1인칭이 된다 (타이밍 게임과 좁은 실내).
+   자리는 종류로 본다 — 멀티의 조수석(car2)·뒷좌석(car3·car4)·텐트 자리(tent2~4)도 1인칭.
    차·텐트를 뚫지 않게 카메라를 당기고, 땅 아래로는 내려가지 않게 띄운다 */
 
 const V = { k: 0, d: 0, shown: false }, BOOM = 2.4, LIFT = 0.3;
@@ -22,13 +24,14 @@ function allowed() {
   if (!ctx.running) return false;
   const m = state.mode;
   if (m === 'chop' || m === 'shoot' || m === 'sleep' || fishActive()) return false;
-  if ((m === 'seated' || m === 'memo') && FIRST_SEATS[state.seat]) return false;
+  if ((m === 'seated' || m === 'memo') && FIRST_SEATS[seatKind(state.seat)]) return false;
   return true;
 }
-/* 카메라가 들어가면 안 되는 곳: 차 · 텐트(삼각 단면) */
+/* 카메라가 들어가면 안 되는 곳: 차 · 텐트(삼각 단면 — 지금 캠프 배치의 텐트 크기로) */
 function camBlocked(x, y, z) {
   if (x > -1.05 && x < 1.05 && z > 5.45 && z < 10.55 && y < 1.98) return true;
-  const tx = Math.abs(x + 1.6); if (tx < 1.35 && z > -0.25 && z < 2.8 && y < 1.75 * (1 - tx / 1.35) + 0.05) return true;
+  const t = camp().tent, half = t.w / 2 + 0.15, tx = Math.abs(x - t.x);
+  if (tx < half && z > t.z - t.l / 2 - 0.15 && z < t.z + t.l / 2 + 0.3 && y < (t.h + 0.05) * (1 - tx / half) + 0.05) return true;
   return false;
 }
 

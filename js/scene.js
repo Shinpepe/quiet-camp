@@ -16,6 +16,7 @@ import { buildBeach, toggleParasol, parasolOpen, onMat } from './beach.js';
 import { prepareRoad, makeRoad } from './road.js';
 import { buildDream, dreamOn } from './dream.js';
 import { attachAvatar } from './avatar.js';
+import { campForBuild, seatKind } from './camp.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -279,7 +280,9 @@ export function buildScene(bgKey) {
   const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
     dome: null, domeLit: false, domeK: 0,
     wind: { value: 0.4 },
-    fireBase: 0, firePop: 0, fireBurst: false, trunkT: 0 };
+    fireBase: 0, firePop: 0, fireBurst: false, trunkT: 0,
+    /* camp: 캠프 배치표 (1인·멀티) — 이 씬의 텐트·의자·모닥불·자리·충돌이 모두 이것을 따른다 (camp.js) */
+    camp: campForBuild() };
   attachAvatar(scene, cfg);
   /* Fog 객체는 셰이더의 USE_FOG 를 켜고 fogColor 를 넘기는 용도. 실제 농도는 util.js 의 FOG 배열이 정한다 */
   scene.fog = new THREE.Fog(cur.fog, 40, 1000);
@@ -339,11 +342,13 @@ export function buildScene(bgKey) {
     }
   }
 
-  const tent = makeTent(); tent.position.set(-1.6, 0, 1.2); scene.add(tent);
-  const chair = makeChair(); chair.position.set(1.5, 0, 0.8); scene.add(chair);
-  const table = makeTable(); table.position.set(0.6, 0, 0.5); scene.add(table);
-  W.lantern = new THREE.PointLight(0xffc07a, W.lanternLit ? cur.lantern : 0, 12, 2); W.lantern.position.set(0.65, 0.75, 0.5); scene.add(W.lantern);
-  const fire = makeFire(); fire.position.set(0.3, 0, -1.4); scene.add(fire);
+  /* 캠프: 배치표(W.camp)대로 놓는다. 의자는 yaw 만큼 돌려 모닥불을 바라보게 */
+  const L = W.camp, T = L.tent;
+  const tent = makeTent(); tent.position.set(T.x, 0, T.z); scene.add(tent);
+  L.chairs.forEach(([x, z, yaw]) => { const c = makeChair(); c.position.set(x, 0, z); c.rotation.y = yaw; scene.add(c); });
+  const table = makeTable(); table.position.set(L.table[0], 0, L.table[1]); scene.add(table);
+  W.lantern = new THREE.PointLight(0xffc07a, W.lanternLit ? cur.lantern : 0, 12, 2); W.lantern.position.set(L.table[0] + 0.05, 0.75, L.table[1]); scene.add(W.lantern);
+  const fire = makeFire(); fire.position.set(L.fire[0], 0, L.fire[1]); scene.add(fire);
   /* 모닥불 그림자: castShadow 를 바꾸면 재컴파일이 나므로 고정하고, 불이 꺼져 있으면 main.js 가 큐브맵 갱신만 멈춘다 */
   W.fireLight.castShadow = settings.shadow && FINE;
   W.fireLight.shadow.autoUpdate = W.fireLit;
@@ -356,7 +361,9 @@ export function buildScene(bgKey) {
   if (cfg.snow) makeSnowCaps();
   /* 눈사람 만들기: 설산이면 재질·자국·견본을 만들고, 다른 장소면 이전 상태만 비운다 (텐트 다음 — 목도리를 W.tentMats 에 넣는다) */
   buildSnowman(cfg);
-  contactShadow(-1.6, 1.3, 4.4, 4.8); contactShadow(1.5, 0.8, 1.3, 1.3, 0.7); contactShadow(0.6, 0.5, 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(0.3, -1.4, 2.0, 2.0, 0.6); contactShadow(2.4, 0.6, 1.0, 0.9, 0.6); contactShadow(3.05, 0.15, 0.8, 0.8, 0.5);
+  contactShadow(T.x, T.z + 0.1, T.w + 2.0, T.l + 2.2); L.chairs.forEach(([x, z]) => contactShadow(x, z, 1.3, 1.3, 0.7));
+  contactShadow(L.table[0], L.table[1], 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(L.fire[0], L.fire[1], 2.0, 2.0, 0.6);
+  contactShadow(L.cooler[0], L.cooler[1], 1.0, 0.9, 0.6); contactShadow(L.pack[0], L.pack[1], 0.8, 0.8, 0.5);
 
   W.steam = new Particles(160, { color: 0xffffff, size: 0.05, opacity: 0.32 }); scene.add(W.steam.mesh);
   W.smoke = new Smoke(220, { color: 0xb9bdc5, warm: 0.6 }); scene.add(W.smoke.mesh);
@@ -392,19 +399,29 @@ export function buildScene(bgKey) {
      from: 어디서 볼 때 보이는지 ('walk' = 서 있을 때, 그 밖에는 앉은 자리 이름)
      tap: 모바일 행동 버튼에 쓸 짧은 이름 (없으면 label 을 그대로 쓴다)
      꿈속에서는 트렁크가 "확인하기"(총을 꺼낸다), 침낭이 "꿈에서 깨기"가 된다 */
+  /* 자리 이름들: 1인은 car·chair·tent·bed 하나씩, 멀티는 번호가 붙은 자리까지 (data.js 배치표) */
+  const seatsIn = kind => Object.keys(L.seats).filter(k => seatKind(k) === kind);
+  const chairs = seatsIn('chair'), cars = seatsIn('car'), tents = seatsIn('tent'), beds = seatsIn('bed');
+  /* 차 문: 운전석·조수석·뒷좌석 왼쪽·오른쪽 (1인은 운전석만) */
+  const DOORS = [
+    { id: 'car',  pos: [-0.97, 1.0, 8.1], label: '운전석에 앉기' }, { id: 'car2', pos: [0.97, 1.0, 8.1], label: '조수석에 앉기' },
+    { id: 'car3', pos: [-0.97, 1.0, 9.3], label: '뒷좌석에 앉기' }, { id: 'car4', pos: [0.97, 1.0, 9.3], label: '뒷좌석에 앉기' },
+  ].filter(d => L.seats[d.id]);
   W.interact = [
     { id: 'trunk',    pos: [0, 1.0, 10.45],     r: 1.5, hit: 0.9,  from: ['walk'],          label: () => dreamOn() ? '트렁크 확인하기' : '트렁크 열기', act: openTrunk },
-    { id: 'chair',    pos: [1.5, 0.6, 0.8],     r: 1.8, hit: 0.45, from: ['walk'],          label: () => '의자에 앉기', act: () => sitDown('chair') },
-    { id: 'tent',     pos: [-1.6, 0.7, -0.13],  r: 1.5, hit: 1.0,  from: ['walk'],          label: () => '텐트에 들어가기', act: () => sitDown('tent') },
-    { id: 'car',      pos: [-0.97, 1.0, 8.1],   r: 1.5, hit: 0.7,  from: ['walk'],          label: () => '운전석에 앉기', act: () => sitDown('car') },
-    { id: 'fire',     pos: [0.3, 0.4, -1.4],    r: 2.2, hit: 0.6,  from: ['walk'],          label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },
-    { id: 'stump',    pos: [2.55, 0.4, -1.95],  r: 1.7, hit: 0.32, from: ['walk'],          label: () => '장작 패기', act: beginChop },
-    { id: 'cooler',   pos: [2.4, 0.3, 0.6],     r: 1.8, hit: 0.32, from: ['walk'],          label: () => state.item === 'marsh' ? '꼬치 넣기' : '마시멜로 꺼내기', act: useCooler },
-    { id: 'lantern',  pos: [0.65, 0.6, 0.5],    r: 1.8, hit: 0.22, from: ['walk', 'chair'], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
-    { id: 'tentLamp', pos: [-2.35, 0.1, 2.1],   r: 1.8, hit: 0.18, from: ['tent', 'bed'],   label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
-    { id: 'bed',      pos: [-1.1, 0.25, 1.25],  r: 1.8, hit: 0.5,  from: ['tent'],          label: () => dreamOn() ? '꿈에서 깨기' : '침낭에 눕기', act: startSleep },
-    { id: 'dome',     pos: [0, 1.78, 8.32],     r: 1.0, hit: 0.15, from: ['car'],           label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
-    { id: 'memo',     pos: [0.43, 0.83, 8.05],  r: 1.0, hit: 0.14, from: ['car'],           label: () => '캠핑 메모 보기', tap: '메모 보기', act: openMemo },
+    ...chairs.map((id, i) => ({ id, pos: [L.chairs[i][0], 0.6, L.chairs[i][1]], r: 1.8, hit: 0.45, from: ['walk'], label: () => '의자에 앉기', act: () => sitDown(id) })),
+    { id: 'tent',     pos: [T.x, 0.7, T.z - T.l / 2 - 0.03], r: 1.5, hit: L.multi ? 1.4 : 1.0, from: ['walk'], label: () => '텐트에 들어가기', act: () => sitDown('tent') },
+    ...DOORS.map(d => ({ id: d.id, pos: d.pos, r: 1.5, hit: 0.7, from: ['walk'], label: () => d.label, act: () => sitDown(d.id) })),
+    { id: 'fire',     pos: [L.fire[0], 0.4, L.fire[1]],     r: 2.2, hit: 0.6,  from: ['walk'], label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },
+    { id: 'stump',    pos: [L.stump[0], 0.4, L.stump[1]],   r: 1.7, hit: 0.32, from: ['walk'], label: () => '장작 패기', act: beginChop },
+    { id: 'cooler',   pos: [L.cooler[0], 0.3, L.cooler[1]], r: 1.8, hit: 0.32, from: ['walk'], label: () => state.item === 'marsh' ? '꼬치 넣기' : '마시멜로 꺼내기', act: useCooler },
+    { id: 'lantern',  pos: [L.table[0] + 0.05, 0.6, L.table[1]], r: 1.8, hit: 0.22, from: ['walk', ...chairs], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
+    { id: 'tentLamp', pos: [T.x + T.lamp[0], 0.1, T.z + T.lamp[1]], r: 1.8, hit: 0.18, from: [...tents, ...beds], label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
+    /* 침낭: 텐트 자리마다 자기 앞의 침낭 */
+    ...beds.map((id, i) => ({ id, pos: [T.x + T.bags[i], 0.25, T.z + 0.05], r: 1.8, hit: 0.5, from: [tents[i]], label: () => dreamOn() ? '꿈에서 깨기' : '침낭에 눕기', act: startSleep })),
+    /* 실내등·메모: 차의 모든 좌석에서 (멀티의 메모는 가운데 팔걸이 위 — 뒷좌석에서도 닿게 조금 넓게) */
+    { id: 'dome',     pos: [0, 1.78, 8.32], r: L.multi ? 1.3 : 1.0, hit: 0.15, from: cars, label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
+    { id: 'memo',     pos: L.memo,          r: L.multi ? 1.4 : 1.0, hit: 0.14, from: cars, label: () => '캠핑 메모 보기', tap: '메모 보기', act: openMemo },
   ];
   /* 부두 끝: 앉아서 낚시하기 + 태클 상자 위의 노트(물고기 도감). 노트는 서서 내려다볼 때만 (낚시 중에는 시선이 물 쪽으로 묶여 있다).
      낚시하기는 부두 끝 판자 가장자리에(앞에 아무것도 없어 1.8m), 도감은 태클 상자 전체를 덮게 둔다 */

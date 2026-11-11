@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { ctx, state, settings, saveSettings, DAY_LEN, records, session } from './state.js';
 import { bindHome, showHome, inviteLink } from './home.js';
-import { BG, TIME, ITEMS, SEAT, BLOCKS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM } from './data.js';
+import { BG, TIME, ITEMS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM } from './data.js';
+import { camp, campForBuild, multiCamp, blocks, seatOf, seatKind, seatsOf } from './camp.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa, setSeed, newSeed } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
 import { makeItem, applyGear } from './props.js';
@@ -18,7 +19,7 @@ import { onMat, resetBeach, beachHooks } from './beach.js';
 import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
-import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netSpawn, roomNoteText, netBegin, netShare, netFx, netSeatTaken } from './net.js';
+import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken } from './net.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -256,28 +257,33 @@ export function currentTarget() {
   return best;
 }
 
-/* 멀티: 다른 사람이 이미 차지한 자리면 알려 주고 막는다 (텐트는 안에 앉았거나 누운 사람이 있으면). 자리를 여러 개로 늘리는 건 5단계 */
-const BUSY = { chair: ' 의자에 앉아 있다', car: ' 운전석에 앉아 있다', tent: ' 텐트 안에 있다', dock: ' 부두 끝에서 낚시하는 중이다', mat: ' 돗자리에 누워 있다', stump: ' 장작을 패는 중이다' };
+/* 멀티: 다른 사람이 이미 차지한 자리면 알려 주고 막는다. 자리는 하나하나 따로 (의자 2번이 차 있으면 옆 의자는 앉을 수 있다).
+   텐트 자리는 그 자리에 앉았거나 그 앞 침낭에 누운 사람이 있으면 차 있다 */
+const BUSY = { chair: '의자에 앉아 있다', tent: '텐트 안에 있다', dock: '부두 끝에서 낚시하는 중이다', mat: '돗자리에 누워 있다', stump: '장작을 패는 중이다' };
 function seatBusy(id) {
-  const who = netSeatTaken(id === 'tent' ? ['tent', 'bed'] : [id]); if (!who) return false;
-  showToast(josa(who, '이', '가') + BUSY[id]); return true;
+  const k = seatKind(id), bed = k === 'tent' ? id.replace('tent', 'bed') : null;
+  const who = netSeatTaken(bed ? [id, bed] : [id]); if (!who) return false;
+  showToast(josa(who, '이', '가') + ' ' + (k === 'car' ? seatOf(id).name + '에 앉아 있다' : BUSY[k])); return true;
 }
+/* 텐트 입구(멀티): 안의 빈 자리를 앞에서부터 고른다 */
+const freeTent = () => seatsOf('tent').find(s => !netSeatTaken([s, s.replace('tent', 'bed')])) || null;
 
 function startMove(to, yawTo, pitchTo) { cam.from.copy(ctx.camera.position); cam.to.copy(to); cam.t = 0; cam.yawFrom = wrapPI(player.yaw); cam.yawTo = yawTo; cam.pitchFrom = player.pitch; cam.pitchTo = pitchTo === undefined ? player.pitch : pitchTo; }
 export function sitDown(id, quiet) {
+  if (id === 'tent' && !quiet && multiCamp()) { const free = freeTent(); if (!free) { showToast('텐트 안 자리가 다 찼다'); return; } id = free; }
   if (!quiet && seatBusy(id)) return;
-  const st = SEAT[id]; state.mode = 'seated'; state.seat = id;
-  /* 부두 끝·돗자리: 물 쪽(정면)을 본다. 돗자리는 하늘을 반쯤 올려다보며 눕는다 */
+  const st = seatOf(id), kind = seatKind(id); state.mode = 'seated'; state.seat = id;
+  /* 부두 끝·돗자리: 물 쪽(정면)을 본다. 돗자리는 하늘을 반쯤 올려다보며 눕는다. 멀티의 의자는 모닥불을 본다 */
   const sea = id === 'dock' || id === 'mat';
-  const yawTo = sea ? 0 : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : id === 'mat' ? BEACH.lie : undefined;
+  const yawTo = sea ? 0 : kind === 'chair' && st.yaw !== undefined ? st.yaw : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : id === 'mat' ? BEACH.lie : undefined;
   startMove(new THREE.Vector3(...st.pos), yawTo, pitchTo);
-  if (!quiet) { if (id === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (id === 'tent') sfx('zipper'); else sfx('sit'); }
-  setIndoor(id === 'tent' || id === 'car');
+  if (!quiet) { if (kind === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (kind === 'tent') sfx('zipper'); else sfx('sit'); }
+  setIndoor(kind === 'tent' || kind === 'car');
 }
 function standUp() {
-  const st = SEAT[state.seat];
+  const st = seatOf(state.seat), kind = seatKind(state.seat);
   if (state.seat === 'dock') stopFish();
-  if (state.seat === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (state.seat === 'tent') sfx('zipper', 'close'); else sfx('stand');
+  if (kind === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (kind === 'tent') sfx('zipper', 'close'); else sfx('stand');
   player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); setIndoor(false);
   restoreStashed();
 }
@@ -325,7 +331,7 @@ export function interact() {
     const t = currentTarget();
     if (t) { if (t.act) t.act(); else sitDown(t.id); }
     else if (state.mode === 'walk' && snowStartable()) startSnowball();
-    else if (state.mode === 'seated') { if (state.seat === 'bed') sitDown('tent', true); else standUp(); }
+    else if (state.mode === 'seated') { if (seatKind(state.seat) === 'bed') sitDown(state.seat.replace('bed', 'tent'), true); else standUp(); }
   }
   updateHUD(); anim.lastTargetId = undefined;
 }
@@ -393,7 +399,8 @@ function refreshGuide() {
   const nn = netNotice(); if (nn) { guide(nn); return; }
   if (dreamOn()) { guide(dreamGuide()); return; }
   if (!memoUnread()) { guide(null); return; }
-  guide(state.mode === 'seated' && state.seat === 'car' ? '내리기 전에 조수석 메모를 보자' : '차 조수석의 메모를 보자');
+  const inCar = state.mode === 'seated' && seatKind(state.seat) === 'car', multi = multiCamp();
+  guide(inCar ? (multi ? '내리기 전에 팔걸이 메모를 보자' : '내리기 전에 조수석 메모를 보자') : (multi ? '차 안의 메모를 보자' : '차 조수석의 메모를 보자'));
 }
 
 /* ── 아이스박스: 바라보고 E. 꼬치가 없으면 마시멜로 꼬치를 꺼내고, 들고 있으면(빈 꼬치 포함) 넣는다.
@@ -406,16 +413,18 @@ export function useCooler() {
 
 /* ── 마시멜로 굽기: 서서 모닥불 가까이(ROAST.near) 불꽃 자리를 바라볼 때만 굽는다 ──
    roastSpot: 'roast' = 구울 수 있음, 'cold' = 불이 꺼져 있음, null = 굽는 자리가 아님(클릭하면 먹는다) */
-const FIRE = new THREE.Vector3(...ROAST.fire), _rv = new THREE.Vector3(), _rf = new THREE.Vector3();
+/* 불꽃 자리: 지금 캠프 배치의 모닥불 가운데, 높이는 ROAST.fire 의 y */
+const FIRE = new THREE.Vector3(), _rv = new THREE.Vector3(), _rf = new THREE.Vector3();
+const fireSpot = () => { const f = camp().fire; return FIRE.set(f[0], ROAST.fire[1], f[1]); };
 /* 꼬치 끝이 닿을 자리: 모닥불 가운데에서 플레이어 쪽으로 12cm, 불꽃 높이 */
 export function roastTarget(out) {
-  const c = ctx.camera.position, dx = c.x - FIRE.x, dz = c.z - FIRE.z, d = Math.hypot(dx, dz) || 1;
-  return out.set(FIRE.x + dx / d * 0.12, FIRE.y, FIRE.z + dz / d * 0.12);
+  const F = fireSpot(), c = ctx.camera.position, dx = c.x - F.x, dz = c.z - F.z, d = Math.hypot(dx, dz) || 1;
+  return out.set(F.x + dx / d * 0.12, F.y, F.z + dz / d * 0.12);
 }
 export function roastSpot() {
   if (state.item !== 'marsh' || state.mode !== 'walk' || cam.t < 1 || ctx.paused) return null;
   const ud = ctx.W.item && ctx.W.item.userData; if (!ud || ud.amount <= 0) return null;
-  const c = ctx.camera.position; if (Math.hypot(c.x - FIRE.x, c.z - FIRE.z) > ROAST.near) return null;
+  const F = fireSpot(), c = ctx.camera.position; if (Math.hypot(c.x - F.x, c.z - F.z) > ROAST.near) return null;
   roastTarget(_rv).sub(c).normalize(); ctx.camera.getWorldDirection(_rf);
   if (_rv.dot(_rf) < Math.cos(ROAST.aim)) return null;
   return ctx.W.fireLit ? 'roast' : 'cold';
@@ -555,7 +564,7 @@ export function updateSleep(dt) {
   if (sleep.phase === 'in') {
     setVolume(settings.vol * Math.max(0.12, 1 - sleep.t / 1.6));
     if (sleep.t >= 1.7) {
-      const b = SEAT.bed; state.seat = 'bed'; ctx.camera.position.set(...b.pos); player.yaw = b.yaw; player.pitch = b.pitch; cam.t = 1; putBack();
+      const b = seatOf('bed'); state.seat = 'bed'; ctx.camera.position.set(...b.pos); player.yaw = b.yaw; player.pitch = b.pitch; cam.t = 1; putBack();
       if (sleep.wake) endDream(); else sleep.dream = pickDream();
       setIndoor(true);
       sleep.from = state.clock; sleep.to = sleep.dream ? 1 : state.clock < WAKE ? WAKE : 1 + WAKE; sleep.phase = 'night'; sleep.t = 0;
@@ -646,7 +655,7 @@ export function updatePrompt() {
   const start = !t && !roll && state.mode === 'walk' && snowStartable();
   const id = roll ? 'roll:' + rl : t ? t.id : start ? 'snowStart' : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
   if (id === anim.lastTargetId) return; anim.lastTargetId = id;
-  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? SEAT[state.seat].up : chop ? '그만하기' : null;
+  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? seatOf(state.seat).up : chop ? '그만하기' : null;
   const clickLab = t && t.click && !state.item ? t.clickLabel() : null;
   cross.classList.toggle('hot', !!t || rl === '눈사람 만들기');
   if (isTouch) {
@@ -744,7 +753,12 @@ export function buildWithLoading(after) {
 function sceneReady(bg) {
   const W = ctx.W;
   return doneGen === buildGen && !ctx.compiling && !!ctx.scene && !!W.cfg && W.cfg.key === bg && !(settings.reflect && !builtReflect)
-    && (session.seed === null || W.seed === session.seed);
+    && (session.seed === null || W.seed === session.seed) && W.camp === campForBuild();
+}
+/* 처음 앉을 좌석: 원하는 좌석(net.js — 1인·방장은 운전석, 친구는 자리 번호 순)부터, 비어 있는 차 좌석 */
+function startSeat() {
+  const list = [netStartSeat(), ...seatsOf('car')].filter(s => seatOf(s));
+  return list.find(s => !netSeatTaken([s])) || null;
 }
 /* 프리뷰 씬을 재사용할 때 새로 빌드한 것과 같은 출발점으로 되돌린다 */
 function resetSceneForStart() {
@@ -769,10 +783,10 @@ export function startGame(fromHost) {
   const begin = () => {
     if (sg !== startGen) return; starting = false;
     stashed = null; putBack(); ctx.hand.visible = true; player.yaw = player.pitch = 0; cam.t = 1; anim.lastTargetId = undefined; ctx.paused = false; anim.exhale = 0;
-    /* 1인·방장은 운전석에서, 친구는 차 옆에 선 채로 시작한다 (멀티 자리 배치는 5단계) */
-    const spawn = netSpawn();
-    if (spawn) { state.mode = 'walk'; state.seat = null; player.x = spawn[0]; player.z = spawn[1]; ctx.camera.position.set(player.x, floorY(player.x, player.z) + EYE, player.z); }
-    else { state.mode = 'seated'; state.seat = 'car'; ctx.camera.position.set(...SEAT.car.pos); }
+    /* 모두 차를 타고 도착한다: 1인·방장은 운전석, 친구는 조수석·뒷좌석. 좌석이 모두 차 있으면 차 옆에 서서 시작한다 */
+    const seat = startSeat();
+    if (seat) { state.mode = 'seated'; state.seat = seat; ctx.camera.position.set(...seatOf(seat).pos); }
+    else { state.mode = 'walk'; state.seat = null; player.x = -2.2; player.z = 7.2; ctx.camera.position.set(player.x, floorY(player.x, player.z) + EYE, player.z); }
     ctx.camera.rotation.set(0, 0, 0);
     const night = isNightClock(state.clock);
     ctx.W.wasNight = night;
@@ -780,7 +794,7 @@ export function startGame(fromHost) {
     /* 멀티: 방장은 지금 불·랜턴 상태를 알리고, 친구는 받아 둔 상태로 맞춘다 */
     netBegin();
     startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
-    setIndoor(!spawn);
+    setIndoor(!!seat);
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
     guideReady = false; const gs = ++guideSess;
     ctx.running = true; updateHUD(); fade.style.opacity = 0;
@@ -820,7 +834,7 @@ export function surfaceAt(x, z) {
 /* 걷기 충돌: 몸(반지름 PR)이 네모나 원에 닿으면 막힌다.
    네모는 "가장 가까운 점까지의 거리"로 재서 모서리를 둥글게 돌아 나간다 (예전엔 네모를 PR 만큼 키워 모서리에서 더 일찍 막혔다) */
 function blockedAt(x, z) {
-  for (const b of BLOCKS) {
+  for (const b of blocks()) {
     if (b.round) { const r = (b.x[1] - b.x[0]) / 2; if (Math.hypot(x - b.x[0] - r, z - b.z[0] - r) < r + PR) return true; continue; }
     const dx = Math.max(b.x[0] - x, 0, x - b.x[1]), dz = Math.max(b.z[0] - z, 0, z - b.z[1]);
     if (dx * dx + dz * dz < PR * PR) return true;

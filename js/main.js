@@ -16,6 +16,7 @@ import { updateSnowman, snowMoving } from './snowman.js';
 import { updateBeach, parasolMoving } from './beach.js';
 import { updateDream, dreamOn, tintDream } from './dream.js';
 import { updateView, beginView, endView, viewThird } from './view.js';
+import { camp } from './camp.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -252,6 +253,7 @@ function loop(now) {
   if (W.flames) W.flames.forEach((f, i) => { f.material.uniforms.uK.value = W.fireK; f.visible = W.fireK > 0.02; f.scale.y = W.fireK * (0.85 + 0.2 * Math.sin(T * 8.5 + i * 1.3) + 0.1 * Math.sin(T * 21 + i) + 0.25 * W.firePop); f.scale.x = 0.9 + 0.1 * Math.sin(T * 6.7 + i * 2); });
   if (W.logGlow) W.logGlow.forEach((s, i) => { s.material.opacity = Math.min(1, W.fireK * (0.55 + 0.45 * Math.sin(T * 13 + i * 1.9) + 0.3 * W.firePop)); });
   if (W.fireLight) {
+    { const f = camp().fire; firePos.set(f[0], 0.25, f[1]); }
     W.fireBase += ((W.fireLit ? W.tm.fireI : 0) - W.fireBase) * Math.min(1, dt * 4);
     W.fireLight.intensity = W.fireBase * (0.88 + 0.07 * Math.sin(T * 17) + 0.05 * Math.sin(T * 41) + 0.45 * W.firePop);
     W.emberCore.material.color.lerp(_c.setHex(W.fireLit ? 0xff6a1a : 0x2a1c14), Math.min(1, dt * 3));

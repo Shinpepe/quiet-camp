@@ -7,6 +7,7 @@ import { tex } from './textures.js';
 import { sfx } from './audio.js';
 import { makeAxe, AXE_EDGE } from './props.js';
 import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide } from './gauge.js';
+import { camp } from './camp.js';
 
 /* ══ 장작 패기 ══
    타이밍 게이지: 성공 CHOP_GAUGE.hits 번이면 쪼개지고, 대성공은 한 번에 쪼개진다. 실패는 벌점 없이 튕기기만 한다.
@@ -51,7 +52,7 @@ function dust(x, y, z, n, op) {
   const W = ctx.W; if (!W.smoke) return;
   for (let i = 0; i < n; i++) { R.rig.localToWorld(_w.set(x + rnd(-0.06, 0.06), y, z + rnd(-0.06, 0.06))); W.smoke.spawn(_w, { x: rnd(-0.15, 0.15), y: rnd(0.1, 0.3), z: rnd(-0.15, 0.15) }, 0.05, rnd(1, 1.6), 0.1, 0.04, 0.3, op); }
 }
-function setPile() { R.pile.set(CHOP.pile[0] - CHOP.stump[0], 0, CHOP.pile[1] - CHOP.stump[1]).applyAxisAngle(_UP, -R.rig.rotation.y); }
+function setPile() { R.pile.set(camp().pile[0] - camp().stump[0], 0, camp().pile[1] - camp().stump[1]).applyAxisAngle(_UP, -R.rig.rotation.y); }
 
 /* ── 장작 윗면의 금: 도끼날 방향(rig z)을 따라 들쭉날쭉하게 갈라진다 ──
    장작마다 시드로 경로가 정해지고, 성공 단계에 따라 길이·폭이 늘어난다.
@@ -107,7 +108,7 @@ export function buildChop() {
   C.G = makeGauge(CHOP_GAUGE.speed, CHOP_GAUGE.ok, CHOP_GAUGE.great);
   P.yaw = 0;
 
-  const rig = new THREE.Group(); rig.position.set(CHOP.stump[0], 0, CHOP.stump[1]); scene.add(rig);
+  const rig = new THREE.Group(); rig.position.set(camp().stump[0], 0, camp().stump[1]); scene.add(rig);
   const work = new THREE.Group(); work.visible = false; rig.add(work);
 
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5)));
@@ -149,7 +150,7 @@ function clearDebris() {
   R.chipMesh.instanceMatrix.needsUpdate = true; R.chipLive = false;
 }
 function placeFor(px, pz, free) {
-  const sx = CHOP.stump[0], sz = CHOP.stump[1], a0 = Math.atan2(px - sx, pz - sz);
+  const [sx, sz] = camp().stump, a0 = Math.atan2(px - sx, pz - sz);
   for (let k = 0; k <= 32; k++) {
     const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.2;
     const x = sx + Math.sin(a) * CHOP.dist, z = sz + Math.cos(a) * CHOP.dist;
@@ -168,7 +169,7 @@ export function startChop(px, pz, free) {
   if (Math.abs(wrapPI(p.yaw - R.rig.rotation.y)) > 0.01) { clearDebris(); R.rig.rotation.y = p.yaw; R.rig.updateMatrixWorld(true); setPile(); }
   P.x = p.x; P.z = p.z; P.yaw = p.yaw;
   C.eye.set(p.x, terrainH(p.x, p.z, W.cfg) + EYE, p.z);
-  C.fwd.set(CHOP.stump[0] - p.x, 0, CHOP.stump[1] - p.z).normalize(); C.right.set(-C.fwd.z, 0, C.fwd.x);
+  C.fwd.set(camp().stump[0] - p.x, 0, camp().stump[1] - p.z).normalize(); C.right.set(-C.fwd.z, 0, C.fwd.x);
   Object.assign(C, { on: true, st: 'ready', a: A_READY, pk: 0, wantStop: false, nextLogT: 1.0, log: null, hits: 0, combo: 0 });
   R.work.visible = true; R.logG.visible = false;
   if (W.stumpAxe) W.stumpAxe.visible = false;

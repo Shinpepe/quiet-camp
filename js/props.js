@@ -4,6 +4,7 @@ import { GEAR, GEAR_DEFAULT, ROAST } from './data.js';
 import { rnd, fbm, smooth, std, smoothM, METAL, shadowed, bar, jitter, softTex, shadowTex, canvasTex, NOISE_GLSL, stream } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex, T } from './textures.js';
+import { camp } from './camp.js';
 
 const wood = (color, rx, ry, extra) => smoothM(color, Object.assign({ roughness: 0.75 }, tex('wood', rx, ry, 0.25), extra || {}));
 const cloth = (color, rx, extra) => smoothM(color, Object.assign({ roughness: 0.95 }, tex('fabric', rx, rx, 0.3), extra || {}));
@@ -233,7 +234,7 @@ function makeSleepingBag(M) {
 function addTentDoor(g, M, Wd, H, L) {
   const V3 = THREE.Vector3, zf = -L / 2 - 0.03;
   [-1, 1].forEach(s => {
-    const a = new V3(s * 1.08, 0.04, zf), b = new V3(s * 0.05, 1.63, zf), T = b.clone().sub(a).normalize(), curve = new THREE.LineCurve3(a, b);
+    const a = new V3(s * (Wd / 2 - 0.12), 0.04, zf), b = new V3(s * 0.05, H - 0.07, zf), T = b.clone().sub(a).normalize(), curve = new THREE.LineCurve3(a, b);
     const NU = 48, NV = 10, geo = new THREE.TubeGeometry(curve, NU, 1, NV, false), p = geo.attributes.position, P = new V3();
     for (let i = 0; i <= NU; i++) {
       const t = i / NU; curve.getPointAt(t, P);
@@ -247,7 +248,8 @@ function addTentDoor(g, M, Wd, H, L) {
 }
 
 export function makeTent() {
-  const W = ctx.W, g = new THREE.Group(), Wd = 2.4, H = 1.7, L = 2.6, linings = [];
+  /* 크기·침낭·말뚝·랜턴 자리는 배치표의 텐트(1인 = 2인용 크기, 멀티 = 침낭 4개가 들어가는 큰 텐트) */
+  const W = ctx.W, tc = camp().tent, g = new THREE.Group(), Wd = tc.w, H = tc.h, L = tc.l, linings = [];
   /* 천 색은 applyGear 가 정한다 (여기서는 흰색으로 만들어 두고 등록만) */
   const clothM = cloth(0xffffff, 8), flyM = cloth(0xffffff, 8), backM = cloth(0xffffff, 4), liningM = cloth(0xffffff, 8, { side: THREE.BackSide }), pole = METAL(), cord = smoothM(0xbfb7a8);
   const backInM = cloth(0xffffff, 4, { side: THREE.BackSide }), doorM = cloth(0xffffff, 2);
@@ -270,14 +272,18 @@ export function makeTent() {
   addTentDoor(g, { door: doorM, cord }, Wd, H, L);
   /* 바닥은 뒷면 삼각형(z=L/2)보다 3cm 짧게 — 같은 평면에서 만나면 뒤쪽 아래가 깜빡인다 */
   const floor = new THREE.Mesh(new THREE.BoxGeometry(Wd - 0.04, 0.05, L - 0.06), cloth(0x3a2d24, 6)); floor.position.y = 0.025; g.add(floor);
-  /* 침낭·베개: 바닥 윗면(y 0.05)에 놓는다. 머리 쪽이 텐트 뒤(+z) */
-  const sleep = makeSleepingBag({ shell: cloth(0xffffff, 4, { vertexColors: true }), piping: cloth(0x1a2840, 2), zip: smoothM(0x1b1d22, { roughness: 0.4, metalness: 0.4 }), pillow: cloth(0xd9d2c5, 3) });
-  sleep.position.set(0.5, 0.05, 0.05); g.add(sleep);
+  /* 침낭·베개: 바닥 윗면(y 0.05)에 놓는다. 머리 쪽이 텐트 뒤(+z). 자리는 배치표(tc.bags) — 1인 1개, 멀티 4개 나란히. 재질은 함께 쓴다 */
+  const bagM = { shell: cloth(0xffffff, 4, { vertexColors: true }), piping: cloth(0x1a2840, 2), zip: smoothM(0x1b1d22, { roughness: 0.4, metalness: 0.4 }), pillow: cloth(0xd9d2c5, 3) };
+  tc.bags.forEach(bx => { const s = makeSleepingBag(bagM); s.position.set(bx, 0.05, 0.05); g.add(s); });
+
   /* 앞 매트: 접지 그림자 평면(y 0.02)과 같은 높이가 되지 않게 살짝 띄운다 */
   const mat2 = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.02, 0.45), cloth(0x6b5a45, 3)); mat2.position.set(0, 0.035, -L / 2 - 0.4); g.add(mat2);
-  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * 1.95, 0.02, sz * 1.75], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * 1.95, 0.04, sz * 1.75); stake.rotation.z = -sx * 0.45; g.add(stake); });
-  const lamp = makeLantern(W.tentLampLit); lamp.scale.setScalar(0.7); lamp.position.set(-0.75, 0.05, 0.9); g.add(lamp); W.tentLampObj = lamp;
-  W.tentLamp = new THREE.PointLight(0xffc890, W.tentLampLit ? W.tm.tentLamp : 0, 4.5, 2); W.tentLamp.position.set(-0.6, 0.35, 0.8); g.add(W.tentLamp);
+  const [kx, kz] = tc.stake;
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { g.add(bar([0, H + 0.04, sz * (L / 2 + 0.28)], [sx * kx, 0.02, sz * kz], 0.004, cord, 4)); const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), pole); stake.position.set(sx * kx, 0.04, sz * kz); stake.rotation.z = -sx * 0.45; g.add(stake); });
+  /* 텐트 랜턴: 1인은 침낭 옆 구석, 멀티는 침낭 머리맡 뒤 가운데. 큰 텐트는 빛이 조금 더 멀리 닿는다 */
+  const [lx, lz] = tc.lamp;
+  const lamp = makeLantern(W.tentLampLit); lamp.scale.setScalar(0.7); lamp.position.set(lx, 0.05, lz); g.add(lamp); W.tentLampObj = lamp;
+  W.tentLamp = new THREE.PointLight(0xffc890, W.tentLampLit ? W.tm.tentLamp : 0, 4.5 + (Wd - 2.4), 2); W.tentLamp.position.set(lx + 0.15, 0.35, lz - 0.1); g.add(W.tentLamp);
   shadowed(g); linings.forEach(li => { li.castShadow = false; }); applyGear(); return g;
 }
 export function makeChair() {
@@ -410,11 +416,18 @@ function makeCarInterior(M) {
     [[0.15, 0.55], [1.15, 0.5]].forEach(([z, l]) => add(roundedBox(0.09, 0.05, l, 0.02), M.trim, s * 0.8, 0.995, z));
     add(roundedBox(0.03, 0.03, 0.12, 0.01), M.chrome, s * 0.78, 1.105, -0.2);
   });
-  /* 조수석에 접어 둔 담요 */
-  add(roundedBox(0.36, 0.05, 0.32, 0.02), M.blanket, P, 0.775, FZ - 0.02, 0, 0.2);
-  /* 담요 위의 캠핑 메모: 살짝 비뚤게 놓인 A5 줄노트 한 장. 담요 윗면(0.825)에서 2mm 띄운다.
-     위쪽(제목)이 앞유리 쪽 — 조수석에 앉은 사람이 읽는 방향. scene.js 의 메모 상호작용이 이 자리를 쓴다 */
-  add(new THREE.PlaneGeometry(0.15, 0.21), smoothM(0xffffff, { map: memoTex, roughness: 0.92 }), P - 0.02, 0.827, FZ - 0.03, -Math.PI / 2, 0, 0.45);
+  /* 접어 둔 담요와 캠핑 메모 (A5 줄노트 한 장, 위쪽(제목)이 앞유리 쪽).
+     1인: 조수석에 담요, 그 위에 메모 (담요 윗면 0.825 에서 2mm).
+     멀티: 조수석에도 사람이 앉으므로 메모는 운전석·조수석 사이 가운데 팔걸이 위(윗면 0.82)로, 담요는 뒷좌석 가운데 빈자리로.
+     scene.js 의 메모 상호작용은 배치표의 memo 자리를 쓴다 */
+  const memoM = smoothM(0xffffff, { map: memoTex, roughness: 0.92 }), memoG = new THREE.PlaneGeometry(0.15, 0.21);
+  if (camp().multi) {
+    add(roundedBox(0.36, 0.05, 0.32, 0.02), M.blanket, 0, 0.775, 1.3, 0, 0.2);
+    add(memoG, memoM, 0, 0.823, 0.3, -Math.PI / 2, 0, 0.2);
+  } else {
+    add(roundedBox(0.36, 0.05, 0.32, 0.02), M.blanket, P, 0.775, FZ - 0.02, 0, 0.2);
+    add(memoG, memoM, P - 0.02, 0.827, FZ - 0.03, -Math.PI / 2, 0, 0.45);
+  }
   /* 실내등: 지붕 안쪽(헤드라이너 아랫면 y 1.805) 가운데. 빛 닿는 거리 3.2m — 차 안과 바로 주변만 비춘다. 그림자는 만들지 않는다 */
   add(roundedBox(0.24, 0.025, 0.13, 0.012), M.trim, 0, 1.78, 0.32);
   const lens = add(roundedBox(0.17, 0.012, 0.08, 0.006), M.lens, 0, 1.772, 0.32);
@@ -621,13 +634,13 @@ function makeBackpack(M) {
 
 /* ── 쿨러, 배낭, 장작더미, 도끼 박힌 그루터기, 잔가지 ── */
 export function makeProps() {
-  const scene = ctx.scene, R = stream('props');
+  const scene = ctx.scene, R = stream('props'), cp = camp();
   /* 아이스박스: 걸쇠가 있는 앞면이 캠프 가운데를 보도록 돌려 둔다 */
   const cooler = makeCooler({
     body: smoothM(0x3d6f9e, { roughness: 0.55 }), lid: smoothM(0xdde6ee, { roughness: 0.5 }),
     dark: smoothM(0x2a2c30, { roughness: 0.8 }), trim: smoothM(0x9aa3ab, { roughness: 0.45, metalness: 0.2 }),
   });
-  cooler.position.set(2.4, 0, 0.6); cooler.rotation.y = -1.8; scene.add(shadowed(cooler)); ctx.W.coolerLid = cooler.userData.lid;
+  cooler.position.set(cp.cooler[0], 0, cp.cooler[1]); cooler.rotation.y = -1.8; scene.add(shadowed(cooler)); ctx.W.coolerLid = cooler.userData.lid;
   /* 배낭: 게임 질감(천 노멀)을 입힌 재질로 makeBackpack 을 만들고 1.15배로 키운다 (높이 약 75cm).
      머그가 아이스박스와 붙어 보이지 않게 아이스박스 반대쪽으로 조금 떼어 놓는다 (data.js 의 BLOCKS·scene.js 의 접지 그림자도 이 위치) */
   const pack = makeBackpack({
@@ -637,7 +650,7 @@ export function makeProps() {
     pad: cloth(0xb8743a, 4), padIn: smoothM(0x6a4020, { roughness: 0.9 }),
     mug: smoothM(0xece6d6, { roughness: 0.35, side: THREE.DoubleSide }), rim: smoothM(0x24405e, { roughness: 0.35 }),
   });
-  pack.scale.setScalar(1.15); pack.position.set(3.05, 0, 0.15); pack.rotation.y = -0.6; scene.add(shadowed(pack));
+  pack.scale.setScalar(1.15); pack.position.set(cp.pack[0], 0, cp.pack[1]); pack.rotation.y = -0.6; scene.add(shadowed(pack));
 
   const bark = smoothM(0x5a3d28, Object.assign({ roughness: 0.95 }, tex('bark', 1, 1, 0.5))), cut = smoothM(0xc9a97c, Object.assign({ roughness: 0.85 }, tex('wood', 1, 1, 0.3)));
   const pile = new THREE.Group();
@@ -645,7 +658,7 @@ export function makeProps() {
     const rad = R.rnd(0.068, 0.082), l = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, R.rnd(0.5, 0.6), 10), [bark, cut, cut]);
     l.rotation.set(R.rnd(0, 6.3), R.rnd(-0.05, 0.05), Math.PI / 2); l.position.set(R.rnd(-0.03, 0.03), 0.075 + r * 0.139, z); pile.add(l);
   }));
-  pile.position.set(1.85, 0, -2.55); pile.rotation.y = -0.35; scene.add(shadowed(pile)); contactShadow(1.85, -2.55, 0.95, 0.8, 0.6);
+  pile.position.set(cp.pile[0], 0, cp.pile[1]); pile.rotation.y = -0.35; scene.add(shadowed(pile)); contactShadow(cp.pile[0], cp.pile[1], 0.95, 0.8, 0.6);
 
   const stump = new THREE.Group();
   const st = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.32, 12), [bark, cut, cut]); st.position.y = 0.16; stump.add(st);
@@ -660,10 +673,10 @@ export function makeProps() {
     /* 칼자국은 도끼를 들어도 남도록 그루터기에 붙인다 */
     const slot = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.004, 0.17), std(0x1a1410)); slot.position.set(0, 0.322, 0); slot.rotation.y = holder.rotation.y; stump.add(slot);
   }
-  stump.position.set(2.55, 0, -1.95); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(2.55, -1.95, 0.55, 0.55, 0.6);
+  stump.position.set(cp.stump[0], 0, cp.stump[1]); stump.rotation.y = 0.5; scene.add(shadowed(stump)); contactShadow(cp.stump[0], cp.stump[1], 0.55, 0.55, 0.6);
 
-  for (let i = 0; i < 6; i++) { const x = R.rnd(1.5, 2.5), z = R.rnd(-2.95, -2.15), a = R.rnd(0, 6.3), L = R.rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], R.rnd(0.008, 0.014), bark, 6))); }
-  for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(R.rnd(0.06, 0.12), 0.012, R.rnd(0.03, 0.06)), bark); c.position.set(R.rnd(1.6, 2.6), 0.008, R.rnd(-2.9, -2.1)); c.rotation.set(R.rnd(-0.2, 0.2), R.rnd(0, 6.3), 0); scene.add(shadowed(c)); }
+  for (let i = 0; i < 6; i++) { const x = cp.pile[0] + R.rnd(-0.35, 0.65), z = cp.pile[1] + R.rnd(-0.4, 0.4), a = R.rnd(0, 6.3), L = R.rnd(0.18, 0.32); scene.add(shadowed(bar([x - Math.cos(a) * L / 2, 0.012, z - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, 0.012, z + Math.sin(a) * L / 2], R.rnd(0.008, 0.014), bark, 6))); }
+  for (let i = 0; i < 5; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(R.rnd(0.06, 0.12), 0.012, R.rnd(0.03, 0.06)), bark); c.position.set(cp.pile[0] + R.rnd(-0.25, 0.75), 0.008, cp.pile[1] + R.rnd(-0.35, 0.45)); c.rotation.set(R.rnd(-0.2, 0.2), R.rnd(0, 6.3), 0); scene.add(shadowed(c)); }
 }
 
 /* ── 해변 유목: 원점 = 바닥 가운데, 길이 방향 = x. scene.js 가 모래 위에 3개 놓는다 ──

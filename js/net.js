@@ -6,6 +6,7 @@ import { applyGear } from './props.js';
 import { sfxAt } from './audio.js';
 import { parasolOpen, setParasol } from './beach.js';
 import { rollState, remoteRoll, snowRemote, snowList, snowLoad } from './snowman.js';
+import { seatKind } from './camp.js';
 /* 아래 모듈들도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
 import { startGame, exitGame, toLobby, updateHUD, previewRebuild, renderMenu, showToast, spawnPlanted, surfaceAt } from './game.js';
 import { showHome } from './home.js';
@@ -13,7 +14,7 @@ import { addRemote, removeRemote, hideRemote, setRemoteTag, updateAvatar, snapsh
 import { meteorHooks, showMeteor } from './scene.js';
 
 /* ══ 멀티 캠핑 연결 (Trystero, P2P) ══
-   서버 없이 브라우저끼리 직접 잇는다. 방 이름 = 'camp-' + 초대 코드. 최대 3명.
+   서버 없이 브라우저끼리 직접 잇는다. 방 이름 = 'camp-' + 초대 코드. 최대 4명.
    방장(host)이 세계의 주인이다: 시드·장소·시각·하루 길이·시간 흐름·차/텐트 색, 모닥불·랜턴·실내등·파라솔을 정해 친구(guest)에게 보낸다. 별똥별도 방장이 띄운 값을 보낸다.
    몸은 각자 정한다: 스냅샷(위치·시선·자세·손에 든 것·굴리는 눈덩이)을 초당 12번 모두에게 보내고, 받은 쪽은 120ms 늦춰 두 스냅샷 사이를 보간한다.
    신호 — hello(친구→방장: 들어가도 될까) · welcome(방장→친구: 세계 정보·자리 번호·함께 쓰는 물건·눈덩이/눈사람 목록) · nope(가득 참·버전 다름) · profile(이름)
@@ -27,10 +28,8 @@ import { meteorHooks, showMeteor } from './scene.js';
    방장 신호가 4초 끊기면 친구 화면에 "방장이 잠시 자리를 비웠다". 방장 연결이 끊기면 친구는 홈으로.
    1인 캠핑에서는 이 파일의 연결 코드가 돌지 않는다 (Trystero 도 멀티를 고를 때 처음 불러온다) */
 
-const APP = 'quiet-camp-v1', V = 4, MAX = 3;
+const APP = 'quiet-camp-v1', V = 5, MAX = 4;
 const HZ = 12, DELAY = 120, STALE = 3000, AWAY = 4000, FIND = 15000;
-/* 친구가 처음 서는 자리: 차 왼쪽 옆 (자리 번호 1·2). 멀티 자리 배치는 5단계 */
-const SPAWN = [[-2.2, 7.2], [-2.2, 9.2]];
 /* 함께 쓰는 물건: 읽기·쓰기, 소리를 낼 자리(W.interact 의 id)와 켤 때·끌 때 소리. now = 움직임 없이 바로 맞추기 (중간에 들어올 때) */
 const FLAG = {
   fire: { get: () => ctx.W.fireLit, set: v => { ctx.W.fireLit = v; }, at: 'fire', on: 'fireOn', off: 'fireOff' },
@@ -130,7 +129,7 @@ function guestWire(A) {
     if (d.running) startGame(true); else follow();
     roomNote();
   });
-  A.nope.get(d => bounce(d && d.why === 'full' ? '캠핑장이 가득 찼다 (최대 3명)' : '버전이 달라 들어갈 수 없다. 새로고침하자'));
+  A.nope.get(d => bounce(d && d.why === 'full' ? '캠핑장이 가득 찼다 (최대 4명)' : '버전이 달라 들어갈 수 없다. 새로고침하자'));
   A.start.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); N.shared = N.snow = null; applyWorld(d); startGame(true); });
   A.room.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); applyWorld(d); if (!ctx.running) follow(); });
   A.lobby.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); N.shared = N.snow = null; toLobby(); roomNote(); });
@@ -270,10 +269,10 @@ function peerSounds(p) {
   if (p.seat === undefined) p.seat = seat;
   else if (seat !== p.seat) {
     const was = p.seat; p.seat = seat;
-    const inTent = s => s === 'tent' || s === 'bed';
+    const inTent = s => !!s && (seatKind(s) === 'tent' || seatKind(s) === 'bed');
     if (!(inTent(was) && inTent(seat))) {
       const k = seat || was, x = r.x, y = r.y + 1, z = r.z;
-      if (k === 'car') { sfxAt('doorOpen', x, y, z); setTimeout(() => { if (ctx.running) sfxAt('doorClose', x, y, z); }, 900); }
+      if (seatKind(k) === 'car') { sfxAt('doorOpen', x, y, z); setTimeout(() => { if (ctx.running) sfxAt('doorClose', x, y, z); }, 900); }
       else if (inTent(k)) sfxAt('zipper', x, y, z, seat ? 'open' : 'close');
       else sfxAt(seat ? 'sit' : 'stand', x, y, z);
     }
@@ -372,7 +371,7 @@ export function netProfile() { clearTimeout(N.profT); N.profT = setTimeout(() =>
 export const clockRule = () => isGuest() && N.hostId ? { dayMin: N.dayMin, flow: N.flow } : { dayMin: settings.dayMin, flow: settings.flow };
 /* 안내 줄: 방장 신호가 끊겼을 때 */
 export const netNotice = () => isGuest() && N.away ? '방장이 잠시 자리를 비웠다' : null;
-/* 친구가 처음 설 자리 (1인·방장은 null → 운전석) */
-export const netSpawn = () => isGuest() ? SPAWN[(N.slot || 1) - 1] || SPAWN[0] : null;
+/* 처음 앉을 좌석: 1인·방장은 운전석, 친구는 자리 번호 순으로 조수석·뒷좌석 왼쪽·오른쪽 (이미 차 있으면 game.js 가 다른 빈 좌석을 고른다) */
+export const netStartSeat = () => isGuest() ? ['car2', 'car3', 'car4'][(N.slot || 1) - 1] || 'car2' : 'car';
 /* 다른 사람 아바타가 보이는 중 — main.js 가 그동안 그림자맵을 매 프레임 갱신한다 */
 export const netBusy = () => { for (const p of N.peers.values()) if (p.av && p.av.root.visible) return true; return false; };

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ctx, state, settings } from './state.js';
 import { BG } from './data.js';
 import { rnd } from './util.js';
+import { camp, seatKind } from './camp.js';
 
 /* ── 방향: 힐링 캠핑. 모든 소리는 멀리·부드럽게·드물게. 날카로운 고역 없음, 긴 어택, 밤엔 더 뜸하게.
    버스: world(환경·위치음, 실내 필터) / bed(world 안의 배경 베드 — 한 모금 하는 동안 살짝 물러난다)
@@ -126,7 +127,7 @@ function applyWorld() {
   worldGain.gain.setTargetAtTime((menuMode ? 0.35 : 1) * (indoor ? 0.5 : 1), t, 0.2);
   worldLP.frequency.setTargetAtTime(indoor ? 1300 : dreaming ? 2800 : 20000, t, 0.15);
   const out = ctx.W.cfg ? OUTDOOR[ctx.W.cfg.key] : 'forest';
-  setSpace(dreaming ? 'dream' : indoor ? (state.seat === 'car' ? 'car' : 'tent') : out || 'forest');
+  setSpace(dreaming ? 'dream' : indoor ? (seatKind(state.seat) === 'car' ? 'car' : 'tent') : out || 'forest');
 }
 export function setIndoor(on) { indoor = !!on; applyWorld(); }
 /* 꿈에 들어가고 나올 때 dream.js 가 부른다 */
@@ -426,7 +427,7 @@ function getChorus() {
 /* 모닥불: 연속층은 아주 작게(파도·바람과 헷갈리지 않게 — 낮은 웅웅거림은 예전의 1/5, 1.4kHz 쉭은 제거),
    대신 '타닥'이 불의 크기를 따라 촘촘해진다. 4번에 1번은 바로 뒤에 한 번 더 겹친다 */
 function makeFireSrc() {
-  const pan = panner(0.3, 0.6, -1.4, 1.6, 45, 1.1), g = gainN(0), t = []; g.connect(pan);
+  const f = camp().fire, pan = panner(f[0], 0.6, f[1], 1.6, 45, 1.1), g = gainN(0), t = []; g.connect(pan);
   const rum = noise('brown', true), rl = filt('lowpass', 120), rg = gainN(0.04); chain(rum, rl, rg, g); rum.start(0, off());
   const fl = noise('pink', true), ff = filt('bandpass', 380, 0.8), fg = gainN(0.005); chain(fl, ff, fg, g); fl.start(0, off());   // 불꽃이 빠르게 펄럭이는 숨결
   const src = { pan, gain: g, t, nodes: [rum, rl, rg, fl, ff, fg, ...lfo(6.1, 0.003, fg.gain), ...lfo(3.7, 0.002, fg.gain), g, pan] };
@@ -471,7 +472,7 @@ function buildSpatial() {
   const cfg = ctx.W.cfg; killSpatial();
   makeFireSrc();
   if (cfg.water) makeWaterSrc(cfg.key === 'beach' ? 'waves' : 'lake', cfg.water.z - 3);
-  sceneKey = cfg.key;
+  sceneKey = ctx.W;
 }
 function killSpatial() {
   if (fire) { killT(fire.t); kill(fire.nodes); } if (water) { killT(water.t); kill(water.nodes); }
@@ -599,7 +600,7 @@ function makeBed(type, timeKey) {
 }
 const killBed = b => { if (!b) return; killT(b.timers); kill(b.nodes); };
 function startAmb(type, timeKey) {
-  if (sceneKey !== ctx.W.cfg.key) buildSpatial();
+  if (sceneKey !== ctx.W) buildSpatial();
   const old = bed, t = AC.currentTime;
   bed = makeBed(type, timeKey); bed.out.gain.setValueAtTime(0.0001, t); bed.out.gain.exponentialRampToValueAtTime(1, t + 5);
   if (old) { old.out.gain.cancelScheduledValues(t); old.out.gain.setValueAtTime(Math.max(0.0001, old.out.gain.value), t); old.out.gain.exponentialRampToValueAtTime(0.0001, t + 5); setTimeout(() => killBed(old), 5600); }
@@ -657,7 +658,7 @@ function gust(k, type) {
   f.frequency.setValueAtTime(250, t); f.frequency.linearRampToValueAtTime(900, t + 1.8); f.frequency.linearRampToValueAtTime(300, t + 4.0);
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16 * k, t + 1.7); g.gain.linearRampToValueAtTime(0, t + 4.2); chain(s, f, g, pan); s.start(t, off()); s.stop(t + 4.4);
   if (type === 'forest') { const l = noise('pink'), lf = filt('bandpass', 3200, 0.7), lg = gainN(0); lg.gain.setValueAtTime(0, t + 0.4); lg.gain.linearRampToValueAtTime(0.012 * k, t + 2.0); lg.gain.linearRampToValueAtTime(0, t + 4.2); chain(l, lf, lg, pan); l.start(t, off()); l.stop(t + 4.4); }
-  if (type === 'wind') { /* 텐트 천 펄럭임 */ const p = panner(-1.6, 1.0, 1.2, 1.5, 20, 1.2), fl = noise('white'), ff = filt('lowpass', 700), fg = gainN(0); fg.gain.setValueAtTime(0, t + 0.6); fg.gain.linearRampToValueAtTime(0.04 * k, t + 1.8); fg.gain.linearRampToValueAtTime(0, t + 4.0); const [lo, lg2] = lfo(rnd(6, 9), 0.02 * k, fg.gain); chain(fl, ff, fg, p); fl.start(t, off()); fl.stop(t + 4.2); setTimeout(() => kill([lo, lg2, p]), 4500); }
+  if (type === 'wind') { /* 텐트 천 펄럭임 */ const tc = camp().tent, p = panner(tc.x, 1.0, tc.z, 1.5, 20, 1.2), fl = noise('white'), ff = filt('lowpass', 700), fg = gainN(0); fg.gain.setValueAtTime(0, t + 0.6); fg.gain.linearRampToValueAtTime(0.04 * k, t + 1.8); fg.gain.linearRampToValueAtTime(0, t + 4.0); const [lo, lg2] = lfo(rnd(6, 9), 0.02 * k, fg.gain); chain(fl, ff, fg, p); fl.start(t, off()); fl.stop(t + 4.2); setTimeout(() => kill([lo, lg2, p]), 4500); }
   setTimeout(() => kill([pan]), 4800);
 }
 function foghorn() { const t = AC.currentTime, p = panner(-160, 15, -70, 60, 800, 0.6), lp = filt('lowpass', 500); lp.connect(p); const o = osc('sine', 95), o2 = osc('sine', 190), g2 = gainN(0.25), g = gainN(0); o.connect(g); o2.connect(g2); g2.connect(g); g.connect(lp); env(g, t, 0.6, 0.06, 2.6); o.start(t); o2.start(t); o.stop(t + 3.4); o2.stop(t + 3.4); setTimeout(() => kill([lp, p]), 4000); }
