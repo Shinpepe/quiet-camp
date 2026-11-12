@@ -249,8 +249,8 @@ export function showMeteor(p) {
 }
 export function updateMeteors(dt) {
   const W = ctx.W; if (!W.meteors) return;
-  /* 꿈속에서 운석을 막는 동안에는 장식용 별똥별을 띄우지 않는다 (쏠 수 없는 것이 섞이면 헷갈린다) */
-  const night = W.tm.stars > 0.5 && !W.sunUp && state.mode !== 'shoot';
+  /* 멀티 꿈속은 총을 들기 전에도 운석과 헷갈리지 않게 띄우지 않는다 */
+  const night = W.tm.stars > 0.5 && !W.sunUp && state.mode !== 'shoot' && !(dreamOn() && session.mode !== 'solo');
   if (night && session.mode !== 'guest' && (!ctx.paused || session.mode === 'host')) {
     W.meteorT -= dt;
     if (W.meteorT <= 0) {
@@ -418,7 +418,7 @@ export function buildScene(bgKey) {
     { id: 'lantern',  pos: [L.table[0] + 0.05, 0.6, L.table[1]], r: 1.8, hit: 0.22, from: ['walk', ...chairs], label: () => W.lanternLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('lantern') },
     { id: 'tentLamp', pos: [T.x + T.lamp[0], 0.1, T.z + T.lamp[1]], r: 1.8, hit: 0.18, from: [...tents, ...beds], label: () => W.tentLampLit ? '랜턴 끄기' : '랜턴 켜기', act: () => toggleLamp('tentLamp') },
     /* 침낭: 텐트 자리마다 자기 앞의 침낭 */
-    ...beds.map((id, i) => ({ id, pos: [T.x + T.bags[i], 0.25, T.z + 0.05], r: 1.8, hit: 0.5, from: [tents[i]], label: () => dreamOn() ? '꿈에서 깨기' : '침낭에 눕기', act: startSleep })),
+    ...beds.map((id, i) => ({ id, pos: [T.x + T.bags[i], 0.25, T.z + 0.05], r: 1.8, hit: 0.5, from: [tents[i]], label: () => dreamOn() && session.mode === 'solo' ? '꿈에서 깨기' : '침낭에 눕기', act: startSleep })),
     /* 실내등·메모: 차의 모든 좌석에서 (멀티의 메모는 가운데 팔걸이 위 — 뒷좌석에서도 닿게 조금 넓게) */
     { id: 'dome',     pos: [0, 1.78, 8.32], r: L.multi ? 1.3 : 1.0, hit: 0.15, from: cars, label: () => W.domeLit ? '실내등 끄기' : '실내등 켜기', act: () => toggleLamp('dome') },
     { id: 'memo',     pos: L.memo,          r: L.multi ? 1.4 : 1.0, hit: 0.14, from: cars, label: () => '캠핑 메모 보기', tap: '메모 보기', act: openMemo },

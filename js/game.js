@@ -19,7 +19,7 @@ import { onMat, resetBeach, beachHooks } from './beach.js';
 import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
-import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken } from './net.js';
+import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken, netEnter, netHostLive, netSleepCount } from './net.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -86,7 +86,7 @@ function copyText(btn, text) {
   else prompt('복사해서 보내 주자', text);
 }
 /* 메뉴를 지금 캠핑 방식(session)에 맞춰 연다.
-   1인·방장은 모든 칸을 고르고, 친구(guest)는 이름·재킷만 고른다 (장소·시각·차·텐트는 흐리게 잠김, 떠나기 대신 기다림 안내).
+   1인·방장은 모든 칸을 고르고, 친구(guest)는 이름·재킷만 고른다 (장소·시각·차·텐트는 흐리게 잠김). 친구의 떠나기는 방장이 떠난 뒤에 밝아진다.
    방장·친구는 맨 위에 캠핑장 칸(초대 코드)과 이름 줄이 나온다 */
 export function openMenu() {
   const m = $('#menu'), multi = session.mode !== 'solo', guest = session.mode === 'guest';
@@ -100,10 +100,17 @@ export function openMenu() {
     $('#copyLink').style.display = guest ? 'none' : '';
     $('#roomNote').textContent = roomNoteText();
   }
-  const go = $('#start'); go.classList.toggle('wait', guest);
-  go.firstChild.textContent = guest ? '출발하기를 기다리는 중 ' : '떠나기 ';
+  refreshGo();
   renderMenu(); m.classList.remove('hidden');
 }
+/* 떠나기 버튼: 친구는 방장이 캠핑장으로 떠나기 전까지 흐리게 (눌러도 안내만 한다) */
+export function refreshGo() {
+  const go = $('#start'), wait = session.mode === 'guest' && !netHostLive();
+  go.classList.remove('wait'); go.style.opacity = wait ? 0.5 : '';
+  go.firstChild.textContent = '떠나기 ';
+}
+/* 떠나기 (버튼·Enter): bindInput 이 이름 칸과 함께 채운다 */
+let pressGo = () => {};
 
 export function bindInput() {
   /* 모바일이면 body 에 touch 를 단다 → style.css 가 키 표시(E·숫자)를 숨긴다 */
@@ -127,7 +134,7 @@ export function bindInput() {
     keys[e.code] = true;
     if (e.repeat) return;
     /* Enter 의 기본 동작(포커스된 버튼의 click)을 막아 두 번 실행되지 않게 한다 */
-    if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden') && session.mode !== 'guest') { e.preventDefault(); startGame(); } return; }
+    if (!ctx.running) { if (e.code === 'Enter' && !$('#menu').classList.contains('hidden')) { e.preventDefault(); pressGo(); } return; }
     if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
     if (e.code === 'Escape' && inModal()) { closeModal(); return; }
@@ -169,7 +176,6 @@ export function bindInput() {
   ms.onpointerup = ms.onpointercancel = () => { sipTouchT = performance.now(); endSip(); };
   ms.oncontextmenu = e => e.preventDefault();
   $('#mAct').onclick = () => { if (performance.now() - sipTouchT < 500) return; interact(); };
-  $('#start').onclick = startGame;
   /* 슬라이더: 같은 키의 메뉴·일시정지 슬라이더를 함께 움직이고 저장한다.
      map 을 주면 슬라이더 값과 설정 값을 서로 바꿔 준다 (하루 길이: 단계 번호 0..3 ↔ 30·60·120·240분) */
   const bindRange = (id, key, fmt, apply, map) => {
@@ -206,10 +212,22 @@ export function bindInput() {
   $('#copyCode').onclick = () => copyText($('#copyCode'), session.code);
   $('#copyLink').onclick = () => copyText($('#copyLink'), inviteLink(session.code));
   $('#pauseCopy').onclick = () => copyText($('#pauseCopy'), session.code);
+  /* 이름: 한글처럼 조합해서 쓰는 글자는 마지막 글자가 조합 중으로 남아 input 이 오지 않을 수 있다.
+     입력·조합 끝·값 바뀜·포커스 해제 때마다 다시 읽고, 바뀌었을 때만 저장하고 알린다 */
   const ni = $('#nameInput'); ni.value = state.name;
-  ni.oninput = () => { state.name = ni.value.trim().slice(0, 12); saveSettings(); netProfile(); };
-  /* 이름을 쓰는 동안 글자가 게임 키(E·V·Enter)로 넘어가지 않게 */
-  ni.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') ni.blur(); });
+  const syncName = () => { const v = ni.value.trim().slice(0, 12); if (v === state.name) return; state.name = v; saveSettings(); netProfile(); };
+  ['input', 'compositionend', 'change', 'blur'].forEach(ev => ni.addEventListener(ev, syncName));
+  /* 이름을 쓰는 동안 글자가 게임 키(E·V·Enter)로 넘어가지 않게. 조합 중인 Enter 는 글자 확정용이라 무시한다 */
+  ni.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) ni.blur(); });
+  /* 떠나기: 이름 칸에 조합 중인 글자가 있으면 먼저 확정한다 (버튼을 눌러도 칸이 포커스를 잃지 않는 브라우저가 있다).
+     친구는 방장이 캠핑장으로 떠난 뒤에만 따라 들어간다 — 그 전이면 캠핑장 칸에 이유를 띄운다 */
+  pressGo = () => {
+    if (document.activeElement === ni) ni.blur();
+    syncName();
+    if (session.mode !== 'guest') { startGame(); return; }
+    const msg = netEnter(); if (msg) { sfx('ui'); $('#roomNote').textContent = msg; }
+  };
+  $('#start').onclick = () => pressGo();
   renderMenu();
   bindHome();
 }
@@ -259,7 +277,7 @@ export function currentTarget() {
 
 /* 멀티: 다른 사람이 이미 차지한 자리면 알려 주고 막는다. 자리는 하나하나 따로 (의자 2번이 차 있으면 옆 의자는 앉을 수 있다).
    텐트 자리는 그 자리에 앉았거나 그 앞 침낭에 누운 사람이 있으면 차 있다 */
-const BUSY = { chair: '의자에 앉아 있다', tent: '텐트 안에 있다', dock: '부두 끝에서 낚시하는 중이다', mat: '돗자리에 누워 있다', stump: '장작을 패는 중이다' };
+const BUSY = { chair: '의자에 앉아 있다', tent: '텐트 안에 있다', bed: '침낭에 누워 있다', dock: '부두 끝에서 낚시하는 중이다', mat: '돗자리에 누워 있다', stump: '장작을 패는 중이다' };
 function seatBusy(id) {
   const k = seatKind(id), bed = k === 'tent' ? id.replace('tent', 'bed') : null;
   const who = netSeatTaken(bed ? [id, bed] : [id]); if (!who) return false;
@@ -331,7 +349,7 @@ export function interact() {
     const t = currentTarget();
     if (t) { if (t.act) t.act(); else sitDown(t.id); }
     else if (state.mode === 'walk' && snowStartable()) startSnowball();
-    else if (state.mode === 'seated') { if (seatKind(state.seat) === 'bed') sitDown(state.seat.replace('bed', 'tent'), true); else standUp(); }
+    else if (state.mode === 'seated') { if (seatKind(state.seat) === 'bed') leaveBag(); else standUp(); }
   }
   updateHUD(); anim.lastTargetId = undefined;
 }
@@ -363,7 +381,8 @@ function takeGun() {
   if (ctx.W.item && ctx.W.item.userData.lit) { showToast('스파클라를 먼저 땅에 꽂자'); return; }
   ctx.W.trunkT = 1.4; sfx('trunkOpen'); setTimeout(() => sfx('trunkClose'), 1300);
   pickItem('gun'); showToast('하늘에서 무언가 떨어진다');
-  const y0 = roadYaw(player.x, player.z);
+  /* 1인은 내가 선 자리에서 길 쪽, 멀티는 모두 같은 정면 (dream.js 가 꿈에 들어갈 때 정한다) */
+  const y0 = session.mode === 'solo' ? roadYaw(player.x, player.z) : dreamCenter();
   state.mode = 'shoot'; anim.lastTargetId = undefined;
   startMove(ctx.camera.position.clone(), y0, DREAM.look[0]);
   beginShoot(y0); $('#cross').classList.add('aim'); updateHUD();
@@ -397,6 +416,7 @@ const memoUnread = () => memoFor(state.bg).some(m => !records.memoRead.includes(
 function refreshGuide() {
   if (!ctx.running || !guideReady || state.mode === 'sleep') { guide(null); return; }
   const nn = netNotice(); if (nn) { guide(nn); return; }
+  if (sleep.wait) { const c = netSleepCount(); guide(`침낭에 누워 기다리는 중 (${c.n}/${c.of})`); return; }
   if (dreamOn()) { guide(dreamGuide()); return; }
   if (!memoUnread()) { guide(null); return; }
   const inCar = state.mode === 'seated' && seatKind(state.seat) === 'car', multi = multiCamp();
@@ -537,18 +557,67 @@ export function itemEmptied() {
 /* ── 잠자기: 보통은 다음 아침 7시(WAKE)에 깬다.
    꿈을 꾸면(pickDream — 처음 잠들 때는 반드시) 잠자기 시계가 0:00 까지 돌아가 멈추고, 꿈속 밤에 깨어난다 (dream.js startDream).
    꿈에서 깰 때(wake)는 화면이 흐려지며 어두워지고, 시계가 0:00 → 7:00 으로 돌아 아침의 침낭에서 깬다.
-   꿈속에서 침낭에 다시 누워도, 운석 막기가 끝나도(dream.js) wake 로 깬다 ── */
-const sleep = { on: false, phase: '', t: 0, from: 0, to: 0, wake: false, dream: false };
+   꿈속에서 침낭에 다시 누워도, 운석 막기가 끝나도(dream.js) wake 로 깬다.
+   멀티: 침낭에 누우면 바로 잠들지 않고 기다린다(wait). 캠핑장 안에서 자리 비움이 아닌 사람이 모두 누우면
+   방장이 잠들기 신호를 보내고(net.js), 모두 startNap 으로 함께 잠든다 — 자리 비움인 사람도 방장이 정해 준 침낭으로 옮겨져 함께.
+   멀티의 꿈은 방장이 정한다 (net.js hostNap). 꿈속에서는 혼자 깰 수 없고, 운석 막기가 끝나면 각자 자기 침낭으로 깬다 ── */
+const sleep = { on: false, phase: '', t: 0, from: 0, to: 0, wake: false, dream: false, wait: false, bed: 'bed' };
+/* 멀티: 침낭에 누워 다른 사람을 기다리는 중인지 (net.js 가 스냅샷에 실어 보낸다) */
+export const sleepWaiting = () => sleep.wait && state.mode === 'seated';
 export function startSleep(wake) {
   if (sleep.on) return;
-  /* 멀티: 같이 잠드는 규칙은 5단계에서 만든다. 그때까지는 침낭에 눕지 않는다 (꿈에서 깨는 wake 는 그대로) */
-  if (wake !== true && session.mode !== 'solo') { showToast('멀티 캠핑에서는 아직 잘 수 없다'); return; }
+  if (wake !== true && session.mode !== 'solo') {
+    /* 멀티의 꿈은 혼자 깰 수 없다 — 운석 막기가 끝나면 모두 함께 깬다 */
+    if (dreamOn()) { showToast('꿈이 끝나면 함께 깨어난다'); return; }
+    lieInBag(); return;
+  }
   sleep.wake = wake === true || dreamOn(); sleep.dream = false;
+  /* 1인은 언제나 그 침낭, 멀티는 잠들 때 방장이 정해 준 내 침낭으로 깬다 (하던 일도 정리) */
+  if (session.mode === 'solo') sleep.bed = 'bed'; else settleForNap();
+  beginNight();
+  if (sleep.wake) canvas().style.filter = 'blur(10px)'; else sfx('bag');
+}
+/* 잠자기 화면을 연다 (1인·멀티 공통) */
+function beginNight() {
   sleep.on = true; sleep.phase = 'in'; sleep.t = 0; state.mode = 'sleep'; anim.holding = false; anim.sipT = null; anim.mouth = false; anim.roast = false; anim.eatT = null;
   const f = $('#fade'); f.style.transition = 'opacity 1.6s'; f.style.opacity = 1;
   $('#prompt').classList.remove('on'); $('#cross').style.display = 'none'; $('#legend').style.display = 'none';
-  if (sleep.wake) canvas().style.filter = 'blur(10px)'; else sfx('bag');
   updateHUD();
+}
+/* 멀티: 지금 앉은 텐트 자리 앞의 침낭에 누워 기다린다. 손에 든 것은 맡겨 두고, 일어나면(leaveBag) 돌려받는다 */
+function lieInBag() {
+  if (seatKind(state.seat) !== 'tent') return;
+  const bed = state.seat.replace('tent', 'bed'), b = seatOf(bed);
+  if (!b || seatBusy(bed) || !stashHand()) return;
+  state.mode = 'seated'; state.seat = bed; sleep.wait = true;
+  startMove(new THREE.Vector3(...b.pos), b.yaw ?? wrapPI(player.yaw), b.pitch ?? 0);
+  sfx('bag'); setIndoor(true);
+}
+/* 침낭에서 일어나 텐트 자리에 앉는다. 기다리던 중이면 기다림도 그만두고, 맡겨 둔 물건을 돌려받는다 */
+function leaveBag() {
+  sleep.wait = false;
+  sitDown(state.seat.replace('bed', 'tent'), true);
+  restoreStashed();
+}
+/* 멀티: 방장의 잠들기 신호 (net.js). bed = 방장이 정해 준 내 침낭.
+   기다리던 사람은 누운 채로, 자리 비움이던 사람은 하던 일을 정리하고 그 침낭으로 옮겨 함께 잠든다 */
+export function startNap(bed, dream) {
+  if (sleep.on || !ctx.running || !seatOf(bed)) return;
+  settleForNap();
+  /* dream = 방장이 정한 꿈 여부 */
+  sleep.wait = false; sleep.wake = false; sleep.dream = !!dream; sleep.bed = bed;
+  beginNight();
+}
+/* 하던 일 정리: 열린 창·장작 패기·낚시·굴리던 눈덩이·손에 든 것(맡겨 둔 것 포함) */
+function settleForNap() {
+  if (state.mode === 'trunk') $('#trunk').classList.remove('on');
+  else if (state.mode === 'journal') hideJournal();
+  else if (state.mode === 'memo') hideMemo();
+  else if (state.mode === 'chop') resetChop();
+  if (fishActive() || state.seat === 'dock') resetFish();
+  if (snowRolling()) rollAct();
+  $('#cross').classList.remove('aim');
+  stashed = null; putBack(); gaugeHide(); ctx.hand.visible = true; cam.t = 1;
 }
 /* 잠자기 화면을 정리한다. 잠자는 도중(페이드가 검은 상태)이었다면 페이드도 걷어 낸다. 흐림·조준 모양도 되돌린다 */
 function endSleepUI() {
@@ -564,8 +633,10 @@ export function updateSleep(dt) {
   if (sleep.phase === 'in') {
     setVolume(settings.vol * Math.max(0.12, 1 - sleep.t / 1.6));
     if (sleep.t >= 1.7) {
-      const b = seatOf('bed'); state.seat = 'bed'; ctx.camera.position.set(...b.pos); player.yaw = b.yaw; player.pitch = b.pitch; cam.t = 1; putBack();
-      if (sleep.wake) endDream(); else sleep.dream = pickDream();
+      const b = seatOf(sleep.bed); state.seat = sleep.bed; ctx.camera.position.set(...b.pos); player.yaw = b.yaw ?? player.yaw; player.pitch = b.pitch ?? 0; cam.t = 1;
+      stashed = null; putBack();
+      /* 꿈 여부: 1인은 여기서 뽑고, 멀티는 방장이 정해 보낸 값 그대로 (startNap) */
+      if (sleep.wake) endDream(); else if (session.mode === 'solo') sleep.dream = pickDream();
       setIndoor(true);
       sleep.from = state.clock; sleep.to = sleep.dream ? 1 : state.clock < WAKE ? WAKE : 1 + WAKE; sleep.phase = 'night'; sleep.t = 0;
       st.classList.add('on'); ctx.W.fireLit = false;
@@ -655,7 +726,7 @@ export function updatePrompt() {
   const start = !t && !roll && state.mode === 'walk' && snowStartable();
   const id = roll ? 'roll:' + rl : t ? t.id : start ? 'snowStart' : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
   if (id === anim.lastTargetId) return; anim.lastTargetId = id;
-  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? seatOf(state.seat).up : chop ? '그만하기' : null;
+  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? (sleep.wait ? '일어나기' : seatOf(state.seat).up || '일어나기') : chop ? '그만하기' : null;
   const clickLab = t && t.click && !state.item ? t.clickLabel() : null;
   cross.classList.toggle('hot', !!t || rl === '눈사람 만들기');
   if (isTouch) {
@@ -769,7 +840,7 @@ function resetSceneForStart() {
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
 
-/* 출발. 친구는 방장이 출발할 때(net.js 가 startGame(true)) 함께 들어간다.
+/* 출발. 친구는 떠나기를 누르고 방장이 받아 줄 때(net.js 의 welcome go → startGame(true)) 들어간다.
    startGen: 들어가는 도중에 방장이 메뉴로 가면(toLobby) 늦게 끝난 빌드가 게임을 시작하지 않게 막는다 */
 let startGen = 0, starting = false;
 export function startGame(fromHost) {
@@ -812,7 +883,7 @@ export function startGame(fromHost) {
 export function exitGame() {
   startGen++; starting = false;
   hidePause(); ctx.running = false; if (document.pointerLockElement) document.exitPointerLock();
-  endSleepUI(); resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx();
+  endSleepUI(); sleep.wait = false; sleep.bed = 'bed'; resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx();
   $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null);
   $('#fade').style.opacity = 0;
   stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); ctx.hand.visible = false; hideJoy();

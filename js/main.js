@@ -197,7 +197,7 @@ function loop(now) {
       if (cam.t >= 1) { player.yaw = cam.yawTo; player.pitch = cam.pitchTo; updateHUD(); anim.lastTargetId = undefined; }
     } else if (state.mode === 'walk' && !ctx.paused) walk(dt);
     camera.rotation.y = player.yaw; camera.rotation.x = player.pitch + Math.sin(T * 0.7) * 0.003; camera.rotation.z = Math.sin(T * 0.5) * 0.002;
-    updatePrompt(); if (!ctx.paused) updateSleep(dt);
+    updatePrompt(); if (!ctx.paused || session.mode !== 'solo') updateSleep(dt);
   }
   chopCamera(camera, dt, cam.t >= 1);
   camera.updateMatrixWorld();
@@ -223,8 +223,8 @@ function loop(now) {
   updateSnowman(ctx.running && (!ctx.paused || session.mode !== 'solo') ? dt : 0);
   /* 해변 파라솔·랜턴 (1인은 멈춘 동안 움직이지 않는다) */
   updateBeach(ctx.paused && session.mode === 'solo' ? 0 : dt);
-  /* 꿈: 운석·총의 반동·번쩍임·남은 시간 (멈춘 동안·메뉴에서는 dt 0) */
-  updateDream(ctx.running && !ctx.paused ? dt : 0);
+  /* 꿈: 운석·총의 반동·번쩍임·남은 시간 (메뉴에서는 dt 0, 1인은 멈춘 동안에도 0 — 멀티는 세계가 멈추지 않는다) */
+  updateDream(ctx.running && (!ctx.paused || session.mode !== 'solo') ? dt : 0);
   const flick = 0.92 + 0.06 * Math.sin(T * 13) + 0.04 * Math.sin(T * 31);
   if (W.lantern) { lampTo(W.lantern, W.lanternLit, W.tm.lantern, 2.5, flick, dt); if (W.lanternObj) W.lanternObj.userData.setLit(W.lanternLit); }
   if (W.tentLamp) { lampTo(W.tentLamp, W.tentLampLit, W.tm.tentLamp, 1.2, flick, dt); if (W.tentLampObj) W.tentLampObj.userData.setLit(W.tentLampLit); }

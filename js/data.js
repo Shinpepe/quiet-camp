@@ -167,7 +167,9 @@ const SOLO = {
 const MULTI_FIRE = [1.0, -2.0];
 const MULTI = {
   multi: true,
-  tent: { x: -2.9, z: 1.2, w: 3.6, h: 2.0, l: 2.8, stake: [2.1, 1.85], sit: [-0.66, -0.22, 0.22, 0.66], bags: [-1.08, -0.36, 0.36, 1.08], lamp: [0, 1.24] },
+  /* 큰 텐트: 네 명이 각자 침낭 위에 앉아도 머리가 천장에 닿지 않는 크기. 넓어진 만큼 왼쪽으로 옮겨 앞 말뚝이 맨 왼쪽 의자에 닿지 않게.
+     바깥 두 자리는 천장이 낮아 침낭 가운데보다 조금 안쪽(침낭 위)에 앉는다 */
+  tent: { x: -3.5, z: 1.2, w: 4.4, h: 2.4, l: 2.8, stake: [2.6, 1.85], sit: [-0.97, -0.32, 0.32, 0.97], bags: [-1.08, -0.36, 0.36, 1.08], lamp: [0, 1.24] },
   fire: MULTI_FIRE,
   /* 반지름 1.9m, 왼쪽부터 129° · 103° · 77° · 51° — 의자 사이 약 0.2m */
   chairs: arc(MULTI_FIRE, 1.9, [129, 103, 77, 51]),
@@ -214,7 +216,8 @@ function campSeats(L) {
     S['chair' + n(i)] = { pos: [e[0], 1.05, e[1]], stand: turn([x, z], yaw, 0, -0.8), yaw, name: '의자', up: '일어나기', at: [a[0], 0, a[1], yaw] };
   });
   t.sit.forEach((sx, i) => {
-    S['tent' + n(i)] = { pos: [t.x + sx, 0.72, t.z + 0.35], stand: out, name: '텐트 안', up: '텐트에서 나가기', at: [t.x + sx, 0.05, t.z + 0.2, 0] };
+    /* 침낭 위에 앉는다: 눌린 침낭 높이(바닥 위 8cm)만큼 몸과 눈을 올린다 */
+    S['tent' + n(i)] = { pos: [t.x + sx, 0.8, t.z + 0.35], stand: out, name: '텐트 안', up: '텐트에서 나가기', at: [t.x + sx, 0.13, t.z + 0.2, 0] };
   });
   t.bags.forEach((bx, i) => {
     S['bed' + n(i)] = { pos: [t.x + bx, 0.45, t.z + 0.75], yaw: Math.PI, pitch: 1.15, stand: out, name: '침낭', up: '일어나기', at: [t.x + bx, 0.17, t.z + 0.8, 0] };

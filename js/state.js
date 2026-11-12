@@ -51,8 +51,9 @@ export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: nul
    chopBest: 장작 패기 최고 연속
    memoRead: 캠핑 메모에서 읽은 할 일 이름표 (data.js MEMO 의 key). 지금 장소의 메모에 여기 없는 줄이 있으면 안내를 띄운다
    dreams: 꿈을 꾼 횟수 (0 이면 다음에 텐트에서 잠들 때 반드시 꿈을 꾼다 — dream.js pickDream)
-   dreamBest: 꿈속에서 막아 낸 운석 최고 기록 */
-export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0 };
+   dreamBest: 꿈속에서 막아 낸 운석 최고 기록 (1인)
+   dreamTeamBest: 멀티 꿈에서 함께 막아 낸 운석 최고 기록 (1인 기록과 따로) */
+export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0, dreamTeamBest: 0 };
 if (saved.records && typeof saved.records === 'object') {
   const f = saved.records.fish, okSize = v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 500;
   const okClock = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1;
@@ -72,6 +73,7 @@ if (saved.records && typeof saved.records === 'object') {
   const okInt = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1e6;
   if (okInt(saved.records.dreams)) records.dreams = Math.floor(saved.records.dreams);
   if (okInt(saved.records.dreamBest)) records.dreamBest = Math.floor(saved.records.dreamBest);
+  if (okInt(saved.records.dreamTeamBest)) records.dreamTeamBest = Math.floor(saved.records.dreamTeamBest);
 }
 
 /* 슬라이더처럼 연달아 바뀌는 값은 300ms 모아서 한 번에 쓴다. 페이지를 닫을 때는 바로 기록 */
