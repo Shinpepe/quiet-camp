@@ -3,7 +3,7 @@ import { ctx, state, records, saveSettings } from './state.js';
 import { FISHING } from './data.js';
 import { rnd, smoothM } from './util.js';
 import { WATER_Y } from './terrain.js';
-import { sfx } from './audio.js';
+import { sfx, sfxAt } from './audio.js';
 import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide, banner, hideBanner, toast, showCard, hideCard } from './gauge.js';
 import { DOCK } from './dock.js';
 
@@ -16,7 +16,8 @@ import { DOCK } from './dock.js';
    끌어올리기: 성공 needOk 번 또는 대성공 needGr 번이면 잡힌다. 실패 FISHING.fails 번이면 줄이 풀린다.
    잡으면 눈앞에 들어 이름·크기를 보여 주고, 누르면 놓아준다. 잡은 기록은 물고기 도감(journal.js)에 쌓인다.
    끌어올리는 동안과 들어 올린 동안에는 E(일어나기)가 막힌다 (fishBusy).
-   줄은 수면을 지나는 지점에서 끊어 그리고, 끌어올릴 때의 물결도 그 지점에서 퍼진다 */
+   줄은 수면을 지나는 지점에서 끊어 그리고, 끌어올릴 때의 물결도 그 지점에서 퍼진다.
+   다른 사람의 낚시(fishRemote)는 줄·찌를 한 벌 더 두고, 받은 상태·찌 자리·휜 정도로 같은 모양을 그린다 (부두 끝은 한 사람만) */
 
 const V = THREE.Vector3, WY = WATER_Y;
 const cl = (x, a, b) => Math.max(a, Math.min(b, x)), lerp = (a, b, t) => a + (b - a) * t;
@@ -99,32 +100,44 @@ export function fishModel(sp) {
 }
 function disposeModel(m) { if (!m) return; if (m.parent) m.parent.remove(m); m.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
 
-/* ── 낚싯대: 카메라에 붙어 씬이 바뀌어도 살아남는다. 축은 로컬 +y, 네 마디라 끝으로 갈수록 더 휜다.
-   ctx.rod 에 등록해 두면 main.js 가 물 반사를 그릴 때 숨긴다 ── */
+/* ── 낚싯대: 내 것은 카메라에 붙어 씬이 바뀌어도 살아남는다. 축은 로컬 +y(원점 = 손잡이 끝), 네 마디라 끝으로 갈수록 더 휜다.
+   ctx.rod 에 등록해 두면 main.js 가 물 반사를 그릴 때 숨긴다. 다른 사람 아바타가 드는 것은 makeRod 로 같은 모양을 한 벌 더 만든다 ── */
 let rodRoot = null, rod = null, tipObj = null;
 const segs = [];
-function ensureRod() {
-  if (rodRoot) return;
-  rodRoot = new THREE.Group(); rodRoot.visible = false; ctx.camera.add(rodRoot); ctx.rod = rodRoot;
-  rod = new THREE.Group(); rodRoot.add(rod);
+/* 낚싯대 한 벌: { r: 그룹, segs: 마디들, tip: 끝 점 } */
+function buildRod() {
+  const r = new THREE.Group(), sg = [];
   const chrome = smoothM(0x9aa0a6, { metalness: 0.85, roughness: 0.28 }), blankM = smoothM(0x2a3a4a, { roughness: 0.3, metalness: 0.4 });
-  const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.3, 12), smoothM(0xb48c5c, { roughness: 0.8 })); cork.position.y = 0.15; rod.add(cork);
-  const butt = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), smoothM(0x2a2a2a, { roughness: 0.5 })); rod.add(butt);
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.045, 6), chrome); stem.rotation.x = Math.PI / 2; stem.position.set(0, 0.32, -0.0225); rod.add(stem);
-  const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.03, 20), chrome); reel.rotation.z = Math.PI / 2; reel.position.set(0, 0.32, -0.07); rod.add(reel);
-  const spool = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.034, 16), smoothM(0xd8d8d0, { roughness: 0.6 })); spool.rotation.z = Math.PI / 2; spool.position.set(0, 0.33, -0.07); rod.add(spool);
-  const crank = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 5), chrome); crank.rotation.z = 0.9; crank.position.set(0.03, 0.31, -0.07); rod.add(crank);
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), smoothM(0x1e1e1e)); knob.position.set(0.042, 0.29, -0.07); rod.add(knob);
-  let parent = rod, y0 = 0.3;
+  const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.019, 0.3, 12), smoothM(0xb48c5c, { roughness: 0.8 })); cork.position.y = 0.15; r.add(cork);
+  const butt = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), smoothM(0x2a2a2a, { roughness: 0.5 })); r.add(butt);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.045, 6), chrome); stem.rotation.x = Math.PI / 2; stem.position.set(0, 0.32, -0.0225); r.add(stem);
+  const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.03, 20), chrome); reel.rotation.z = Math.PI / 2; reel.position.set(0, 0.32, -0.07); r.add(reel);
+  const spool = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.034, 16), smoothM(0xd8d8d0, { roughness: 0.6 })); spool.rotation.z = Math.PI / 2; spool.position.set(0, 0.33, -0.07); r.add(spool);
+  const crank = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 5), chrome); crank.rotation.z = 0.9; crank.position.set(0.03, 0.31, -0.07); r.add(crank);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), smoothM(0x1e1e1e)); knob.position.set(0.042, 0.29, -0.07); r.add(knob);
+  let parent = r, y0 = 0.3;
   [0.42, 0.42, 0.38, 0.36].forEach((L, i) => {
     const s = new THREE.Group(); s.position.y = y0; parent.add(s);
     const m = new THREE.Mesh(new THREE.CylinderGeometry(0.009 - 0.0016 * (i + 1), 0.009 - 0.0016 * i, L, 8), blankM); m.position.y = L / 2; s.add(m);
     const gy = L * 0.85, gs = new THREE.Mesh(new THREE.CylinderGeometry(0.0012, 0.0012, 0.016, 4), chrome); gs.rotation.x = Math.PI / 2; gs.position.set(0, gy, -0.008); s.add(gs);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.007 - 0.0011 * i, 0.0012, 5, 12), chrome); ring.rotation.x = Math.PI / 2; ring.position.set(0, gy, -0.018); s.add(ring);
-    segs.push(s); parent = s; y0 = L;
+    sg.push(s); parent = s; y0 = L;
   });
-  tipObj = new THREE.Object3D(); tipObj.position.y = 0.36; parent.add(tipObj);
-  rodRoot.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+  const tip = new THREE.Object3D(); tip.position.y = 0.36; parent.add(tip);
+  r.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+  return { r, segs: sg, tip };
+}
+function ensureRod() {
+  if (rodRoot) return;
+  rodRoot = new THREE.Group(); rodRoot.visible = false; ctx.camera.add(rodRoot); ctx.rod = rodRoot;
+  const b = buildRod(); rod = b.r; rodRoot.add(rod); segs.push(...b.segs); tipObj = b.tip;
+}
+/* 다른 사람 아바타가 드는 낚싯대 (avatar.js). userData.setBend(k) = 휘는 정도 (내 낚싯대와 같은 식), userData.tip = 끝 점 */
+export function makeRod() {
+  const b = buildRod();
+  b.r.userData.tip = b.tip;
+  b.r.userData.setBend = k => b.segs.forEach((s, i) => { s.rotation.x = -k * (0.08 + 0.12 * i); });
+  return b.r;
 }
 const ROD_BASE = -1.05;
 
@@ -132,24 +145,35 @@ const ROD_BASE = -1.05;
 const F = {
   ok: false, on: false, st: 'idle', t: 0, raise: 0, wait: 0, nibs: [], nibHit: new Set(), G: null, cur: null, oks: 0, gr: 0, fails: 0,
   target: new V(), hook: new V(), p0: new V(), entry: new V(), bend: 0, bendV: 0, thr: 0, jt: 0, jump: -1, model: null, flying: false, count: 0,
+  /* tb: 이번 프레임에 낚싯대가 휜 정도 (멀티 스냅샷으로 보낸다) */
+  tb: 0,
 };
 let line = null, lineGeo = null, bob = null, rings = [];
+/* 다른 사람의 줄·찌 (fishRemote) */
+let rLine = null, rGeo = null, rBob = null;
 const LN = 40, TIP = new V(), _a = new V(), _b = new V(), _fw = new V();
+
+/* 줄과 찌 한 벌 (내 것 · 다른 사람 것) */
+function makeLine() {
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(LN * 3), 3));
+  const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xf2f4f6, transparent: true, opacity: 0.75 }));
+  l.frustumCulled = false; l.visible = false; l.userData.noAO = true; l.userData.noRefl = true; ctx.scene.add(l); return l;
+}
+function makeBob() {
+  const b = new THREE.Group(), r = 0.028;
+  b.add(new THREE.Mesh(new THREE.SphereGeometry(r, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), smoothM(0xd8402e, { roughness: 0.35 })));
+  b.add(new THREE.Mesh(new THREE.SphereGeometry(r, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), smoothM(0xf2f2f0, { roughness: 0.35 })));
+  const st = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.05, 6), smoothM(0x222222)); st.position.y = 0.045; b.add(st);
+  b.visible = false; b.userData.noRefl = true; ctx.scene.add(b); return b;
+}
 
 /* 씬마다: 줄·찌·물결을 만든다 (부두가 있는 맵만). 첫 입질에서 멈칫하지 않게 사전 컴파일용 물고기 하나를 숨겨 둔다 */
 export function buildFish() {
-  const W = ctx.W; F.ok = false; F.on = false; F.st = 'idle'; F.model = null; F.count = 0; rings = [];
+  const W = ctx.W; F.ok = false; F.on = false; F.st = 'idle'; F.model = null; F.count = 0; rings = []; RF.id = null; rLine = rBob = null;
   ensureRod();
   if (!W.cfg.dock) return;
-  lineGeo = new THREE.BufferGeometry(); lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(LN * 3), 3));
-  line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xf2f4f6, transparent: true, opacity: 0.75 }));
-  line.frustumCulled = false; line.visible = false; line.userData.noAO = true; line.userData.noRefl = true; ctx.scene.add(line);
-  bob = new THREE.Group();
-  const r = 0.028;
-  bob.add(new THREE.Mesh(new THREE.SphereGeometry(r, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), smoothM(0xd8402e, { roughness: 0.35 })));
-  bob.add(new THREE.Mesh(new THREE.SphereGeometry(r, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), smoothM(0xf2f2f0, { roughness: 0.35 })));
-  const st = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.05, 6), smoothM(0x222222)); st.position.y = 0.045; bob.add(st);
-  bob.visible = false; bob.userData.noRefl = true; ctx.scene.add(bob);
+  line = makeLine(); lineGeo = line.geometry; bob = makeBob();
+  rLine = makeLine(); rGeo = rLine.geometry; rBob = makeBob();
   const RG = new THREE.RingGeometry(0.9, 1, 48); RG.rotateX(-Math.PI / 2);
   for (let i = 0; i < 14; i++) {
     const m = new THREE.Mesh(RG, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
@@ -163,17 +187,18 @@ function updRings(dt, T) {
   rings.forEach(r => { if (r.t >= r.life) { r.m.visible = false; return; } r.t += dt; const u = r.t / r.life; r.m.scale.setScalar(0.04 + r.size * eout(u)); r.m.material.opacity = 0.6 * (1 - u); });
   const dr = ctx.W.dockRings; if (dr) dr.forEach((r, i) => { r.scale.setScalar(1 + 0.25 * Math.sin(T * 1.6 + i)); r.material.opacity = 0.16 + 0.1 * Math.sin(T * 1.6 + i); });
 }
-/* 줄: 처지는 곡선. 수면 아래로 내려가는 첫 지점에서 끊고, 그 지점을 F.entry 에 기록한다 */
-function setLine(a, b, sag) {
-  const p = lineGeo.attributes.position; let py = 0, px = 0, pz = 0, cut = -1; const lim = WY + 0.01;
+/* 줄: 처지는 곡선. 수면 아래로 내려가는 첫 지점에서 끊고, 그 지점을 entry 에 기록한다 (내 줄은 F.entry) */
+function drawLine(geo, a, b, sag, entry) {
+  const p = geo.attributes.position; let py = 0, px = 0, pz = 0, cut = -1; const lim = WY + 0.01;
   for (let i = 0; i < LN; i++) {
     const s = i / (LN - 1), x = lerp(a.x, b.x, s), y = lerp(a.y, b.y, s) - sag * 4 * s * (1 - s), z = lerp(a.z, b.z, s);
-    if (i > 0 && py >= lim && y < lim) { const k = (py - lim) / (py - y); const ex = lerp(px, x, k), ez = lerp(pz, z, k); p.setXYZ(i, ex, lim, ez); F.entry.set(ex, WY, ez); cut = i; break; }
+    if (i > 0 && py >= lim && y < lim) { const k = (py - lim) / (py - y); const ex = lerp(px, x, k), ez = lerp(pz, z, k); p.setXYZ(i, ex, lim, ez); entry.set(ex, WY, ez); cut = i; break; }
     p.setXYZ(i, x, y, z); px = x; py = y; pz = z;
   }
-  if (cut < 0) F.entry.set(b.x, WY, b.z);
-  lineGeo.setDrawRange(0, cut < 0 ? LN : cut + 1); p.needsUpdate = true;
+  if (cut < 0) entry.set(b.x, WY, b.z);
+  geo.setDrawRange(0, cut < 0 ? LN : cut + 1); p.needsUpdate = true;
 }
+const setLine = (a, b, sag) => drawLine(lineGeo, a, b, sag, F.entry);
 function setSt(s) { F.st = s; F.t = 0; if (fishHooks.hud) fishHooks.hud(); }
 /* 크기는 작은 쪽이 흔하고 큰 개체는 드물다 (제곱 분포: 범위 위쪽 절반이 약 29%, 위쪽 10% 가 약 5%) */
 function newFish() { const sp = FISH_SPECIES[Math.floor(Math.random() * FISH_SPECIES.length)], size = Math.round(sp.s[0] + (sp.s[1] - sp.s[0]) * Math.random() ** 2), t = cl((size - 8) / 85, 0, 1); return { sp, size, t, needOk: 3 + Math.round(2 * t), needGr: t > 0.55 ? 2 : 1 }; }
@@ -202,7 +227,7 @@ export function fishBusy() {
 }
 export function beginFish() { if (!F.ok) return false; ensureRod(); F.on = true; setSt('idle'); sfx('rodUp'); return true; }
 export function stopFish() { if (!F.on) return; disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; gaugeHide(); hideCard(); hideBanner(); if (fishHooks.hud) fishHooks.hud(); }
-export function resetFish() { disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; F.raise = 0; F.count = 0; if (rodRoot) rodRoot.visible = false; gaugeHide(); hideCard(); }
+export function resetFish() { disposeModel(F.model); F.model = null; F.on = false; F.st = 'idle'; F.raise = 0; F.count = 0; if (rodRoot) rodRoot.visible = false; gaugeHide(); hideCard(); RF.id = null; if (rLine) rLine.visible = rBob.visible = false; }
 
 /* 잡은 물고기 카드 + 도감 기록: 처음 잡은 종 / 기록 경신 / 기록 이하를 구분해 보여 준다.
    처음 잡은 종은 그 자리의 장소와 게임 속 시각을 함께 남긴다 (도감의 "처음 잡은 날") */
@@ -340,8 +365,65 @@ export function updateFish(dt) {
     }
   }
   F.bend += F.bendV * dt * 10; F.bendV *= Math.exp(-dt * 7); F.bend *= Math.exp(-dt * 5);
-  const tb = cl(bend + F.bend, -0.3, 1.1); segs.forEach((s, i) => { s.rotation.x = -tb * (0.08 + 0.12 * i); }); rod.rotation.x = ROD_BASE + lift;
+  const tb = cl(bend + F.bend, -0.3, 1.1); F.tb = tb; segs.forEach((s, i) => { s.rotation.x = -tb * (0.08 + 0.12 * i); }); rod.rotation.x = ROD_BASE + lift;
   rodRoot.updateMatrixWorld(true); tipObj.getWorldPosition(TIP);
   bob.visible = showBob; setLine(TIP, end || bob.position, sag);
   line.visible = F.raise > 0.5 && !(F.st === 'release' && F.t > 0.4);
+}
+
+/* ══ 멀티: 다른 사람의 낚시 ══
+   net.js 가 그 사람의 스냅샷으로 매 프레임 부른다. S = { fs: 상태 번호, fx·fz: 찌를 던진 자리, fb: 휜 정도 } 또는 null(그만둠),
+   tip = 그 사람 낚싯대 끝(월드). 부두 끝은 한 사람만 앉으므로 줄·찌는 한 벌이면 된다.
+   상태가 바뀐 순간부터 각자 시간으로 내 낚시와 같은 모양을 그린다:
+   던지기(0.3초 뒤 날아가 0.85초 만에 떨어짐) · 기다림(찌가 까딱) · 입질(쑥 들어감) · 끌어올리기(줄이 물속으로, 가끔 물결) · 감아 들이기.
+   잡은 물고기를 들어 올리는 모습은 그리지 않는다 (net.js 의 소식만 뜬다) */
+const FST = ['idle', 'cast', 'wait', 'bite', 'missed', 'reel', 'caught', 'release', 'snap', 'reelback'];
+/* 내 낚시 상태 (net.js 스냅샷). 낚시 중이 아니면 null */
+export const fishNet = () => F.on ? { st: FST.indexOf(F.st), x: F.target.x, z: F.target.z, b: F.tb } : null;
+const RF = { id: null, st: '', t: 0, from: new V(), thrown: false, landed: false, rt: 0 }, _rt = new V(), _re = new V(), _rent = new V();
+export function fishRemote(id, S, tip, dt) {
+  if (!F.ok || !rLine) return;
+  if (!S) { if (RF.id === id) { RF.id = null; rLine.visible = rBob.visible = false; } return; }
+  if (F.on) return;
+  if (RF.id !== id) { RF.id = id; RF.st = ''; rBob.position.set(tip.x, tip.y - 0.4, tip.z); }
+  const st = FST[S.fs] || 'idle';
+  _rt.set(S.fx, WY, S.fz);
+  if (st !== RF.st) {
+    RF.st = st; RF.t = 0; RF.from.copy(rBob.position); RF.thrown = RF.landed = false; RF.rt = 0;
+    if (st === 'bite') { ring(_rt.x, _rt.z, 0.6, 1); sfxAt('bite', _rt.x, WY, _rt.z); }
+    else if (st === 'snap') sfxAt('snap', tip.x, tip.y, tip.z);
+    else if (st === 'reel' || st === 'reelback') sfxAt('reel', tip.x, tip.y, tip.z);
+  }
+  RF.t += dt;
+  const t = RF.t; let sag = 0.02, show = true, end = null;
+  switch (st) {
+    case 'cast': {
+      const u = cl((t - 0.3) / 0.85, 0, 1);
+      if (u <= 0) rBob.position.set(tip.x, tip.y - 0.4, tip.z);
+      else {
+        if (!RF.thrown) { RF.thrown = true; sfxAt('cast', tip.x, tip.y, tip.z); }
+        rBob.position.lerpVectors(tip, _rt, u); rBob.position.y += 2.6 * Math.sin(Math.PI * u); sag = 0.25;
+        if (u >= 1 && !RF.landed) { RF.landed = true; ring(_rt.x, _rt.z, 0.5, 1.2); sfxAt('plop', _rt.x, WY, _rt.z); }
+      }
+      break;
+    }
+    case 'wait': rBob.position.set(_rt.x, WY + 0.02 + Math.sin(T * 2) * 0.006, _rt.z); sag = 0.4; break;
+    case 'bite': rBob.position.set(_rt.x, lerp(WY + 0.02, WY - 0.18, Math.min(1, t / 0.15)), _rt.z); sag = 0.06; break;
+    case 'missed': rBob.position.set(_rt.x, lerp(WY - 0.18, WY + 0.02, Math.min(1, t / 0.4)), _rt.z); sag = 0.4; break;
+    case 'reel':
+      /* 물고기가 물속에서 좌우로 끌려다니고, 줄이 수면을 지나는 자리에 가끔 물결이 인다 */
+      show = false; sag = 0.01;
+      end = _re.set(_rt.x + Math.sin(T * 1.4) * 0.7, WY - 0.25, _rt.z + Math.cos(T * 1.1) * 0.3);
+      RF.rt -= dt; if (RF.rt <= 0) { RF.rt = rnd(0.6, 1.1); ring(_rent.x, _rent.z, 0.35, 0.9); }
+      break;
+    case 'caught': case 'release': case 'snap':
+      show = false; sag = 0; end = _re.set(tip.x, tip.y - 0.35, tip.z); break;
+    case 'reelback': {
+      const u = Math.min(1, t / 0.6); _re.set(tip.x, tip.y - 0.4, tip.z);
+      rBob.position.lerpVectors(RF.from, _re, eio(u)); rBob.position.y += 0.4 * Math.sin(Math.PI * u); sag = 0.1; break;
+    }
+    default: rBob.position.set(tip.x + Math.sin(T * 1.3) * 0.01, tip.y - 0.4, tip.z);
+  }
+  rBob.visible = show; rLine.visible = true;
+  drawLine(rGeo, tip, end || rBob.position, sag, _rent);
 }

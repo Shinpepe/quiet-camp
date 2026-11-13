@@ -13,11 +13,13 @@ import { showHome } from './home.js';
 import { addRemote, removeRemote, hideRemote, setRemoteTag, updateAvatar, snapshot } from './avatar.js';
 import { meteorHooks, showMeteor } from './scene.js';
 import { dreamNet, dreamGo, dreamWaiting, dreamReady, dreamStatus, dreamSync, dreamRemote, dreamClaim, dreamOn } from './dream.js';
+import { chopNet, chopRemote } from './chop.js';
+import { fishNet, fishRemote } from './fish.js';
 
 /* ══ 멀티 캠핑 연결 (Trystero, P2P) ══
    서버 없이 브라우저끼리 직접 잇는다. 방 이름 = 'camp-' + 초대 코드. 최대 4명.
    방장(host)이 세계의 주인이다: 시드·장소·시각·하루 길이·시간 흐름·차/텐트 색, 모닥불·랜턴·실내등·파라솔을 정해 친구(guest)에게 보낸다. 별똥별도 방장이 띄운 값을 보낸다.
-   몸은 각자 정한다: 스냅샷(위치·시선·자세·손에 든 것·굴리는 눈덩이)을 초당 12번 모두에게 보내고, 받은 쪽은 120ms 늦춰 두 스냅샷 사이를 보간한다.
+   몸은 각자 정한다: 스냅샷(위치·시선·자세·손에 든 것·굴리는 눈덩이·장작 패기 휘두르기·낚시 상태)을 초당 12번 모두에게 보내고, 받은 쪽은 120ms 늦춰 두 스냅샷 사이를 보간한다.
    신호 — hello(친구→방장: 들어가도 될까) · welcome(방장→친구: 세계 정보·자리 번호·함께 쓰는 물건·눈덩이/눈사람 목록) · nope(가득 참·버전 다름) · profile(이름)
           start(방장 출발) · room(방장이 메뉴에서 장소·시각·색을 바꿈) · lobby(방장이 메뉴로) · world(시계, 1초마다) · snap(몸) · meteor(별똥별)
           flags(방장→모두: 불·랜턴·실내등·파라솔 상태) · ask(친구→방장: 이걸 켜거나 꺼 줘) · nap(방장→모두: 함께 잠든다, 각자의 침낭·꿈 여부) · dream(꿈속 운석 막기: 시작·운석·맞힘 판정·순위)
@@ -29,7 +31,7 @@ import { dreamNet, dreamGo, dreamWaiting, dreamReady, dreamStatus, dreamSync, dr
    방장 신호가 4초 끊기면 친구 화면에 "방장이 잠시 자리를 비웠다". 방장 연결이 끊기면 친구는 홈으로.
    1인 캠핑에서는 이 파일의 연결 코드가 돌지 않는다 (Trystero 도 멀티를 고를 때 처음 불러온다) */
 
-const APP = 'quiet-camp-v1', V = 8, MAX = 4;
+const APP = 'quiet-camp-v1', V = 9, MAX = 4;
 /* GUN_WAIT: 꿈속에서 첫 사람이 총을 든 뒤 나머지를 기다리는 최대 시간 (ms) */
 const HZ = 12, DELAY = 120, STALE = 3000, AWAY = 4000, FIND = 15000, GUN_WAIT = 30000;
 /* 함께 쓰는 물건: 읽기·쓰기, 소리를 낼 자리(W.interact 의 id)와 켤 때·끌 때 소리. now = 움직임 없이 바로 맞추기 (중간에 들어올 때) */
@@ -216,7 +218,7 @@ function bounce(msg) { if (ctx.running) exitGame(); showHome('join', msg); }
 function peerLeft(id) {
   const p = N.peers.get(id); if (!p) return;
   if (p.av) removeRemote(p.av);
-  remoteRoll(id, null);
+  remoteRoll(id, null); chopRemote(id, null, 0); fishRemote(id, null);
   N.peers.delete(id);
   if (isGuest() && id === N.hostId) { bounce('방장이 캠핑장을 떠났다'); return; }
   const ls = p.buf[p.buf.length - 1];
@@ -230,11 +232,15 @@ function pack() {
   const t = Math.round(performance.now());
   if (!ctx.running) return { t, run: 0 };
   const o = snapshot(_O), ud = ctx.W.item && ctx.W.item.userData, r = v => Math.round((v || 0) * 1000) / 1000, sb = rollState();
+  const cn = chopNet(), fn = fishNet();
   return { t, run: 1, bg: state.bg, m: o.mode, st: o.seat, x: r(o.x), z: r(o.z), y: r(wrapPI(o.yaw)), p: r(o.pitch), i: o.item, j: o.jacket,
     s: r(o.sip), mo: o.mouth ? 1 : 0, r: r(o.roast), e: r(o.eat), ro: o.roll ? 1 : 0,
     am: ud && typeof ud.amount === 'number' ? r(ud.amount) : 1, ck: ud && typeof ud.cook === 'number' ? r(ud.cook) : 0, lt: ud && ud.lit ? 1 : 0,
     br: sb ? r(sb.r) : 0, bx: sb ? r(sb.x) : 0, bz: sb ? r(sb.z) : 0,
-    aw: ctx.paused || document.hidden ? 1 : 0, zz: sleepWaiting() ? 1 : 0, nd: records.dreams === 0 ? 1 : 0 };
+    aw: ctx.paused || document.hidden ? 1 : 0, zz: sleepWaiting() ? 1 : 0, nd: records.dreams === 0 ? 1 : 0,
+    /* 장작 패기: 휘두른 횟수·결과·장작이 놓였는지 / 낚시: 상태 번호(-1 = 아님)·찌 자리·휜 정도 */
+    cw: cn ? cn.sw : 0, cr: cn ? cn.res : 0, cg: cn && cn.log ? 1 : 0,
+    fs: fn ? fn.st : -1, fx: fn ? r(fn.x) : 0, fz: fn ? r(fn.z) : 0, fb: fn ? r(fn.b) : 0 };
 }
 function gotSnap(d, id) {
   if (!d || typeof d.t !== 'number') return;
@@ -258,6 +264,8 @@ function sample(p, now, S) {
   S.yaw = (a.y || 0) + wrapPI((c.y || 0) - (a.y || 0)) * u; S.pitch = L(a.p, c.p);
   S.sip = L(a.s, c.s); S.roast = L(a.r, c.r); S.eat = L(a.e, c.e);
   S.amount = c.am; S.cook = c.ck; S.lit = !!c.lt;
+  S.cw = c.cw || 0; S.cr = c.cr || 0; S.cg = !!c.cg;
+  S.fs = typeof c.fs === 'number' ? c.fs : -1; S.fx = c.fx || 0; S.fz = c.fz || 0; S.fb = L(a.fb, c.fb);
   /* 굴리는 눈덩이: 앞뒤 스냅샷 모두 굴리는 중일 때만 보간한다 (막 굴리기 시작한 순간 원점에서 날아오지 않게) */
   const both = a.br > 0 && c.br > 0;
   S.br = c.br || 0; S.bx = both ? L(a.bx, c.bx) : c.bx || 0; S.bz = both ? L(a.bz, c.bz) : c.bz || 0;
@@ -303,10 +311,15 @@ function peerSounds(p) {
   const sf = surfaceAt(r.x, r.z); sfxAt('step', r.x, r.y + 0.1, r.z, sf);
   if (ctx.W.prints && (sf === 'snow' || sf === 'sand')) { p.side = !p.side; ctx.W.prints.stamp(r.x, r.z, -Math.sin(av.yaw), -Math.cos(av.yaw), p.side ? 1 : -1); }
 }
+const _tip = new THREE.Vector3();
 function updatePeer(p, now, dt) {
   const last = p.buf[p.buf.length - 1];
   const show = ctx.running && !!last && last.run === 1 && last.bg === state.bg && (!isHost() || p.ok);
-  if (!show) { if (p.av && p.av.root.visible) { hideRemote(p.av); p.seat = p.step = undefined; p.lit = false; } remoteRoll(p.id, null); return; }
+  if (!show) {
+    if (p.av && p.av.root.visible) { hideRemote(p.av); p.seat = p.step = undefined; p.lit = false; }
+    remoteRoll(p.id, null); chopRemote(p.id, null, dt); fishRemote(p.id, null);
+    return;
+  }
   if (!p.av) p.av = addRemote(p.name || '캠퍼');
   sample(p, now, _S);
   setRemoteTag(p.av, p.name || '캠퍼', !!last.aw || now - p.last > STALE);
@@ -314,6 +327,11 @@ function updatePeer(p, now, dt) {
   updateAvatar(p.av, _S, dt);
   peerSounds(p);
   peerFx(p, dt);
+  /* 장작 패기·낚시: 그루터기의 장작·반쪽, 부두의 줄·찌를 그 사람 몫으로 그린다 (낚싯대 끝은 아바타 손의 낚싯대에서) */
+  chopRemote(p.id, _S.mode === 'chop' ? _S : null, dt);
+  const rod = _S.fs >= 0 && p.av.itemType === 'rod' ? p.av.itemMesh : null;
+  if (rod) { rod.userData.setBend(_S.fb); p.av.root.updateMatrixWorld(true); rod.userData.tip.getWorldPosition(_tip); }
+  fishRemote(p.id, rod ? _S : null, _tip, dt);
   /* 굴리는 눈덩이: 내려놓았다는 소식을 받은 뒤로는, 굴리지 않는 스냅샷이 올 때까지 숨긴다 */
   if (!last.br) p.snowHold = false;
   if (!p.snowHold && _S.br > 0) remoteRoll(p.id, _S.bx, _S.bz, _S.br); else remoteRoll(p.id, null);
@@ -406,7 +424,7 @@ export function netLeave() {
   if (N.room) { try { N.room.leave(); } catch (e) {} }
   N.room = null; N.act = null; N.self = null; N.hostId = null; N.hostName = ''; N.slot = 0; N.phase = 'off'; N.err = ''; N.away = false; N.live = false; N.shared = null; N.snow = null;
   N.hostLive = false; N.entering = false; N.napT = 0; N.zzKey = ''; N.gunT = 0;
-  N.peers.forEach(p => { if (p.av) removeRemote(p.av); remoteRoll(p.id, null); }); N.peers.clear();
+  N.peers.forEach(p => { if (p.av) removeRemote(p.av); remoteRoll(p.id, null); chopRemote(p.id, null, 0); fishRemote(p.id, null); }); N.peers.clear();
   meteorHooks.send = null; session.gear = null;
   if (N.stash) { const s = N.stash; N.stash = null; state.bg = s.bg; state.time = s.time; state.clock = s.clock; }
   applyGear();

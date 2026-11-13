@@ -4,7 +4,7 @@ import { CHOP, CHOP_GAUGE, EYE } from './data.js';
 import { rnd, smooth, smoothM, shadowed, wrapPI } from './util.js';
 import { terrainH } from './terrain.js';
 import { tex } from './textures.js';
-import { sfx } from './audio.js';
+import { sfx, sfxAt } from './audio.js';
 import { makeAxe, AXE_EDGE } from './props.js';
 import { makeGauge, gaugeUpdate, gaugeJudge, gaugeShow, gaugeHide } from './gauge.js';
 import { camp } from './camp.js';
@@ -12,7 +12,9 @@ import { camp } from './camp.js';
 /* ══ 장작 패기 ══
    타이밍 게이지: 성공 CHOP_GAUGE.hits 번이면 쪼개지고, 대성공은 한 번에 쪼개진다. 실패는 벌점 없이 튕기기만 한다.
    모든 메시는 그루터기에 붙은 rig 좌표계 안에 있다: 원점 = 그루터기 바닥 중심, +z = 플레이어가 서는 쪽.
-   rig 는 시작할 때마다 플레이어가 다가온 방향으로 돈다 */
+   rig 는 시작할 때마다 플레이어가 다가온 방향으로 돈다.
+   다른 사람이 패는 모습(chopRemote)도 같은 장작·금·반쪽·조각을 빌려 그린다 — 그루터기는 한 사람만 쓰기 때문이다.
+   그때 도끼는 그 사람 아바타의 손에 있고(avatar.js), 소리는 그루터기 자리에서 나며, 내 카메라는 흔들지 않는다 */
 
 const V = THREE.Vector3;
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -43,9 +45,15 @@ const C = {
   on: false, st: 'off', a: A_READY, t: 0, from: A_READY, pk: 0, pkFrom: 0, stop: 0, wantStop: false,
   G: null, res: null, hits: 0, combo: 0, log: null, nextLogT: 0,
   eye: new V(), fwd: new V(), right: new V(), clock: 0, trauma: 0, kick: 0, kickV: 0, fov: 0,
+  /* 멀티: 휘두른 횟수와 마지막 결과 (0 빗나감 · 1 성공 · 2 쪼갬) — net.js 가 스냅샷에 실어 보낸다 */
+  swing: 0, swRes: 0,
 };
 const P = { x: 0, z: 0, yaw: 0 };
 let R = null;
+/* 다른 사람의 장작 패기 (chopRemote): 그루터기를 쓰는 사람 id · 마지막으로 본 휘두르기 횟수 · 맞을 때까지 남은 시간 · 결과 · 성공 단계(금) */
+const RC = { id: null, sw: 0, hitT: -1, res: 0, hits: 0 };
+/* 소리: 내가 패면 그대로, 다른 사람이 패면 그루터기 자리에서 */
+const snd = (type, arg) => { if (RC.id) { const [x, z] = camp().stump; sfxAt(type, x, 0.5, z, arg); } else sfx(type, arg); };
 const _w = new V(), _d = new THREE.Object3D();
 
 function dust(x, y, z, n, op) {
@@ -103,7 +111,7 @@ function setCrack(stage) {
 
 /* ── 씬마다 한 번: 도끼·장작·금·반쪽·조각을 만들어 숨겨 둔다 (사전 컴파일에 함께 들어간다) ── */
 export function buildChop() {
-  const W = ctx.W, scene = ctx.scene; W.splitCount = 0;
+  const W = ctx.W, scene = ctx.scene; W.splitCount = 0; RC.id = null;
   Object.assign(C, { on: false, st: 'off', a: A_READY, pk: 0, stop: 0, wantStop: false, log: null, trauma: 0, kick: 0, kickV: 0, fov: 0, hits: 0, combo: 0 });
   C.G = makeGauge(CHOP_GAUGE.speed, CHOP_GAUGE.ok, CHOP_GAUGE.great);
   P.yaw = 0;
@@ -171,7 +179,7 @@ export function startChop(px, pz, free) {
   C.eye.set(p.x, terrainH(p.x, p.z, W.cfg) + EYE, p.z);
   C.fwd.set(camp().stump[0] - p.x, 0, camp().stump[1] - p.z).normalize(); C.right.set(-C.fwd.z, 0, C.fwd.x);
   Object.assign(C, { on: true, st: 'ready', a: A_READY, pk: 0, wantStop: false, nextLogT: 1.0, log: null, hits: 0, combo: 0 });
-  R.work.visible = true; R.logG.visible = false;
+  R.work.visible = true; R.axe.visible = true; R.logG.visible = false;
   if (W.stumpAxe) W.stumpAxe.visible = false;
   sfx('chopPick');
   return true;
@@ -180,6 +188,8 @@ export function startChop(px, pz, free) {
 export function chopPress() {
   if (!C.on || C.st !== 'ready' || !C.log || !C.log.landed) return;
   const r = gaugeJudge(C.G); if (!r) return;
+  /* 다른 사람 화면용: 이번 휘두르기가 어떻게 끝날지 (대성공이거나 성공이 다 차면 쪼갬) */
+  C.swing++; C.swRes = r === 'fail' ? 0 : (r === 'great' || C.hits + 1 >= CHOP_GAUGE.hits) ? 2 : 1;
   /* 연속 대성공은 게이지 옆 판정 글자로 (예전엔 화면 가운데 배너였다) */
   if (r === 'great' && C.combo >= 1) C.G.label = `${C.combo + 1}연속 대성공`;
   C.res = r; C.st = 'raise'; C.t = 0; C.from = C.a;
@@ -190,11 +200,49 @@ function finishStop() { resetChop(); sfx('chopPut'); if (chopHooks.stop) chopHoo
 export function resetChop() {
   if (!R) return;
   Object.assign(C, { on: false, st: 'off', wantStop: false, log: null, hits: 0, combo: 0 });
-  R.work.visible = false; R.logG.visible = false;
+  RC.id = null; R.work.visible = false; R.axe.visible = true; R.logG.visible = false;
   if (ctx.W.stumpAxe) ctx.W.stumpAxe.visible = true;
   gaugeHide();
 }
 export function chopStats() { return { count: ctx.W.splitCount || 0, best: records.chopBest }; }
+
+/* ── 멀티 ── */
+/* 내 장작 패기 상태 (net.js 스냅샷): 휘두른 횟수 · 결과 · 장작이 그루터기에 놓였는지. 패는 중이 아니면 null */
+export const chopNet = () => C.on ? { sw: C.swing, res: C.swRes, log: !!(C.log && C.log.landed) } : null;
+/* 다른 사람의 장작 패기: net.js 가 그 사람의 스냅샷(보간된 값)으로 매 프레임 부른다.
+   d = { x, z: 그 사람 자리, cw: 휘두른 횟수, cr: 결과, cg: 장작이 놓였는지 } 또는 null(그만둠).
+   휘두르기는 횟수가 바뀐 순간부터 들기 0.12 + 내려치기 0.09초 뒤에 맞은 것으로 친다 (아바타의 도끼 동작과 같은 시간) */
+export function chopRemote(id, d, dt) {
+  if (!R || C.on) return;
+  if (!d) {
+    if (RC.id !== id) return;
+    RC.id = null; C.log = null; R.logG.visible = false; R.work.visible = false; R.axe.visible = true;
+    if (ctx.W.stumpAxe) ctx.W.stumpAxe.visible = true;
+    return;
+  }
+  if (RC.id !== id) {
+    /* 처음 보는 순간: 그 사람이 선 쪽으로 rig 를 돌리고, 그루터기에 박힌 도끼를 숨긴다 (작업용 도끼도 숨긴 채 장작만 쓴다) */
+    const [sx, sz] = camp().stump, yaw = Math.atan2(d.x - sx, d.z - sz);
+    if (Math.abs(wrapPI(yaw - R.rig.rotation.y)) > 0.01) { clearDebris(); R.rig.rotation.y = yaw; R.rig.updateMatrixWorld(true); setPile(); }
+    Object.assign(RC, { id, sw: d.cw, hitT: -1, hits: 0 }); C.log = null;
+    R.work.visible = true; R.axe.visible = false; R.logG.visible = false;
+    if (ctx.W.stumpAxe) ctx.W.stumpAxe.visible = false;
+  }
+  if (d.cg && !C.log) newLog();
+  if (d.cw !== RC.sw) { RC.sw = d.cw; RC.res = d.cr; RC.hitT = T_RAISE + T_STRIKE; }
+  if (RC.hitT >= 0) { RC.hitT -= dt; if (RC.hitT < 0) remoteImpact(RC.res); }
+}
+/* 다른 사람의 도끼가 장작에 닿았다: 내 impact 와 같은 모양이지만 기록·카메라는 건드리지 않는다 */
+function remoteImpact(res) {
+  const L = C.log; if (!L || !L.landed) return;
+  if (res === 0) { L.sqV -= 0.8; L.wob = 1; spawnChips(2, 0.5); snd('chop', { knot: true, power: 0 }); return; }
+  if (res === 2) {
+    snd('chop', { fin: true, power: 0.6 }); spawnChips(12, 0.85); dust(0, LOG_TOP, 0, 3, 0.12);
+    RC.hits = 0; R.logG.visible = false; R.crackD.visible = R.crackL.visible = false; C.log = null; spawnHalves(1);
+    return;
+  }
+  RC.hits++; L.sqV -= 2; spawnChips(5, 0.6); dust(0, LOG_TOP, 0, 1, 0.07); snd('chop', { power: 0.35 }); setCrack(RC.hits);
+}
 
 /* ── 매 프레임 ── */
 export function updateChop(dt) {
@@ -284,7 +332,7 @@ function split(fly) {
 function newLog() {
   C.log = { t: 0, landed: false, sq: 0, sqV: 0, wob: 0, yaw: rnd(-0.8, 0.8), crack: crackPath(Math.random()) };
   R.logM.rotation.y = rnd(0, 6.28); setCrack(0);
-  R.logG.visible = true; sfx('logLift');
+  R.logG.visible = true; snd('logLift');
 }
 function updLog(dt) {
   const L = C.log;
@@ -294,7 +342,7 @@ function updLog(dt) {
     L.t = Math.min(1, L.t + dt / 0.45); const u = L.t, e = eout(u);
     g.position.set(lerp(R.pile.x, 0, e), lerp(0.28, LOG_CY, u) + 0.42 * Math.sin(Math.PI * u), lerp(R.pile.z, 0, e));
     g.rotation.set(0.15 * (1 - e), L.yaw * (1 - e), (1 - e) * Math.PI / 2);
-    if (u >= 1) { L.landed = true; g.position.set(0, LOG_CY, 0); g.rotation.set(0, 0, 0); L.sqV -= 1.4; C.trauma = Math.min(1, C.trauma + 0.07); sfx('logPlace'); dust(0, STUMP_TOP + 0.02, 0, 3, 0.08); }
+    if (u >= 1) { L.landed = true; g.position.set(0, LOG_CY, 0); g.rotation.set(0, 0, 0); L.sqV -= 1.4; if (C.on) C.trauma = Math.min(1, C.trauma + 0.07); snd('logPlace'); dust(0, STUMP_TOP + 0.02, 0, 3, 0.08); }
   }
   for (let i = 0; i < 4; i++) { const h = dt / 4; L.sqV += (-900 * L.sq - 24 * L.sqV) * h; L.sq += L.sqV * h; }
   L.wob *= Math.exp(-dt * 6);
@@ -323,7 +371,7 @@ function updHalves(dt) {
       const v = Math.min(1, (h.age - h.T) / 0.3); y += 0.03 * Math.sin(Math.PI * v) * (1 - v); ov = 0.08 * Math.sin(Math.PI * v) * (1 - v);
       if (!h.landed) {
         h.landed = true;
-        if (ctx.running) { sfx('woodLand', { k: 1, pan: h.side * 0.35 }); C.trauma = Math.min(1, C.trauma + 0.04); }
+        if (ctx.running) { snd('woodLand', { k: 1, pan: h.side * 0.35 }); if (C.on) C.trauma = Math.min(1, C.trauma + 0.04); }
         dust(h.side * (0.01 + h.d), 0.03, h.dz, 2, 0.08);
       }
     }

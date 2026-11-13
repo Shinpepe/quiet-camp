@@ -7,7 +7,8 @@ import { DOCK } from './dock.js';
 /* game.js·snowman.js 와 서로 불러오지만, 실행 중에만 부르므로 순환해도 괜찮다 (snowman.js 와 같은 방식) */
 import { player, anim } from './game.js';
 import { snowRolling } from './snowman.js';
-import { makeItem } from './props.js';
+import { makeItem, makeAxe } from './props.js';
+import { makeRod } from './fish.js';
 import { seatOf, seatKind } from './camp.js';
 
 /* ══ 아바타 ══
@@ -15,6 +16,7 @@ import { seatOf, seatKind } from './camp.js';
    관절마다 그룹 하나 — 그룹을 돌리면 관절이 꺾인다. 자세는 관절 각도 표, 손이 갈 자리가 정해진 동작(마시기·먹기·스파클라)은 IK 로 팔 각도를 계산한다.
    updateAvatar(A, S, dt): S = 스냅샷 { mode, seat, x, z, yaw, pitch, item, jacket, sip, mouth, roast, eat, roll }.
      내 아바타는 localState() 가 게임 상태에서 채우고, 멀티가 되면 다른 플레이어는 네트워크로 받은 같은 스냅샷을 넣는다.
+     다른 사람의 스냅샷에는 장작 패기(cw 휘두른 횟수 · cr 결과)와 낚시(fs 상태)도 들어 있어 도끼·낚싯대를 쥐여 준다.
    자리에 앉으면 SEAT_ANCHOR 의 자리(의자·부두 끝·돗자리…)에 몸을 놓고, 걸을 때는 플레이어 위치를 따라가며 걸음 위상을 실제 이동 거리로 정한다(발이 미끄러지지 않게).
    손에 든 물건: 오른손의 mount(몸 기준 방향) 안 grip(물건별 쥐는 자리)에 W.item 을 그대로 옮겨 붙인다 (view.js 의 mountItem).
    모델은 씬을 옮겨 다닌다 — root.userData.persist 라서 scene.js 의 정리에서 빠진다 */
@@ -180,7 +182,31 @@ const ITEM = {
     return ie;
   } },
   gun: { g: [0, 0, 0], arm: j => { setArm(j, 1, 0.08, 0.47, -0.45); setArm(j, -1, 0.03, 0.44, -0.38); return [0, 0, 0]; } },
+  /* 장작 패기 (다른 사람): 두 손으로 자루 끝을 쥔다 (오른손 = 도끼 원점, 왼손 = 자루를 따라 10cm 앞).
+     도끼 각도 A.axeA(chop.js 와 같은 값 — 클수록 머리가 위로)에 맞춰 손이 머리 위로 들렸다 내려오고, 내려칠수록 허리를 숙인다 */
+  axe: { g: [0, 0, 0], arm: (j, S, A) => {
+    const a = A.axeA, up = clamp((a - 0.5) / 1.25, 0, 1), down = clamp((0.5 - a) / 0.75, 0, 1);
+    j.spine = [-0.06 - 0.22 * down + 0.06 * up, 0, 0];
+    const px = 0.03, py = 0.08 + 0.4 * up - 0.1 * down, pz = -0.3 + 0.18 * up - 0.08 * down;
+    setArm(j, 1, px, py, pz); setArm(j, -1, px, py + 0.1 * Math.sin(a), pz - 0.1 * Math.cos(a));
+    return [a + j.spine[0], 0, 0];
+  } },
+  /* 낚시 (다른 사람): 무릎 앞에서 손잡이(코르크)를 쥐고 대를 물 쪽 위로 */
+  rod: { g: [0, -0.12, 0], arm: j => { setArm(j, 1, 0.1, 0.02, -0.28); return [-1.15, 0, 0]; } },
 };
+/* 다른 사람의 도끼 각도: 누른 순간부터 t 초. chop.js 와 같은 시간·각도 — 들기 0.12 → 내려치기 0.09 → 결과에 따라 → 준비 자세로 0.45. 끝나면 null
+   res 0 = 빗나감(튕겨 나옴) · 1 = 성공(박혔다 뽑음) · 2 = 쪼갬(그루터기까지 내리침) */
+function swingAngle(t, res) {
+  if (t < 0.12) return lerp(0.5, 1.75, ez(t / 0.12));
+  t -= 0.12;
+  if (t < 0.09) { const k = t / 0.09; return lerp(1.75, -0.25, k * k); }
+  t -= 0.09;
+  let a;
+  if (res === 0) { if (t < 0.2) return -0.25 + 0.35 * Math.sin(t / 0.2 * PI / 2); a = 0.1; t -= 0.2; }
+  else if (res === 2) { if (t < 0.35) return -0.25 - 0.4 * Math.min(1, t / 0.13); a = -0.65; t -= 0.35; }
+  else { if (t < 0.3) return -0.29; a = -0.29; t -= 0.3; }
+  return t < 0.45 ? lerp(a, 0.5, ez(t / 0.45)) : null;
+}
 
 /* ── 서기·걷기: amp 0 = 서 있음, 1 = 걷기. ph = 걸음 위상 (한 걸음 = π) ── */
 function walkPose(j, ph, amp, t) {
@@ -256,8 +282,16 @@ export function updateAvatar(A, S, dt) {
   let hyaw = clamp(wrapPI(S.yaw - A.yaw), -1, 1);
   if (sp && sp.lie) { look = 0.05; hyaw *= 0.3; }
   j.head = [look, hyaw, 0]; j.spine = j.spine || [0, 0, 0];
-  /* 손에 든 것 (누워 있으면 맡겨 두었다) */
-  const it = sp && sp.lie ? null : S.item, I = it ? ITEM[it] : null;
+  /* 손에 든 것 (누워 있으면 맡겨 두었다).
+     장작을 패는 중이면 도끼, 부두에서 낚시 중이면 낚싯대 (다른 사람의 스냅샷 — 내 아바타는 이때 1인칭이라 보이지 않는다) */
+  const it = S.mode === 'chop' ? 'axe' : sp && sp.lie ? null : S.fs >= 0 ? 'rod' : S.item, I = it ? ITEM[it] : null;
+  /* 도끼 각도: 휘두른 횟수(cw)가 바뀌면 그 순간부터 swingAngle 로, 아니면 준비 자세에서 숨 쉬듯 */
+  if (it === 'axe') {
+    if (A.swN !== S.cw) { if (A.swN !== undefined) { A.swT = 0; A.swRes = S.cr; } A.swN = S.cw; }
+    const a = A.swT >= 0 ? swingAngle(A.swT, A.swRes) : null;
+    if (a === null) A.swT = -1; else A.swT += dt;
+    A.axeA = a === null ? 0.5 + 0.012 * Math.sin(t * 1.3) : a;
+  } else A.swN = undefined;
   if (A.remote) syncItem(A, it, S);
   if (it !== A.item) { A.item = it; A.dr = 0; A.itemFresh = true; if (I) A.grip.position.set(I.g[0], I.g[1], I.g[2]); }
   const ie = I ? I.arm(j, S, A, dt) : Z;
@@ -342,11 +376,11 @@ export function removeRemote(A) {
   if (A.mat.zip.map) A.mat.zip.map.dispose();
   disposeTree(A.root);
 }
-/* 다른 사람 손의 물건: 종류가 바뀌면 새로 만들고, 남은 양·익음·불붙음을 맞춘다 */
+/* 다른 사람 손의 물건: 종류가 바뀌면 새로 만들고, 남은 양·익음·불붙음을 맞춘다 (도끼·낚싯대는 모양만) */
 function syncItem(A, it, S) {
   if (A.itemType !== it) {
     if (A.itemMesh) { A.itemMesh.removeFromParent(); disposeTree(A.itemMesh); }
-    A.itemType = it; A.itemMesh = it && ITEM[it] ? makeItem(it) : null;
+    A.itemType = it; A.itemMesh = it && ITEM[it] ? (it === 'axe' ? makeAxe() : it === 'rod' ? makeRod() : makeItem(it)) : null;
     if (A.itemMesh) A.grip.add(A.itemMesh);
   }
   const m = A.itemMesh; if (!m) return;
