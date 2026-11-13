@@ -9,7 +9,7 @@ import { player, anim } from './game.js';
 import { snowRolling } from './snowman.js';
 import { makeItem, makeAxe } from './props.js';
 import { makeRod } from './fish.js';
-import { seatOf, seatKind } from './camp.js';
+import { seatOf, seatKind, camp } from './camp.js';
 
 /* ══ 아바타 ══
    원점 = 발바닥 가운데, 앞 = −z (카메라와 같은 방향). 키 약 1.72m, 눈높이 1.6m (data.js EYE 와 같다).
@@ -185,15 +185,19 @@ const ITEM = {
   /* 장작 패기 (다른 사람): 두 손으로 자루 끝을 쥔다 (오른손 = 도끼 원점, 왼손 = 자루를 따라 10cm 앞).
      도끼 각도 A.axeA(chop.js 와 같은 값 — 클수록 머리가 위로)에 맞춰 손이 머리 위로 들렸다 내려오고, 내려칠수록 허리를 숙인다 */
   axe: { g: [0, 0, 0], arm: (j, S, A) => {
+    /* 내려친 순간(down = 1) 손은 허리 앞 1.1m 높이, 허리는 0.15 숙임 → 도끼날이 몸 앞 약 0.98m·높이 0.68m (장작 윗면) 에 온다 */
     const a = A.axeA, up = clamp((a - 0.5) / 1.25, 0, 1), down = clamp((0.5 - a) / 0.75, 0, 1);
-    j.spine = [-0.06 - 0.22 * down + 0.06 * up, 0, 0];
-    const px = 0.03, py = 0.08 + 0.4 * up - 0.1 * down, pz = -0.3 + 0.18 * up - 0.08 * down;
+    j.spine = [-0.06 - 0.09 * down + 0.06 * up, 0, 0];
+    const px = 0.03, py = 0.08 + 0.4 * up + 0.068 * down, pz = -0.3 + 0.18 * up - 0.08 * down;
     setArm(j, 1, px, py, pz); setArm(j, -1, px, py + 0.1 * Math.sin(a), pz - 0.1 * Math.cos(a));
     return [a + j.spine[0], 0, 0];
   } },
   /* 낚시 (다른 사람): 무릎 앞에서 손잡이(코르크)를 쥐고 대를 물 쪽 위로 */
   rod: { g: [0, -0.12, 0], arm: j => { setArm(j, 1, 0.1, 0.02, -0.28); return [-1.15, 0, 0]; } },
 };
+/* 장작 패기: 아바타가 눈 자리(그루터기에서 1.2m)보다 그루터기 쪽으로 다가서는 거리.
+   팔 길이로 내려친 도끼날이 몸 앞 약 0.98m 에 닿으므로, 이만큼 다가서야 장작 가운데에 찍힌다 */
+const CHOP_REACH = 0.22;
 /* 다른 사람의 도끼 각도: 누른 순간부터 t 초. chop.js 와 같은 시간·각도 — 들기 0.12 → 내려치기 0.09 → 결과에 따라 → 준비 자세로 0.45. 끝나면 null
    res 0 = 빗나감(튕겨 나옴) · 1 = 성공(박혔다 뽑음) · 2 = 쪼갬(그루터기까지 내리침) */
 function swingAngle(t, res) {
@@ -256,7 +260,8 @@ export function updateAvatar(A, S, dt) {
   if (S.jacket !== A.jacket) { A.jacket = S.jacket; const g = GEAR.find(x => x.key === S.jacket) || GEAR.find(x => x.key === GEAR_DEFAULT.jacket); setJacket(A, g.tent); }
   /* 모르는 자리(버전이 다른 사람 등)면 서 있는 자세로 */
   const seat = (S.mode === 'seated' || S.mode === 'memo' || S.mode === 'sleep') ? S.seat : null, an = seat ? anchor(seat) : null, sp = an && SEATP[poseOf(seat)];
-  const key = (sp ? seat : 'walk') + ':' + (S.item || '');
+  /* 자세 묶음이 바뀌면(앉기·일어나기·장작 패기 시작과 끝·손에 든 것) 0.9초 동안 천천히 옮겨 간다 */
+  const key = (sp ? seat : S.mode === 'chop' ? 'chop' : 'walk') + ':' + (S.item || '');
   if (key !== A.key) { A.key = key; A.blendT = 0.9; }
   let tx, ty, tz, yaw, hipsY, by = 0, bz = 0, rx = 0, look = clamp(S.pitch, -0.6, 0.6);
   if (sp) {
@@ -276,6 +281,12 @@ export function updateAvatar(A, S, dt) {
     hipsY = walkPose(j, A.ph, clamp(A.v / 1.2, 0, 1), t);
     /* 눈덩이 굴리기: 몸을 숙이고 두 손을 앞으로 */
     if (S.roll) { j.armL = [0.75, 0, 0.15]; j.armR = [0.75, 0, -0.15]; j.elbowL = j.elbowR = [0.45, 0, 0]; j.spine = [-0.28, 0, 0]; look = Math.max(-0.6, look - 0.3); }
+    /* 장작 패기: 그루터기를 정면으로 보고 CHOP_REACH 만큼 다가선다 — 내려친 도끼날이 장작 윗면 가운데에 닿게.
+       걸음 계산(위의 A.px)이 끝난 뒤에 옮기므로, 다가서는 순간 다리가 걷는 동작을 하지 않는다 (자리는 0.9초에 걸쳐 부드럽게 옮겨 간다) */
+    if (S.mode === 'chop') {
+      const [sx, sz] = camp().stump, dx = sx - tx, dz = sz - tz, L = Math.hypot(dx, dz) || 1;
+      yaw = Math.atan2(-dx, -dz); tx += dx / L * CHOP_REACH; tz += dz / L * CHOP_REACH; ty = floorAt(tx, tz);
+    }
   }
   /* 몸은 시선 방향을 조금 늦게 따라가고, 남은 차이는 고개가 돌린다 */
   A.yaw += wrapPI(yaw - A.yaw) * Math.min(1, dt * (sp ? 6 : 12));
