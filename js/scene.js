@@ -10,7 +10,8 @@ import { buildFish } from './fish.js';
 import { buildChop } from './chop.js';
 import { paramsAt, sunDirAt } from './time.js';
 /* 상호작용(W.interact)의 act 가 부르는 함수들. game.js 도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
-import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler, lieDown } from './game.js';
+import { openTrunk, toggleFire, toggleLamp, startSleep, beginChop, startFishing, sitDown, openJournal, openMemo, useCooler, lieDown, sitPoker } from './game.js';
+import { buildPoker } from './cards.js';
 import { buildSnowman } from './snowman.js';
 import { buildBeach, toggleParasol, parasolOpen, onMat } from './beach.js';
 import { prepareRoad, makeRoad } from './road.js';
@@ -354,6 +355,8 @@ export function buildScene(bgKey) {
   W.fireLight.shadow.autoUpdate = W.fireLit;
   const car = makeCar(); car.position.set(0, 0, 8); scene.add(car);
   makeProps();
+  /* 홀덤 테이블 (멀티 배치에만) */
+  if (L.poker) buildPoker(L.poker);
   /* 장작 패기 도구는 그루터기에 박힌 도끼(W.stumpAxe)가 만들어진 뒤에 */
   buildChop();
   /* 꿈의 운석·번쩍임·탄도선 (모든 장소 — 꿈은 장소를 가리지 않는다) */
@@ -410,6 +413,7 @@ export function buildScene(bgKey) {
   W.interact = [
     { id: 'trunk',    pos: [0, 1.0, 10.45],     r: 1.5, hit: 0.9,  from: ['walk'],          label: () => dreamOn() ? '트렁크 확인하기' : '트렁크 열기', act: openTrunk },
     ...chairs.map((id, i) => ({ id, pos: [L.chairs[i][0], 0.6, L.chairs[i][1]], r: 1.8, hit: 0.45, from: ['walk'], label: () => '의자에 앉기', act: () => sitDown(id) })),
+    ...seatsIn('poker').map((id, i) => ({ id, pos: [L.poker.chairs[i][0], 0.6, L.poker.chairs[i][1]], r: 1.8, hit: 0.45, from: ['walk'], label: () => '홀덤 자리에 앉기', act: () => sitPoker(id) })),
     { id: 'tent',     pos: [T.x, 0.7, T.z - T.l / 2 - 0.03], r: 1.5, hit: L.multi ? 1.4 : 1.0, from: ['walk'], label: () => '텐트에 들어가기', act: () => sitDown('tent') },
     ...DOORS.map(d => ({ id: d.id, pos: d.pos, r: 1.5, hit: 0.7, from: ['walk'], label: () => d.label, act: () => sitDown(d.id) })),
     { id: 'fire',     pos: [L.fire[0], 0.4, L.fire[1]],     r: 2.2, hit: 0.6,  from: ['walk'], label: () => W.fireLit ? '모닥불 끄기' : '모닥불 피우기', act: toggleFire },

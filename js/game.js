@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ctx, state, settings, saveSettings, DAY_LEN, records, session } from './state.js';
 import { bindHome, showHome, inviteLink } from './home.js';
-import { BG, TIME, ITEMS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM } from './data.js';
+import { BG, TIME, ITEMS, EYE, PR, WAKE, CHOP, ICON, GEAR, GEAR_DEFAULT, FISHING, memoFor, ROAST, roastStage, BEACH, DREAM, POKER } from './data.js';
 import { camp, campForBuild, multiCamp, blocks, seatOf, seatKind, seatsOf } from './camp.js';
 import { $, clamp, wrapPI, isTouch, rnd, josa, setSeed, newSeed } from './util.js';
 import { terrainH, shoreOff } from './terrain.js';
@@ -247,6 +247,11 @@ function look(dx, dy, s) {
     /* 돗자리에 누워서: 바다 쪽 좌우 약 100°, 수평선부터 거의 머리 위까지 */
     player.yaw = clamp(wrapPI(player.yaw), -BEACH.look[0], BEACH.look[0]);
     player.pitch = clamp(player.pitch, BEACH.look[1], BEACH.look[2]);
+  } else if (state.mode === 'seated' && seatKind(state.seat) === 'poker' && cam.t >= 1) {
+    /* 홀덤 자리: 테이블 가운데에서 좌우 약 100°, 아래로는 내 손패까지 */
+    const c = seatOf(state.seat).yaw;
+    player.yaw = c + clamp(wrapPI(player.yaw - c), -POKER.look[0], POKER.look[0]);
+    player.pitch = clamp(player.pitch, POKER.look[1], POKER.look[2]);
   } else if (state.mode === 'shoot' && cam.t >= 1) {
     const c = dreamCenter();
     player.yaw = c + clamp(wrapPI(player.yaw - c), -DREAM.look[1], DREAM.look[1]);
@@ -277,7 +282,7 @@ export function currentTarget() {
 
 /* 멀티: 다른 사람이 이미 차지한 자리면 알려 주고 막는다. 자리는 하나하나 따로 (의자 2번이 차 있으면 옆 의자는 앉을 수 있다).
    텐트 자리는 그 자리에 앉았거나 그 앞 침낭에 누운 사람이 있으면 차 있다 */
-const BUSY = { chair: '의자에 앉아 있다', tent: '텐트 안에 있다', bed: '침낭에 누워 있다', dock: '부두 끝에서 낚시하는 중이다', mat: '돗자리에 누워 있다', stump: '장작을 패는 중이다' };
+const BUSY = { chair: '의자에 앉아 있다', tent: '텐트 안에 있다', bed: '침낭에 누워 있다', dock: '부두 끝에서 낚시하는 중이다', mat: '돗자리에 누워 있다', stump: '장작을 패는 중이다', poker: '홀덤 자리에 앉아 있다' };
 function seatBusy(id) {
   const k = seatKind(id), bed = k === 'tent' ? id.replace('tent', 'bed') : null;
   const who = netSeatTaken(bed ? [id, bed] : [id]); if (!who) return false;
@@ -293,7 +298,8 @@ export function sitDown(id, quiet) {
   const st = seatOf(id), kind = seatKind(id); state.mode = 'seated'; state.seat = id;
   /* 부두 끝·돗자리: 물 쪽(정면)을 본다. 돗자리는 하늘을 반쯤 올려다보며 눕는다. 멀티의 의자는 모닥불을 본다 */
   const sea = id === 'dock' || id === 'mat';
-  const yawTo = sea ? 0 : kind === 'chair' && st.yaw !== undefined ? st.yaw : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : id === 'mat' ? BEACH.lie : undefined;
+  const faced = (kind === 'chair' || kind === 'poker') && st.yaw !== undefined;
+  const yawTo = sea ? 0 : faced ? st.yaw : wrapPI(player.yaw), pitchTo = quiet ? 0 : id === 'dock' ? -0.08 : id === 'mat' ? BEACH.lie : kind === 'poker' ? st.pitch : undefined;
   startMove(new THREE.Vector3(...st.pos), yawTo, pitchTo);
   if (!quiet) { if (kind === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (kind === 'tent') sfx('zipper'); else sfx('sit'); }
   setIndoor(kind === 'tent' || kind === 'car');
@@ -321,6 +327,12 @@ export function startFishing() {
 export function lieDown() {
   if (seatBusy('mat') || !stashHand()) return;
   sitDown('mat');
+}
+/* 홀덤 자리: 꿈속에서는 앉을 수 없다. 손에 든 것은 낚시처럼 맡겨 두고 앉는다 (일어나면 돌려받는다) */
+export function sitPoker(id) {
+  if (dreamOn()) { showToast('꿈속의 카드는 숫자가 보이지 않는다'); return; }
+  if (seatBusy(id) || !stashHand()) return;
+  sitDown(id);
 }
 /* 맡겨 둔 물건을 다시 손에 든다. 트렁크에서 꺼낼 때와 달리 붓는 소리·얼음 소리는 내지 않는다 */
 function restoreStashed() {

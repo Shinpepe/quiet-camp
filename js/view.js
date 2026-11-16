@@ -17,7 +17,7 @@ import { mountItem, updateLocalAvatar } from './avatar.js';
    차·텐트를 뚫지 않게 카메라를 당기고, 땅 아래로는 내려가지 않게 띄운다 */
 
 const V = { k: 0, d: 0, shown: false }, BOOM = 2.4, LIFT = 0.3;
-const FIRST_SEATS = { car: 1, tent: 1, bed: 1, dock: 1 };
+const FIRST_SEATS = { car: 1, tent: 1, bed: 1, dock: 1, poker: 1 };
 const _f = new THREE.Vector3(), _h = new THREE.Vector3(), _p = new THREE.Vector3(), _pv = new THREE.Vector3(), _b = new THREE.Vector3(), _sp = new THREE.Vector3(), _sq = new THREE.Quaternion();
 
 function allowed() {

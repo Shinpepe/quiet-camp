@@ -244,6 +244,8 @@ function loop(now) {
     });
   }
   if (W.dockLight) { W.dockLight.intensity = W.tm.lantern * 0.8 * (0.96 + 0.04 * Math.sin(T * 3.1)); if (W.dockLampObj) W.dockLampObj.userData.setLit(W.tm.lantern > 0.5); }
+  /* 홀덤 테이블 랜턴: 부두 랜턴처럼 시간대에 맞춰 저절로 켜진다 */
+  if (W.pokerLight) { W.pokerLight.intensity = W.tm.lantern * 0.55 * (0.96 + 0.04 * Math.sin(T * 2.7)); if (W.pokerLampObj) W.pokerLampObj.userData.setLit(W.tm.lantern > 0.5); }
   if (W.stars) W.stars.material.uniforms.uOp.value = W.tm.stars;
 
   /* ── 모닥불: 기본 밝기는 부드럽게 따라가고, 오디오의 파칙(W.firePop)이 순간적으로 얹힌다. 큰 파칙(W.fireBurst)에는 불티가 솟는다 ── */

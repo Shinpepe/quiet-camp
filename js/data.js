@@ -164,6 +164,21 @@ const SOLO = {
   table: [0.6, 0.5], cooler: [2.4, 0.6], pack: [3.05, 0.15], stump: [2.55, -1.95], pile: [1.85, -2.55],
   memo: [0.43, 0.83, 8.05],
 };
+/* ══ 홀덤 테이블 (멀티 배치에만, cards.js·scene.js·game.js) ══
+   at: 테이블 가운데 [x, z] — 모닥불 오른쪽 뒤. 차에서 불가로 가는 길은 비켜 있다
+   rx·rz: 상판 반지름 (장축 x · 단축 z — 살짝 타원. 같은 값이면 둥근 테이블) · h: 상판 높이(펠트 아래)
+   gap: 의자 가운데가 상판 가장자리에서 떨어진 거리 · pole: 랜턴 폴대 자리 [x, z]
+   look: 앉은 동안 시선 [좌우 범위, 아래 한계, 위 한계] (rad, 정면 = 테이블 가운데)
+   sb·bb·start: 블라인드·시작 칩 (H3 부터 쓴다)
+   demo: true 면 보기용 카드·칩을 깔아 둔다 (H1 확인용. H3 에서 실제 판으로 바뀐다)
+   의자 순서는 위에서 보아 시계 방향: 차 쪽 → 왼쪽(−x) → 호수 쪽 → 오른쪽(+x). 이 순서가 판이 도는 방향이다 */
+export const POKER = { at: [3.5, 3.0], rx: 0.6, rz: 0.5, h: 0.62, gap: 0.32, pole: [4.35, 2.15], look: [1.75, -0.95, 0.55], sb: 10, bb: 20, start: 1000, demo: true };
+/* 의자 자리 [x, z, yaw]: 방향마다 상판 가장자리 + gap. yaw 는 테이블 가운데를 바라보는 방향 */
+const POKER_DIRS = [[0, 1], [-1, 0], [0, -1], [1, 0]];
+const pokerChairs = P => POKER_DIRS.map(([dx, dz]) => {
+  const e = 1 / Math.hypot(dx / P.rx, dz / P.rz) + P.gap, x = P.at[0] + dx * e, z = P.at[1] + dz * e;
+  return [+x.toFixed(3), +z.toFixed(3), Math.atan2(dx, dz)];
+});
 const MULTI_FIRE = [1.0, -2.0];
 const MULTI = {
   multi: true,
@@ -175,6 +190,7 @@ const MULTI = {
   chairs: arc(MULTI_FIRE, 1.9, [129, 103, 77, 51]),
   table: [3.75, -0.6], cooler: [3.75, 0.25], pack: [4.6, 0.2], stump: [5.0, -2.2], pile: [5.6, -2.9],
   memo: [0, 0.83, 8.3], blanket: [0, 0.78, 9.3],
+  poker: Object.assign({}, POKER, { chairs: pokerChairs(POKER) }),
 };
 
 /* 배치표 → 걷기 충돌. 1인 배치표로 만들면 예전 BLOCKS 와 같은 값이 나온다 */
@@ -197,6 +213,13 @@ function campBlocks(L) {
   out.push(circle(L.fire[0], L.fire[1], 0.7), circle(L.stump[0], L.stump[1], 0.22), circle(L.stump[0] + 0.35, L.stump[1], 0.2), circle(L.pack[0], L.pack[1], 0.32));
   /* 텐트 말뚝 네 개 (줄은 통과한다) */
   for (const a of [1, -1]) for (const b of [-1, 1]) out.push(circle(t.x + a * t.stake[0], t.z + b * t.stake[1], 0.06));
+  /* 홀덤 테이블(멀티): 상판 네모 · 의자(돌린 의자라 원) · 랜턴 폴대 */
+  if (L.poker) {
+    const P = L.poker;
+    out.push({ x: [P.at[0] - P.rx - 0.03, P.at[0] + P.rx + 0.03], z: [P.at[1] - P.rz - 0.03, P.at[1] + P.rz + 0.03] });
+    P.chairs.forEach(([x, z, yaw]) => { const c = turn([x, z], yaw, 0, 0.06); out.push(circle(c[0], c[1], 0.38)); });
+    out.push(circle(P.pole[0], P.pole[1], 0.08));
+  }
   return out;
 }
 
@@ -222,6 +245,14 @@ function campSeats(L) {
   t.bags.forEach((bx, i) => {
     S['bed' + n(i)] = { pos: [t.x + bx, 0.45, t.z + 0.75], yaw: Math.PI, pitch: 1.15, stand: out, name: '침낭', up: '일어나기', at: [t.x + bx, 0.17, t.z + 0.8, 0] };
   });
+  /* 홀덤 자리(poker, poker2 …): 테이블 가운데를 바라보고, 내려다보는 각도는 눈에서 상판 가운데까지. 일어나면 의자 뒤에 선다 */
+  if (L.poker) {
+    const P = L.poker;
+    P.chairs.forEach(([x, z, yaw], i) => {
+      const e = turn([x, z], yaw, 0, 0.15), a = turn([x, z], yaw, 0, 0.04), dist = Math.hypot(e[0] - P.at[0], e[1] - P.at[1]);
+      S['poker' + n(i)] = { pos: [e[0], 1.05, e[1]], stand: turn([x, z], yaw, 0, 0.9), yaw, pitch: -Math.atan2(1.05 - P.h, dist), name: '홀덤 자리', up: '일어나기', at: [a[0], 0, a[1], yaw] };
+    });
+  }
   S.dock = SEAT.dock; S.mat = SEAT.mat;
   return S;
 }
