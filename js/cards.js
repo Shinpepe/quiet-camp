@@ -12,13 +12,15 @@ import { makeChair, makeLantern, contactShadow } from './props.js';
      뒷면은 표준 카드처럼 버건디 바탕에 마름모 격자, 흰 테두리, 가운데 작은 타원에 QUIET CAMP.
      무늬(♠♥♦♣)는 글꼴 대신 직접 그린다 — 기기에 따라 이모지로 바뀌는 일이 없게.
      카드 번호: 0..51 = 숫자 + 13 × 무늬 (숫자 0 = A … 12 = K, 무늬 0 ♠ · 1 ♥ · 2 ♦ · 3 ♣).
-   칩: 39mm × 3.3mm. 옆면 엣지 스팟 6개, 윗면 인레이에 텐트 그림과 액면가. 액면가마다 InstancedMesh 하나 (그리기 호출 5번).
+   칩: 52mm × 4.5mm (실제 칩의 1.33배). 옆면 엣지 스팟 6개, 윗면 인레이에 텐트 그림과 액면가. 액면가마다 InstancedMesh 하나 (그리기 호출 5번).
    테이블 위의 모든 것은 테이블 그룹(가운데 원점) 기준 좌표로 놓는다. 자리 기준 자리는 spot(자리, 안쪽, 오른쪽) 으로 구한다.
    공유 자원(아틀라스·카드 모양·칩 모양·재질)은 한 번만 만들고 씬이 바뀌어도 다시 쓴다 (userData.shared).
    H1: POKER.demo 면 보기용 판을 깔아 둔다 (바닥 카드 5장·엎어 둔 손패·칩 더미·베팅·팟·딜러 버튼) */
 
-export const CARD = { w: 0.063, h: 0.088, r: 0.0045 };
-export const CHIP = { r: 0.0195, h: 0.0033 };
+/* 카드는 실제 포커 카드(6.3 × 8.8cm)의 1.6배, 칩은 실제(39mm)의 1.33배.
+   앉은 눈에서 바닥 카드까지 약 1.1m 라, 실제 크기로는 비스듬히 눕힌 글자가 읽히지 않는다 */
+export const CARD = { w: 0.1, h: 0.14, r: 0.007 };
+export const CHIP = { r: 0.026, h: 0.0045 };
 /* 액면가와 색 (카지노 관례) */
 export const DENOMS = [
   { v: 5, col: '#b3262b' }, { v: 10, col: '#1f4fa0' }, { v: 25, col: '#2c7a3a' }, { v: 100, col: '#1d1d21' }, { v: 500, col: '#5a2a86' },
@@ -30,7 +32,7 @@ export const cardRank = c => c % 13, cardSuit = c => Math.floor(c / 13);
 /* 자리 기준 배치 (가장자리에서 안쪽으로 m, 오른쪽으로 m)
    hole: [안쪽, 첫 장 오른쪽, 두 장 간격] · chips: [안쪽, 첫 더미 오른쪽, 더미 간격] · bet: 베팅 줄 안쪽 · button: [안쪽, 오른쪽]
    board: [가운데에서 차 쪽(+z)으로, 카드 사이 간격] · pot: 팟 가운데 [x, z] (테이블 가운데 기준) */
-export const LAY = { hole: [0.16, -0.045, 0.07], chips: [0.14, 0.09, 0.042], bet: 0.28, button: [0.22, -0.14], board: [0.05, 0.009], pot: [0, -0.11] };
+export const LAY = { hole: [0.2, -0.062, 0.11], chips: [0.2, 0.13, 0.056], bet: 0.36, button: [0.3, -0.2], board: [0.07, 0.012], pot: [0, -0.13] };
 
 /* ── 아틀라스: 칸 13 × 5 (4줄 = 무늬, 마지막 줄 첫 칸 = 뒷면). 칸 사이에 여백을 두어 먼 거리(밉맵)에서 옆 칸이 번지지 않게 ── */
 const CW = 144, CH = 200, PX = 152, PY = 204, AW = 2048, AH = 1024;
@@ -155,7 +157,7 @@ function assets() {
     for (let s = 0; s < 4; s++) for (let r = 0; r < 13; r++) drawFace(g, r * PX + 4, s * PY + 2, r, s);
     drawBack(g, 4, 4 * PY + 2);
   });
-  atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 8;
+  atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = Math.min(16, ctx.renderer.capabilities.getMaxAnisotropy());
   const chipMats = DENOMS.map(d => {
     const side = shared(smoothM(0xffffff, { map: chipSideTex(d), roughness: 0.42 })), face = shared(smoothM(0xffffff, { map: chipFaceTex(d), roughness: 0.38 }));
     return [side, face, face];
@@ -164,7 +166,7 @@ function assets() {
   A = {
     cardM: shared(smoothM(0xffffff, { map: atlas, roughness: 0.5 })), faces: [], blank: cardGeo(0, 4, true), backGeo: cardGeo(0, 4, false),
     chipGeo: shared(new THREE.CylinderGeometry(CHIP.r, CHIP.r, CHIP.h, 36)), chipMats,
-    btnGeo: shared(new THREE.CylinderGeometry(0.021, 0.021, 0.006, 36)), btnMats: [shared(smoothM(0xf2efe8, { roughness: 0.4 })), btnTop, btnTop],
+    btnGeo: shared(new THREE.CylinderGeometry(0.028, 0.028, 0.008, 36)), btnMats: [shared(smoothM(0xf2efe8, { roughness: 0.4 })), btnTop, btnTop],
   };
   return A;
 }
@@ -246,11 +248,11 @@ export function buildPoker(P) {
   const felt = smoothM(0x2b5a3e, Object.assign({ roughness: 1 }, tex('fabric', 10, 10, 0.3, false)));
   const leather = smoothM(0x2a1c15, { roughness: 0.55 }), metal = METAL();
   const disk = (sx, sz, th, y, m) => { const d = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, th, 72), m); d.scale.set(sx, 1, sz); d.position.y = y; g.add(d); };
-  /* 상판·펠트(가장자리 5cm 안쪽)·레일 */
+  /* 상판·펠트(가장자리 6cm 안쪽)·레일 */
   disk(P.rx, P.rz, 0.025, P.h - 0.0125, wood);
-  disk(P.rx - 0.05, P.rz - 0.05, 0.004, P.h + 0.002, felt);
-  const rp = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2; rp.push(new THREE.Vector3(Math.cos(t) * (P.rx - 0.028), TOP + 0.008, Math.sin(t) * (P.rz - 0.028))); }
-  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rp, true), 144, 0.026, 10, true), leather));
+  disk(P.rx - 0.06, P.rz - 0.06, 0.004, P.h + 0.002, felt);
+  const rp = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2; rp.push(new THREE.Vector3(Math.cos(t) * (P.rx - 0.034), TOP + 0.01, Math.sin(t) * (P.rz - 0.034))); }
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rp, true), 144, 0.031, 10, true), leather));
   /* X자 다리 두 벌 (앞뒤), 바닥 받침, 상판 밑 가로대 */
   const lx = P.rx * 0.55, lz = P.rz * 0.55, ly = P.h - 0.03;
   [-1, 1].forEach(s => {
@@ -292,7 +294,7 @@ function demo(T) {
       while (n > 0) { const m = Math.min(n, 20), [x, z] = spot(f, LAY.chips[0], LAY.chips[1] + col * LAY.chips[2]); chips.stack(d, x, z, m, top); n -= m; col++; }
     }
   });
-  [1, 2].forEach(k => { const f = frames[k], a = spot(f, LAY.bet, -0.021), b = spot(f, LAY.bet, 0.021); chips.stack(3, a[0], a[1], 1, top); chips.stack(1, b[0], b[1], 2, top); });
+  [1, 2].forEach(k => { const f = frames[k], a = spot(f, LAY.bet, -0.028), b = spot(f, LAY.bet, 0.028); chips.stack(3, a[0], a[1], 1, top); chips.stack(1, b[0], b[1], 2, top); });
   chips.pile([1, 1, 1, 2, 0], LAY.pot[0], LAY.pot[1], top);
-  const [bx, bz] = spot(frames[3], LAY.button[0], LAY.button[1]); btn.position.set(bx, top + 0.003, bz); btn.rotation.y = frames[3].yaw; btn.visible = true;
+  const [bx, bz] = spot(frames[3], LAY.button[0], LAY.button[1]); btn.position.set(bx, top + 0.004, bz); btn.rotation.y = frames[3].yaw; btn.visible = true;
 }

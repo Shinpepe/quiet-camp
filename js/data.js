@@ -172,7 +172,7 @@ const SOLO = {
    sb·bb·start: 블라인드·시작 칩 (H3 부터 쓴다)
    demo: true 면 보기용 카드·칩을 깔아 둔다 (H1 확인용. H3 에서 실제 판으로 바뀐다)
    의자 순서는 위에서 보아 시계 방향: 차 쪽 → 왼쪽(−x) → 호수 쪽 → 오른쪽(+x). 이 순서가 판이 도는 방향이다 */
-export const POKER = { at: [3.5, 3.0], rx: 0.6, rz: 0.5, h: 0.62, gap: 0.32, pole: [4.35, 2.15], look: [1.75, -0.95, 0.55], sb: 10, bb: 20, start: 1000, demo: true };
+export const POKER = { at: [3.8, 3.0], rx: 0.8, rz: 0.64, h: 0.62, gap: 0.32, pole: [4.85, 2.05], look: [1.75, -0.95, 0.55], sb: 10, bb: 20, start: 1000, demo: true };
 /* 의자 자리 [x, z, yaw]: 방향마다 상판 가장자리 + gap. yaw 는 테이블 가운데를 바라보는 방향 */
 const POKER_DIRS = [[0, 1], [-1, 0], [0, -1], [1, 0]];
 const pokerChairs = P => POKER_DIRS.map(([dx, dz]) => {
