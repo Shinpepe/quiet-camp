@@ -15,6 +15,7 @@ import { meteorHooks, showMeteor } from './scene.js';
 import { dreamNet, dreamGo, dreamWaiting, dreamReady, dreamStatus, dreamSync, dreamRemote, dreamClaim, dreamOn } from './dream.js';
 import { chopNet, chopRemote } from './chop.js';
 import { fishNet, fishRemote } from './fish.js';
+import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo } from './poker.js';
 
 /* ══ 멀티 캠핑 연결 (Trystero, P2P) ══
    서버 없이 브라우저끼리 직접 잇는다. 방 이름 = 'camp-' + 초대 코드. 최대 4명.
@@ -31,7 +32,7 @@ import { fishNet, fishRemote } from './fish.js';
    방장 신호가 4초 끊기면 친구 화면에 "방장이 잠시 자리를 비웠다". 방장 연결이 끊기면 친구는 홈으로.
    1인 캠핑에서는 이 파일의 연결 코드가 돌지 않는다 (Trystero 도 멀티를 고를 때 처음 불러온다) */
 
-const APP = 'quiet-camp-v1', V = 9, MAX = 4;
+const APP = 'quiet-camp-v1', V = 10, MAX = 4;
 /* GUN_WAIT: 꿈속에서 첫 사람이 총을 든 뒤 나머지를 기다리는 최대 시간 (ms) */
 const HZ = 12, DELAY = 120, STALE = 3000, AWAY = 4000, FIND = 15000, GUN_WAIT = 30000;
 /* 함께 쓰는 물건: 읽기·쓰기, 소리를 낼 자리(W.interact 의 id)와 켤 때·끌 때 소리. now = 움직임 없이 바로 맞추기 (중간에 들어올 때) */
@@ -93,13 +94,19 @@ async function open(code) {
   N.room = room; N.self = lib.selfId;
   const mk = name => { const [send, get] = room.makeAction(name); return { send, get }; };
   const A = N.act = { hello: mk('hello'), welcome: mk('welcome'), nope: mk('nope'), profile: mk('profile'), start: mk('start'),
-    room: mk('room'), lobby: mk('lobby'), world: mk('world'), snap: mk('snap'), meteor: mk('meteor'), flags: mk('flags'), ask: mk('ask'), fx: mk('fx'), nap: mk('nap'), dream: mk('dream') };
+    room: mk('room'), lobby: mk('lobby'), world: mk('world'), snap: mk('snap'), meteor: mk('meteor'), flags: mk('flags'), ask: mk('ask'), fx: mk('fx'), nap: mk('nap'), dream: mk('dream'), poker: mk('poker') };
   room.onPeerJoin(id => { A.profile.send(profile(), id); if (isGuest()) A.hello.send({ v: V, name: nm(state.name) }, id); });
   room.onPeerLeave(id => peerLeft(id));
   A.profile.get((d, id) => { const p = peer(id); p.name = nm(d && d.name); if (isHost()) roomNote(); });
   A.snap.get((d, id) => gotSnap(d, id));
   A.fx.get((d, id) => gotFx(d, id));
   A.dream.get((d, id) => gotDream(d, id));
+  /* 홀덤 (poker.js): 방장은 들여보낸 친구의 부탁만, 친구는 방장이 보낸 것만 받는다 */
+  A.poker.get((d, id) => {
+    if (!d || !ctx.running) return;
+    if (isHost()) { if ((N.peers.get(id) || {}).ok) pokerRecv(d, id); }
+    else if (id === N.hostId) { N.lastHost = performance.now(); pokerRecv(d, id); }
+  });
   wireDream();
   if (isHost()) hostWire(A); else guestWire(A);
   roomNote();
@@ -218,7 +225,7 @@ function bounce(msg) { if (ctx.running) exitGame(); showHome('join', msg); }
 function peerLeft(id) {
   const p = N.peers.get(id); if (!p) return;
   if (p.av) removeRemote(p.av);
-  remoteRoll(id, null); chopRemote(id, null, 0); fishRemote(id, null);
+  remoteRoll(id, null); chopRemote(id, null, 0); fishRemote(id, null); pokerPeerLeft(id);
   N.peers.delete(id);
   if (isGuest() && id === N.hostId) { bounce('방장이 캠핑장을 떠났다'); return; }
   const ls = p.buf[p.buf.length - 1];
@@ -412,6 +419,7 @@ export function updateNet(dt) {
   else if (dreamReady()) { const c = dreamNet.guns(); k = 'g' + c.n + '/' + c.of; }
   if (k !== N.zzKey) { N.zzKey = k; if (k && ctx.running) updateHUD(); }
   for (const p of N.peers.values()) updatePeer(p, now, dt);
+  pokerUpdate(dt);
 }
 
 /* ── game.js·home.js·main.js 가 부르는 것 ── */
@@ -491,4 +499,26 @@ export function netEnter() {
   N.entering = true; N.act.hello.send({ v: V, name: nm(state.name), enter: 1 }, N.hostId);
   setTimeout(() => { N.entering = false; }, 3000);
   return null;
+}
+
+
+/* ── 홀덤 (poker.js) ── */
+export const netIsHost = isHost;
+export const netSelf = () => N.self;
+export const netName = id => id === N.self ? nm(state.name) : nameOf(id);
+/* 홀덤 테이블에 앉은 사람 (같은 장소에서 캠핑 중인 사람만): [{ id, name, seat: 0..3, away }] — 방장이 판에 들일 사람을 정한다 */
+export function netPokerSeats() {
+  const out = [];
+  for (const c of campers(performance.now())) {
+    const k = pokerSeatNo(c.seat); if (k < 0) continue;
+    out.push({ id: c.id, name: netName(c.id), seat: k, away: c.away });
+  }
+  return out;
+}
+/* 보내기: to 없음 = 모두, 'host' = 방장, 그 밖 = 그 사람 */
+export function netPoker(d, to) {
+  if (!N.act) return;
+  if (to === 'host') { if (N.hostId) N.act.poker.send(d, N.hostId); }
+  else if (to) N.act.poker.send(d, to);
+  else N.act.poker.send(d);
 }

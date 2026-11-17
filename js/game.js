@@ -20,6 +20,7 @@ import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beg
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
 import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken, netEnter, netHostLive, netSleepCount } from './net.js';
+import { pokerKey, pokerWheel, pokerCancel, pokerBox, pokerHooks, pokerReset, pokerUpLabel, POKER_ICON } from './poker.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -116,6 +117,7 @@ export function bindInput() {
   /* 모바일이면 body 에 touch 를 단다 → style.css 가 키 표시(E·숫자)를 숨긴다 */
   document.body.classList.toggle('touch', isTouch);
   chopHooks.stop = endChop; chopHooks.hud = updateHUD;
+  pokerHooks.hud = updateHUD;
   fishHooks.hud = updateHUD;
   /* 멀티: 물고기를 낚으면 모두에게 소식, 파라솔을 접고 펴면 방장을 거쳐 모두에게 */
   fishHooks.caught = (n, size) => netFx('catch', { n, size });
@@ -138,6 +140,8 @@ export function bindInput() {
     if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
     if (e.code === 'Escape' && inModal()) { closeModal(); return; }
+    /* 홀덤 자리: F·C·R·1~4·↑↓·Backspace */
+    if (pokerKey(e.code)) { e.preventDefault(); return; }
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyP') takePhoto();
     if (e.code === 'KeyV') toggleView();
@@ -150,7 +154,9 @@ export function bindInput() {
   /* 모바일: 앱을 내리거나 화면이 꺼지면 일시정지 (PC 는 포인터 잠금이 풀리며 이미 멈춘다) */
   document.addEventListener('visibilitychange', () => { if (document.hidden && ctx.running && isTouch && !ctx.paused && !inModal() && state.mode !== 'sleep') showPause(); });
   canvas().addEventListener('click', () => { if (ctx.running && !isTouch && !locked()) canvas().requestPointerLock(); });
-  addEventListener('mousedown', e => { if (e.button !== 0 || !ctx.running || isTouch || !locked()) return; useItem(); });
+  addEventListener('mousedown', e => { if (e.button === 2 && ctx.running && pokerCancel()) return; if (e.button !== 0 || !ctx.running || isTouch || !locked()) return; useItem(); });
+  /* 홀덤 레이즈 금액 */
+  addEventListener('wheel', e => { if (ctx.running && pokerWheel(e.deltaY)) e.preventDefault(); }, { passive: false });
   addEventListener('mouseup', e => { if (e.button === 0) endSip(); });
   canvas().addEventListener('touchstart', e => { for (const t of e.changedTouches) { if (t.clientX < innerWidth * 0.42 && !tMove) { tMove = { id: t.identifier, sx: t.clientX, sy: t.clientY, dx: 0, dy: 0 }; if (ctx.running) showJoy(t.clientX, t.clientY); } else if (!tLook) tLook = { id: t.identifier, lx: t.clientX, ly: t.clientY }; } }, { passive: true });
   canvas().addEventListener('touchmove', e => { for (const t of e.changedTouches) { if (tMove && t.identifier === tMove.id) { tMove.dx = clamp((t.clientX - tMove.sx) / 60, -1, 1); tMove.dy = clamp((t.clientY - tMove.sy) / 60, -1, 1); moveJoy(tMove.dx, tMove.dy); } if (tLook && t.identifier === tLook.id) { look(t.clientX - tLook.lx, t.clientY - tLook.ly, 0.005 * settings.sens); tLook.lx = t.clientX; tLook.ly = t.clientY; } } }, { passive: true });
@@ -306,10 +312,13 @@ export function sitDown(id, quiet) {
 }
 function standUp() {
   const st = seatOf(state.seat), kind = seatKind(state.seat);
+  /* 홀덤: 판에 살아 있었으면 방장이 폴드로 처리한다 (net.js 스냅샷으로 자리를 떠난 걸 안다) */
+  const folded = kind === 'poker' && !!pokerUpLabel();
   if (state.seat === 'dock') stopFish();
   if (kind === 'car') { sfx('doorOpen'); setTimeout(() => sfx('doorClose'), 900); } else if (kind === 'tent') sfx('zipper', 'close'); else sfx('stand');
   player.x = st.stand[0]; player.z = st.stand[1]; state.mode = 'walk'; state.seat = null; startMove(new THREE.Vector3(player.x, floorY(player.x, player.z) + EYE, player.z), wrapPI(player.yaw), 0); setIndoor(false);
   restoreStashed();
+  if (folded) showToast('이번 판은 폴드하고 일어났다');
 }
 /* 앉기 전에 손에 든 것을 맡겨 둔다 (일어날 때 standUp → restoreStashed 가 남은 양 그대로 돌려준다).
    타는 스파클라는 먼저 꽂게 한다 (장작 패기와 같은 규칙). 맡길 수 없으면 false */
@@ -675,6 +684,8 @@ export function updateSleep(dt) {
 
 /* 소식(위쪽 토스트)은 gauge.js 가 띄운다 — 낚시·장작 패기도 같은 곳을 쓰도록 한 곳에 모았다 */
 export const showToast = toast;
+/* 이름처럼 사람이 쓴 글자를 innerHTML 에 넣을 때 */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
 /* 아이템 상자: 첫 줄 = 이름(+ 기록), 둘째 줄 = 조작 안내 */
 export function updateHUD() {
@@ -683,7 +694,9 @@ export function updateHUD() {
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
   const covered = inModal() || state.mode === 'sleep';
   const mud = state.item === 'marsh' && ctx.W.item && ctx.W.item.userData, marshEmpty = !!mud && mud.amount <= 0;
-  ib.classList.toggle('on', chop || fish || (!!state.item && !covered));
+  /* 홀덤 자리에 앉아 있으면 아이템 상자가 포커 상자가 된다 (손에 든 것은 맡겨 두었다) */
+  const pk = chop || fish ? null : pokerBox();
+  ib.classList.toggle('on', chop || fish || !!pk || (!!state.item && !covered));
   /* 기록은 이름 줄 안에 넣는다 — .hn 은 모바일 세로에서 숨겨진다 */
   const sub = t => `<span style="display:block;font-size:.82em;opacity:.8;margin-top:2px">${t}</span>`;
   if (chop) {
@@ -695,6 +708,9 @@ export function updateHUD() {
     const n = fishCount(), [hn, act] = fishHint(btn);
     ib.querySelector('.ic').innerHTML = ICON.rod; ib.querySelector('.nm').innerHTML = '낚싯대' + (n ? sub(`잡은 물고기 ${n}`) : '');
     ib.querySelector('.hn').textContent = hn; $('#mSip').textContent = act;
+  } else if (pk) {
+    ib.querySelector('.ic').innerHTML = POKER_ICON; ib.querySelector('.nm').innerHTML = esc(pk.nm) + (pk.sub ? sub(esc(pk.sub)) : '');
+    ib.querySelector('.hn').textContent = pk.hn;
   } else if (state.item === 'marsh') {
     /* 익음 단계는 글자로 보여 주지 않는다 — 색으로만 판단하게 */
     const def = ITEMS.marsh, spot = roastSpot();
@@ -738,7 +754,7 @@ export function updatePrompt() {
   const start = !t && !roll && state.mode === 'walk' && snowStartable();
   const id = roll ? 'roll:' + rl : t ? t.id : start ? 'snowStart' : state.mode === 'seated' ? 'up' : chop ? 'chopUp' : null;
   if (id === anim.lastTargetId) return; anim.lastTargetId = id;
-  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? (sleep.wait ? '일어나기' : seatOf(state.seat).up || '일어나기') : chop ? '그만하기' : null;
+  const label = roll ? rl : t ? t.label() : start ? '눈 뭉치기' : state.mode === 'seated' ? (sleep.wait ? '일어나기' : pokerUpLabel() || seatOf(state.seat).up || '일어나기') : chop ? '그만하기' : null;
   const clickLab = t && t.click && !state.item ? t.clickLabel() : null;
   cross.classList.toggle('hot', !!t || rl === '눈사람 만들기');
   if (isTouch) {
@@ -750,7 +766,7 @@ export function updatePrompt() {
   const parts = [];
   if (label) parts.push(`<kbd class="a">E</kbd>${label}`);
   if (clickLab) parts.push(`<kbd class="a">클릭</kbd>${clickLab}`);
-  if (parts.length) { p.innerHTML = parts.join('<span style="opacity:.5;margin:0 .6em">·</span>'); p.classList.add('on'); } else p.classList.remove('on');
+  if (parts.length) { p.innerHTML = parts.join('<span style="opacity:.5;margin:0 .6em">/</span>'); p.classList.add('on'); } else p.classList.remove('on');
 }
 function showPause() {
   if (!ctx.paused) sfx('uiOpen'); ctx.paused = true; anim.holding = false; gaugeHide(); $('#pause').classList.add('on'); $('#pauseSub').textContent = BG[state.bg].name + ' / ' + clockLabel(state.clock);
@@ -875,7 +891,7 @@ export function startGame(fromHost) {
     ctx.W.wasNight = night;
     ctx.W.domeLit = night;
     /* 멀티: 방장은 지금 불·랜턴 상태를 알리고, 친구는 받아 둔 상태로 맞춘다 */
-    netBegin();
+    pokerReset(); netBegin();
     startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
     setIndoor(!!seat);
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
@@ -896,7 +912,7 @@ export function exitGame() {
   startGen++; starting = false;
   hidePause(); ctx.running = false; if (document.pointerLockElement) document.exitPointerLock();
   endSleepUI(); sleep.wait = false; sleep.bed = 'bed'; resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx();
-  $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null);
+  $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); pokerReset();
   $('#fade').style.opacity = 0;
   stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); ctx.hand.visible = false; hideJoy();
 }

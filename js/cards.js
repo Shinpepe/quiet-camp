@@ -298,3 +298,51 @@ function demo(T) {
   chips.pile([1, 1, 1, 2, 0], LAY.pot[0], LAY.pot[1], top);
   const [bx, bz] = spot(frames[3], LAY.button[0], LAY.button[1]); btn.position.set(bx, top + 0.004, bz); btn.rotation.y = frames[3].yaw; btn.visible = true;
 }
+
+
+/* 앞에 쌓아 둔 칩의 구성: 5·10·25 를 조금씩 섞고 나머지는 큰 것부터 (1,000칩이면 시작 구성과 같다).
+   1,500칩까지는 500칩을 쓰지 않는다 */
+export function stackChips(amount) {
+  const out = [0, 0, 0, 0, 0]; let rest = amount;
+  [[0, 10, 0.05], [1, 15, 0.15], [2, 12, 0.3]].forEach(([k, max, share]) => {
+    const v = DENOMS[k].v, n = Math.min(max, Math.floor(amount * share / v), Math.floor(rest / v)); out[k] = n; rest -= n * v;
+  });
+  for (let k = amount > 1500 ? 4 : 3; k >= 0; k--) { const v = DENOMS[k].v, n = Math.floor(rest / v); out[k] += n; rest -= n * v; }
+  return out;
+}
+/* ── 지금 판의 모습 그대로 놓기 (H3 — 움직임 없이. 카드가 날아가고 칩이 밀려가는 연출은 H4) ──
+   d = { board: [카드…], holes: [[카드|null, 카드|null] | null ×4], stacks: [칩 ×4], bets: [칩 ×4], pot: 칩, btn: 자리 (−1 = 없음) }
+   null 카드는 뒷면 (다른 사람의 손패) */
+export function renderTable(T, d) {
+  const { chips, frames, board, hole, btn, top } = T;
+  chips.clear();
+  board.forEach((c, i) => {
+    if (d.board[i] === undefined) { c.visible = false; return; }
+    c.userData.set(d.board[i]); c.userData.lay((i - 2) * (CARD.w + LAY.board[1]), LAY.board[0], 0, false, top);
+  });
+  frames.forEach((f, k) => {
+    const h = d.holes[k];
+    hole[k].forEach((c, j) => {
+      if (!h) { c.visible = false; return; }
+      const [x, z] = spot(f, LAY.hole[0], LAY.hole[1] + j * LAY.hole[2]);
+      c.userData.set(h[j]); c.userData.lay(x, z, f.yaw + (j ? 0.07 : -0.05), false, top);
+    });
+    /* 앞의 칩: 큰 것부터 더미마다 20개까지 */
+    const n = stackChips(d.stacks[k] || 0); let col = 0;
+    for (let q = DENOMS.length - 1; q >= 0; q--) {
+      let m = n[q];
+      while (m > 0) { const s = Math.min(m, 20), [x, z] = spot(f, LAY.chips[0], LAY.chips[1] + col * LAY.chips[2]); chips.stack(q, x, z, s, top); m -= s; col++; }
+    }
+    /* 이번 라운드에 건 칩: 베팅 줄 위에 액면가마다 한 더미 */
+    if (d.bets[k] > 0) {
+      const used = chipsFor(d.bets[k]).map((v, q) => [q, v]).filter(e => e[1] > 0);
+      used.forEach(([q, v], i) => { const [x, z] = spot(f, LAY.bet, (i - (used.length - 1) / 2) * 0.056); chips.stack(q, x, z, v, top); });
+    }
+  });
+  if (d.pot > 0) chips.pile(stackChips(d.pot), LAY.pot[0], LAY.pot[1], top);
+  if (d.btn >= 0 && frames[d.btn]) {
+    const [bx, bz] = spot(frames[d.btn], LAY.button[0], LAY.button[1]);
+    btn.position.set(bx, top + 0.004, bz); btn.rotation.y = frames[d.btn].yaw; btn.visible = true;
+  } else btn.visible = false;
+  chips.commit();
+}

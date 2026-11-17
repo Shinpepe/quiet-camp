@@ -195,6 +195,15 @@ export function act(S, k, a) {
 }
 /* 시간이 다 됐을 때: 체크할 수 있으면 체크, 아니면 폴드 */
 export function autoAct(S, k) { const L = legal(S, k); if (!L) return '행동할 수 없다'; return act(S, k, { k: L.canCheck ? 'check' : 'fold' }); }
+/* 차례가 아닐 때 판에서 빠진다 (자리에서 일어남·연결 끊김): 폴드로 처리하고 판을 이어 간다.
+   올인한 사람은 더 낼 것이 없으니 판에 남는다 (쇼다운까지 간다) */
+export function leave(S, k) {
+  const p = S && S.seats[k];
+  if (!p || S.street === 'done' || p.st !== 'in') return;
+  if (S.turn === k) { act(S, k, { k: 'fold' }); return; }
+  p.st = 'fold'; p.last = 'fold'; ev(S, 'act', { seat: k, k: 'fold', left: true });
+  advance(S, (S.turn + S.n - 1) % S.n);
+}
 
 /* 다음 차례를 정하고, 라운드가 끝났으면 칩을 거둬 다음 카드를 펼친다. 더 베팅할 사람이 없으면 리버까지 계속 펼친다 */
 function advance(S, from) {
@@ -418,6 +427,13 @@ export function pokerTest(N = 3000) {
     need(act(S, 1, { k: 'call' }) !== null, '차례가 아닌 사람'); need(act(S, 0, { k: 'check' }) !== null, '콜해야 할 때 체크');
     need(act(S, 0, { k: 'raise', to: 33 }) !== null, '최소 레이즈 미만'); need(act(S, 0, { k: 'raise', to: 63 }) !== null, '5칩 단위가 아님');
   });
+  T('판 도중 자리를 떠나면 폴드로 처리하고 판을 이어 간다', () => {
+    const S = setup([[0, 1000], [1, 1000], [2, 1000]], 0);
+    leave(S, 1); need(S.seats[1].st === 'fold' && S.turn === 0, `${S.seats[1].st} 차례 ${S.turn}`);
+    play(S, [[0, 'call'], [2, 'check']]); need(S.street === 'flop' && potTotal(S) === 50, `${S.street} 팟 ${potTotal(S)}`);
+    const S2 = setup([[0, 1000], [2, 1000]], 0); leave(S2, 2);
+    need(S2.street === 'done' && chips(S2) === '[1020,null,980,null]', chips(S2));
+  });
   T(`무작위 ${N}판: 칩 총합 유지 · 판이 끝남 · 규칙 위반 없음`, () => {
     const r = mulberry(12345);
     for (let h = 0; h < N; h++) {
@@ -428,6 +444,10 @@ export function pokerTest(N = 3000) {
       let steps = 0;
       while (S.street !== 'done') {
         need(++steps < 400, `${h}번째 판이 끝나지 않는다`);
+        if (r() < 0.03) {
+          const ks = S.seats.map((p, i) => p && p.st === 'in' && i !== S.turn ? i : -1).filter(i => i >= 0);
+          if (ks.length) { leave(S, ks[Math.floor(r() * ks.length)]); continue; }
+        }
         const k = S.turn, L = legal(S, k); need(L, `${h}번째 판: 차례 ${k} 인데 할 수 있는 행동이 없다`);
         const x = r(); let a;
         if (x < 0.12) a = { k: 'fold' };
