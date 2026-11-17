@@ -17,6 +17,8 @@ import { updateBeach, parasolMoving } from './beach.js';
 import { updateDream, dreamOn, tintDream } from './dream.js';
 import { updateView, beginView, endView, viewThird } from './view.js';
 import { camp } from './camp.js';
+/* 홀덤 규칙 엔진 — 지금은 콘솔 시험용 (pokerTest()). H3 부터 방장이 판을 돌리는 데 쓴다 */
+import './pokerEngine.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
