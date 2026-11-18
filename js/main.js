@@ -233,7 +233,7 @@ function loop(now) {
   /* 차 실내등: 빛은 항상 장면에 있고 세기만 바뀐다 (재컴파일 없음) */
   if (W.dome) {
     W.domeK += ((W.domeLit ? 1 : 0) - W.domeK) * Math.min(1, dt * 10);
-    W.dome.light.intensity = 3 * W.domeK; W.dome.lens.material.emissiveIntensity = 1.6 * W.domeK;
+    W.dome.light.intensity = 1.5 * W.domeK; W.dome.lens.material.emissiveIntensity = 0.8 * W.domeK;
   }
   /* 텐트 랜턴이 켜지면 밖에서 천이 은은하게 빛난다. 어두운 천일수록 덜 비치고,
      큰 면이 빠르게 깜빡이면 지직거려 보이므로 점광원의 떨림(flick)은 곱하지 않는다 */

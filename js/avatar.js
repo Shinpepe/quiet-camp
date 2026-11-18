@@ -30,7 +30,7 @@ function makeMats() {
   teeth.wrapS = teeth.wrapT = THREE.RepeatWrapping; teeth.repeat.set(1, 90); teeth.magFilter = THREE.NearestFilter; teeth.colorSpace = THREE.SRGBColorSpace;
   return {
     jacket: smoothM(0xe0783a, { roughness: 0.55 }), seam: smoothM(0xe0783a, { roughness: 0.65 }), pocket: smoothM(0xe0783a, { roughness: 0.6 }),
-    zip: smoothM(0xffffff, { map: teeth, metalness: 0.6, roughness: 0.35 }), metal: smoothM(0xb8bcc2, { metalness: 0.85, roughness: 0.3 }),
+    zip: smoothM(0xb4b8bd, { map: teeth, metalness: 0.3, roughness: 0.6 }), metal: smoothM(0xb8bcc2, { metalness: 0.85, roughness: 0.3 }),
     pants: smoothM(0x3b3f47, { roughness: 0.9 }), boot: smoothM(0x5b3e29, { roughness: 0.8 }), sole: smoothM(0x1e1e1e, { roughness: 0.9 }),
     skin: smoothM(0xf2cfb0), eye: smoothM(0x15120f, { roughness: 0.25 }), glove: smoothM(0x4a3426, { roughness: 0.85 }),
     hat: smoothM(0xefe6d1, { roughness: 0.95, side: THREE.DoubleSide }),
@@ -229,7 +229,7 @@ const SEATP = {
   chair: { hipsY: 0.55, j: { spine: [0.16, 0, 0], legL: [1.5, 0, -0.08], legR: [1.48, 0, 0.08], kneeL: [-1.48, 0, 0], kneeR: [-1.42, 0, 0], footL: [-0.02, 0, 0], footR: [-0.06, 0, 0], armL: [0.25, 0, -0.18], armR: [0.25, 0, 0.18], elbowL: [1.15, 0, 0], elbowR: [1.15, 0, 0] } },
   /* 홀덤 자리: 등받이에서 몸을 떼고 테이블 쪽으로 숙인다. 두 팔뚝은 테이블 레일 위에 걸친다
      (머리가 카메라 자리 — 의자 가운데 앞 약 10cm·높이 약 1.17m — 에 오도록 허리 숙임을 맞췄다) */
-  poker: { hipsY: 0.55, j: { spine: [0.38, 0, 0], legL: [1.5, 0, -0.08], legR: [1.48, 0, 0.08], kneeL: [-1.48, 0, 0], kneeR: [-1.42, 0, 0], footL: [-0.02, 0, 0], footR: [-0.06, 0, 0], armL: [0.1, 0, 0.08], armR: [0.1, 0, -0.08], elbowL: [0.97, 0, 0], elbowR: [0.97, 0, 0] } },
+  poker: { hipsY: 0.55, j: { spine: [-0.32, 0, 0], legL: [1.5, 0, -0.08], legR: [1.48, 0, 0.08], kneeL: [-1.48, 0, 0], kneeR: [-1.42, 0, 0], footL: [-0.02, 0, 0], footR: [-0.06, 0, 0], armL: [0.1, 0, 0.08], armR: [0.1, 0, -0.08], elbowL: [0.97, 0, 0], elbowR: [0.97, 0, 0] } },
   car: { hipsY: 0.86, j: { spine: [0.14, 0, 0], legL: [1.35, 0, -0.05], legR: [1.35, 0, 0.05], kneeL: [-0.25, 0, 0], kneeR: [-0.3, 0, 0], footL: [-0.8, 0, 0], footR: [-0.75, 0, 0], armL: [0.8, 0, -0.05], armR: [0.8, 0, 0.05], elbowL: [0.6, 0, 0], elbowR: [0.6, 0, 0] } },
   /* 조수석: 다리는 운전석과 같고 손은 무릎에 / 뒷좌석: 앞좌석 등받이에 다리가 끼지 않게 무릎을 굽힌다 (발은 차 바닥 0.51 에) */
   carPass: { hipsY: 0.86, j: { spine: [0.14, 0, 0], legL: [1.35, 0, -0.05], legR: [1.35, 0, 0.05], kneeL: [-0.25, 0, 0], kneeR: [-0.3, 0, 0], footL: [-0.8, 0, 0], footR: [-0.75, 0, 0], armL: [0.35, 0, -0.15], armR: [0.35, 0, 0.15], elbowL: [1.1, 0, 0], elbowR: [1.1, 0, 0] } },
@@ -297,9 +297,19 @@ export function updateAvatar(A, S, dt) {
   if (sp && sp.lie) { look = 0.05; hyaw *= 0.3; }
   j.head = [look, hyaw, 0]; j.spine = j.spine || [0, 0, 0];
   /* 홀덤 자리 (다른 사람): 들춰 보는 동안(pk) 두 손을 손패 쪽으로, 칩을 낼 때(pushT — showBubble) 오른손을 앞으로 내밀었다 돌아온다 */
+  /* 홀덤 자리: 손 자리는 몸 기준(오른쪽 x · 위 y · 뒤 z, 척추 관절에서)으로 정하고, 숙인 만큼 돌려 IK 에 넣는다.
+     척추 관절은 바닥 위 0.63m, 테이블 가장자리는 몸 앞 0.36m, 상판 0.62m, 손패 가까운 끝은 몸 앞 약 0.5m
+     쉬는 자세 = 두 손을 레일 위에 / 들춰 보기(pk) = 두 손을 손패의 가까운 쪽 끝에 / 칩 내기(pushT) = 오른손을 앞으로.
+     고개는 숙인 만큼 들어 시선 높이를 그대로 둔다 */
   if (sp && poseOf(seat) === 'poker') {
-    if (S.pk) { setArm(j, 1, 0.09, 0.04, -0.36); setArm(j, -1, -0.05, 0.04, -0.34); }
-    else if (A.pushT > 0) { const u = Math.sin(PI * clamp(1 - A.pushT / 0.6, 0, 1)); setArm(j, 1, 0.1, 0.04 + 0.02 * u, -0.3 - 0.2 * u); }
+    const th = j.spine[0], c = Math.cos(th), s = Math.sin(th);
+    const hand = (side, x, y, z) => setArm(j, side, x, y * c + z * s, -y * s + z * c);
+    if (S.pk) { hand(1, 0.05, 0.06, -0.5); hand(-1, -0.07, 0.06, -0.5); }
+    else {
+      const u = A.pushT > 0 ? Math.sin(PI * clamp(1 - A.pushT / 0.6, 0, 1)) : 0;
+      hand(1, 0.15, 0.09 + 0.03 * u, -0.4 - 0.16 * u); hand(-1, -0.15, 0.09, -0.4);
+    }
+    j.head = [j.head[0] - th, j.head[1], 0];
   }
   if (A.pushT > 0) A.pushT -= dt;
   /* 손에 든 것 (누워 있으면 맡겨 두었다).

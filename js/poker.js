@@ -33,7 +33,7 @@ import { netPoker, netPokerSeats, netIsHost, netSelf, netName, netBubble } from 
    화면 문구: 나란한 항목은 " / ", 문장이 끝나고 이어지면 ". ", 이름 여러 개는 ", " */
 
 const TURN = 60000, AWAY = 3000, COUNT = 3, LOW = 10, E = POKER.earn;
-const PEEK_HINT = isTouch ? '카드를 누르고 있으면 본다' : 'Space 를 누르고 있으면 카드를 본다';
+const PEEK_HINT = isTouch ? '눌러서 카드 보기' : 'Space를 눌러서 카드 보기';
 /* 다른 사람이 들춰 볼 때 그 사람 카드의 가까운 쪽 모서리를 드는 각도 (rad, 약 17°) */
 const REMOTE_PEEK = 0.3;
 /* game.js 가 채운다: hud = 일어나기 안내가 바뀌면 updateHUD, stand = 일어나기(폰 버튼) */
@@ -408,9 +408,10 @@ function raiseView(L) {
   const quick = [['1', `최소 ${won(q[0])}`, q[0]], ['2', `½팟 ${won(q[1])}`, q[1]], ['3', `팟 ${won(q[2])}`, q[2]], ['4', `올인 ${won(q[3])}`, q[3]]];
   return {
     label: L.open ? '벳 금액' : '레이즈 금액', amt: to, min: L.minTo, max: L.maxTo, frac: (to - L.minTo) / span,
-    quick: quick.map(([k, n, a], i) => [k, n, 'q' + (i + 1), a === to, '', a]),
-    hint: isTouch ? '막대를 밀거나 빠른 금액을 고르자' : `휠이나 ↑↓ 로 ${POKER.bb}씩 조절한다`,
-    keys: [['Backspace', '취소', 'raiseX'], ['R', to >= L.maxTo ? `올인 ${won(to)}` : `${won(to)} ${L.open ? '벳' : '레이즈'}`, 'raiseGo', false, 'wide']],
+    /* 같은 금액이 겹치면(최소 = ½팟 등) 앞의 것만 고른 표시, 뒤의 것은 흐리게 */
+    quick: quick.map(([k, n, a], i) => { const dup = q.indexOf(a) !== i; return [k, n, 'q' + (i + 1), a === to && !dup, dup ? 'dup' : '', a]; }),
+    hint: isTouch ? '' : `휠이나 ↑↓ 로 ${POKER.bb}씩 조절한다`,
+    keys: [['Backspace', '취소', 'raiseX'], ['R', to >= L.maxTo ? `올인 ${won(to)}` : `${won(to)} ${L.open ? '벳' : '레이즈'}`, 'raiseGo', false, 'ok']],
   };
 }
 function body(me) {
@@ -420,7 +421,7 @@ function body(me) {
   if (p) {
     const hole = V.hole && V.hole.h === pub.hand ? V.hole.c : null, seen = !!hole && V.seen === pub.hand, L = legal(pub, k);
     const left = Math.ceil(Math.max(0, V.dl - performance.now()) / 1000);
-    const v = { cards: seen ? hole : [null, null], hand: seen ? handLabel(hole, pub.board) : hole ? PEEK_HINT : '카드를 받는 중',
+    const v = { cards: seen ? hole : [null, null], hand: seen ? handLabel(hole, pub.board) : hole ? PEEK_HINT : '카드를 받는 중', hint: !seen,
       peek: !!hole && p.st !== 'fold', stats: [['내 칩', p.chips], ['팟', potNow(pub)]] };
     if (L) {
       v.timer = { who: '내 차례', left, mine: true };
@@ -473,11 +474,13 @@ const keysHtml = (ks, cls) => `<div class="keys${cls ? ' ' + cls : ''}">${ks.map
 const pct = f => Math.round(clamp(f, 0, 1) * 100);
 const barCls = T => T.mine ? (T.left <= LOW ? ' low' : '') : ' other';
 function render(v) {
+  /* 홀덤 자리에 앉아 있는 동안 body.poker — 아래 조작키 안내를 숨긴다 (style.css) */
+  document.body.classList.toggle('poker', !!v);
   const el = document.getElementById('pokerbox'); if (!el) return;
   if (!v) { el.classList.remove('on'); el.innerHTML = ''; return; }
   wire(el);
   let h = '<div class="top">';
-  if (v.cards) h += `<div class="who"${v.peek ? ' data-act="peek"' : ''}>${v.cards.map(miniCard).join('')}<span class="hand">${esc(v.hand)}</span></div>`;
+  if (v.cards) h += `<div class="who"${v.peek ? ' data-act="peek"' : ''}>${v.cards.map(miniCard).join('')}<span class="hand${v.hint ? ' hint' : ''}">${esc(v.hand)}</span></div>`;
   else h += `<div class="who"><span class="title">${esc(v.title || '')}</span></div>`;
   h += `<div class="hd">${v.hd.map(keyHtml).join('')}</div></div>`;
   if (v.cards && v.title) h += `<div class="title">${esc(v.title)}</div>`;
@@ -490,8 +493,9 @@ function render(v) {
   if (v.raise) {
     const R = v.raise, f = pct(R.frac);
     h += `<div class="amt"><span>${R.label}</span><b>${won(R.amt)}</b></div>`;
-    h += `<div class="rng"><span>${won(R.min)}</span><div class="trw" data-act="slide"><div class="tr"><i style="width:${f}%"></i><em style="left:${f}%"></em></div></div><span>${won(R.max)} 올인</span></div>`;
-    h += keysHtml(R.quick, 'quick') + `<div class="msg">${R.hint}</div>` + keysHtml(R.keys, 'go');
+    /* 막대는 한 줄을 다 쓰고, 최소·올인 금액은 막대 아래 양끝에 */
+    h += `<div class="rng col"><div class="trw" data-act="slide"><div class="tr"><i style="width:${f}%"></i><em style="left:${f}%"></em></div></div><div class="ends"><span>${won(R.min)}</span><span>${won(R.max)} 올인</span></div></div>`;
+    h += keysHtml(R.quick, 'quick') + (R.hint ? `<div class="msg">${R.hint}</div>` : '') + keysHtml(R.keys, 'pair');
   }
   if (v.msg) h += `<div class="msg">${esc(v.msg)}</div>`;
   if (v.keys) h += keysHtml(v.keys);
@@ -511,7 +515,7 @@ function syncRaise() {
   if (b) b.textContent = won(R.amt);
   if (i) i.style.width = f + '%';
   if (m) m.style.left = f + '%';
-  el.querySelectorAll('.keys.quick .key').forEach(k => k.classList.toggle('sel', +k.dataset.to === R.amt));
+  el.querySelectorAll('.keys.quick .key').forEach((k, i) => k.classList.toggle('sel', !!R.quick[i][3]));
   if (g && g.lastChild) g.lastChild.textContent = R.keys[1][1];
   V.boxKey = keyOf(v);
 }
