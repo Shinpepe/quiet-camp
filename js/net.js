@@ -32,7 +32,7 @@ import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo, pokerTagLine, poker
    방장 신호가 4초 끊기면 친구 화면에 "방장이 잠시 자리를 비웠다". 방장 연결이 끊기면 친구는 홈으로.
    1인 캠핑에서는 이 파일의 연결 코드가 돌지 않는다 (Trystero 도 멀티를 고를 때 처음 불러온다) */
 
-const APP = 'quiet-camp-v1', V = 10, MAX = 4;
+const APP = 'quiet-camp-v1', V = 11, MAX = 4;
 /* GUN_WAIT: 꿈속에서 첫 사람이 총을 든 뒤 나머지를 기다리는 최대 시간 (ms) */
 const HZ = 12, DELAY = 120, STALE = 3000, AWAY = 4000, FIND = 15000, GUN_WAIT = 30000;
 /* 함께 쓰는 물건: 읽기·쓰기, 소리를 낼 자리(W.interact 의 id)와 켤 때·끌 때 소리. now = 움직임 없이 바로 맞추기 (중간에 들어올 때) */

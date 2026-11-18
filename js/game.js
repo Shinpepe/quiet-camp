@@ -16,7 +16,7 @@ import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
 import { showMemo, hideMemo, memoHooks } from './memo.js';
 import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman, snowHooks } from './snowman.js';
 import { onMat, resetBeach, beachHooks } from './beach.js';
-import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream } from './dream.js';
+import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beginShoot, dreamShoot, endDream, resetDream, takeNightmare } from './dream.js';
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
 import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken, netEnter, netHostLive, netSleepCount } from './net.js';
@@ -679,7 +679,7 @@ export function updateSleep(dt) {
     if (sleep.t >= 1.7) {
       const dream = sleep.dream;
       endSleepUI(); setVolume(settings.vol); state.mode = 'seated'; updateHUD(); anim.lastTargetId = undefined;
-      showToast(dream ? '아직 밤이다' : '아침이 왔다');
+      showToast(dream ? '아직 밤이다' : takeNightmare() ? '악몽을 꾸었다' : '아침이 왔다');
     }
   }
 }

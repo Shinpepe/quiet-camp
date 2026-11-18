@@ -14,7 +14,7 @@ import { updateFish } from './fish.js';
 import { ROAST } from './data.js';
 import { updateSnowman, snowMoving } from './snowman.js';
 import { updateBeach, parasolMoving } from './beach.js';
-import { updateDream, dreamOn, tintDream } from './dream.js';
+import { updateDream, dreamOn, tintDream, dreamCamera } from './dream.js';
 import { updateView, beginView, endView, viewThird } from './view.js';
 import { camp } from './camp.js';
 /* 홀덤 규칙 엔진 — 지금은 콘솔 시험용 (pokerTest()). H3 부터 방장이 판을 돌리는 데 쓴다 */
@@ -202,6 +202,8 @@ function loop(now) {
     updatePrompt(); if (!ctx.paused || session.mode !== 'solo') updateSleep(dt);
   }
   chopCamera(camera, dt, cam.t >= 1);
+  /* 꿈: 운석이 부딪힌 충격만큼 화면이 흔들린다 */
+  dreamCamera(camera, dt);
   camera.updateMatrixWorld();
   updateFish(ctx.paused ? 0 : dt);
   applyTime();

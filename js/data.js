@@ -304,11 +304,12 @@ export const GEAR_DEFAULT = { car: 'burgundy', tent: 'orange',  jacket: 'forest'
    look: 총을 든 동안 시선 [처음 올려다보는 각도, 정면에서 좌우 범위, 아래 한계, 위 한계] (rad). 정면은 길이 뻗어 나가는 방향 (road.js roadYaw)
    every: 운석이 떨어지는 간격 [처음, 끝](초) · speed: 떨어지는 빠르기(m/s, 끝으로 갈수록 1.5배까지)
    spread: 정면에서 좌우로 퍼져 떨어지는 범위(rad) · size: 운석 머리 반지름(m) · trail: 꼬리 길이(m)
-   floor: 이 높이 아래로 내려오면 스스로 사그라든다(m) — 실패 없이 그냥 사라진다
+   land: 떨어지는 땅 — 기준 자리(1인 = 내 눈, 멀티 = 트렁크 뒤)에서 정면으로 [가까이, 멀리](m)
+   hp: 캠프가 버티는 횟수 — 막지 못한 운석이 땅에 부딪힐 때마다 하나 줄고, 다 줄면 악몽에서 깬다
    aim: 조준 허용 각도 [PC, 모바일](rad) · cool: 쏘는 간격(초) · pool: 동시에 떠 있을 수 있는 운석 수 */
 export const DREAM = {
   chance: 0.2, dur: 60, endWait: 2.8, look: [0.55, 1.25, 0.12, 1.3],
-  every: [1.6, 0.6], speed: [14, 20], spread: 0.75, size: 1.6, trail: 26, floor: 14,
+  every: [1.6, 0.6], speed: [18, 24], spread: 0.75, size: 1.6, trail: 26, land: [9, 30], hp: 5,
   aim: [0.035, 0.07], cool: 0.28, pool: 14,
 };
 

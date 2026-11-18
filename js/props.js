@@ -283,7 +283,9 @@ export function makeTent() {
   /* 텐트 랜턴: 1인은 침낭 옆 구석, 멀티는 침낭 머리맡 뒤 가운데. 큰 텐트는 빛이 조금 더 멀리 닿는다 */
   const [lx, lz] = tc.lamp;
   const lamp = makeLantern(W.tentLampLit); lamp.scale.setScalar(0.7); lamp.position.set(lx, 0.05, lz); g.add(lamp); W.tentLampObj = lamp;
-  W.tentLamp = new THREE.PointLight(0xffc890, W.tentLampLit ? W.tm.tentLamp : 0, 4.5 + (Wd - 2.4), 2); W.tentLamp.position.set(lx + 0.15, 0.35, lz - 0.1); g.add(W.tentLamp);
+  /* 불빛은 랜턴에서 텐트 가운데 쪽으로 15cm, 문 쪽으로 10cm 띄운다 (벽이 하얗게 타지 않게). 가운데에 놓인 랜턴은 옆으로 비키지 않는다 */
+  W.tentLamp = new THREE.PointLight(0xffc890, W.tentLampLit ? W.tm.tentLamp : 0, 4.5 + (Wd - 2.4), 2);
+  W.tentLamp.position.set(lx - Math.sign(lx) * 0.15, 0.35, lz - 0.1); g.add(W.tentLamp);
   shadowed(g); linings.forEach(li => { li.castShadow = false; }); applyGear(); return g;
 }
 export function makeChair() {

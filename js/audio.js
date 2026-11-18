@@ -956,6 +956,19 @@ export function sfx(type, arg) {
       for (let i = 0; i < 8; i++) burst(B, false, 'bandpass', rnd(3500, 8000), 2, 0.001, rnd(0.02, 0.04), 0.03, t + 0.03 + Math.random() * 0.25);
       burst(B, 'pink', 'bandpass', 1600, 0.7, 0.01, 0.06, 0.6, t + 0.02, 500, 0.6);
       tone(B, 70, 35, 0.02, 0.1, 1.0, t + 0.05); return;
+    /* 운석이 땅에 가까워질 때 바람을 가르는 소리 (arg = 가까운 정도 0..1) */
+    case 'meteorFall': burst(B, 'pink', 'bandpass', 300, 0.8, 0.5, 0.025 + 0.05 * (arg || 0.5), 0.6, t, 1400, 1.1); return;
+    /* 운석이 땅에 부딪힌 소리: 낮은 쿵 + 땅울림 + 흙이 튀는 소리 + 잔불티.
+       arg = { k: 크기 0..1, delay: 늦게 들리는 초(거리 ÷ 340), pan: 좌우 −1..1 } */
+    case 'meteorImpact': {
+      const o = arg || {}, k = o.k || 1, t0 = t + (o.delay || 0), P = AC.createStereoPanner();
+      P.pan.value = o.pan || 0; P.connect(B); setTimeout(() => { try { P.disconnect(); } catch (e) {} }, 4500);
+      burst(P, 'brown', 'lowpass', 500, 1, 0.012, 0.32 * k, 1.8, t0, 50, 1.8);
+      tone(P, 64, 26, 0.01, 0.3 * k, 1.3, t0);
+      burst(P, 'pink', 'bandpass', 2600, 0.8, 0.01, 0.07 * k, 0.5, t0, 700, 0.5);
+      for (let i = 0; i < 6; i++) burst(P, false, 'bandpass', rnd(2500, 5000), 2, 0.002, 0.03 * k, 0.04, t0 + 0.15 + Math.random() * 0.7);
+      return;
+    }
     /* 홀덤: 칩 딸깍(arg = 몇 번) · 칩 밀기 · 칩 만지작 · 카드 미끄러짐·뒤집기 · 덱 섞기 (테이블 자리에서 나도록 poker.js 가 sfxAt 으로 부른다)
        내 차례 두 음 · 마지막 5초 똑딱 (UI 버스 — 나에게만, 공간 잔향 없이) */
     case 'chip': { const n = Math.max(1, Math.min(5, arg || 1)); for (let i = 0; i < n; i++) playBank('chip', B, FOLEY_GAIN.chip * rnd(0.6, 1), rnd(0.92, 1.1), t + i * rnd(0.03, 0.06)); return; }
