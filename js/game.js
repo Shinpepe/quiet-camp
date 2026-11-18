@@ -20,7 +20,7 @@ import { dreamOn, dreamGuide, dreamHint, dreamCenter, pickDream, startDream, beg
 import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
 import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken, netEnter, netHostLive, netSleepCount } from './net.js';
-import { pokerKey, pokerWheel, pokerCancel, pokerBox, pokerHooks, pokerReset, pokerUpLabel, POKER_ICON } from './poker.js';
+import { pokerKey, pokerKeyUp, pokerWheel, pokerCancel, pokerHooks, pokerReset, pokerUpLabel, pokerEarn } from './poker.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -117,7 +117,9 @@ export function bindInput() {
   /* 모바일이면 body 에 touch 를 단다 → style.css 가 키 표시(E·숫자)를 숨긴다 */
   document.body.classList.toggle('touch', isTouch);
   chopHooks.stop = endChop; chopHooks.hud = updateHUD;
-  pokerHooks.hud = updateHUD;
+  pokerHooks.hud = updateHUD; pokerHooks.stand = interact;
+  /* 홀덤 칩이 다 떨어졌으면 장작을 패서 칩을 번다 (1인 캠핑에서는 아무 일도 없다) */
+  chopHooks.split = great => pokerEarn(great);
   fishHooks.hud = updateHUD;
   /* 멀티: 물고기를 낚으면 모두에게 소식, 파라솔을 접고 펴면 방장을 거쳐 모두에게 */
   fishHooks.caught = (n, size) => netFx('catch', { n, size });
@@ -140,15 +142,15 @@ export function bindInput() {
     if (ctx.paused) { if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); resume(); } return; }
     if (e.code === 'Space' && timingMode()) { e.preventDefault(); timingPress(); return; }
     if (e.code === 'Escape' && inModal()) { closeModal(); return; }
-    /* 홀덤 자리: F·C·R·1~4·↑↓·Backspace */
+    /* 홀덤 자리: F·C·R·H·1~4·↑↓·Backspace, Space 누르고 있기 = 들춰 보기 */
     if (pokerKey(e.code)) { e.preventDefault(); return; }
     if (e.code === 'KeyE') interact();
     if (e.code === 'KeyP') takePhoto();
     if (e.code === 'KeyV') toggleView();
     if (state.mode === 'trunk' && /^Digit[1-9]$/.test(e.code)) trunkKey(+e.code[5]);
   });
-  addEventListener('keyup', e => { keys[e.code] = false; });
-  addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; hideJoy(); });
+  addEventListener('keyup', e => { keys[e.code] = false; pokerKeyUp(e.code); });
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; tMove = tLook = null; hideJoy(); pokerKeyUp('Space'); });
   addEventListener('mousemove', e => { if (!locked() || !ctx.running) return; look(e.movementX, e.movementY, 0.0022 * settings.sens); });
   document.addEventListener('pointerlockchange', () => { if (!ctx.running || isTouch) return; if (locked()) { hidePause(); $('#lockmsg').style.opacity = 0; if (!guideReady) { guideReady = true; refreshGuide(); } } else if (!inModal()) showPause(); });
   /* 모바일: 앱을 내리거나 화면이 꺼지면 일시정지 (PC 는 포인터 잠금이 풀리며 이미 멈춘다) */
@@ -684,8 +686,6 @@ export function updateSleep(dt) {
 
 /* 소식(위쪽 토스트)은 gauge.js 가 띄운다 — 낚시·장작 패기도 같은 곳을 쓰도록 한 곳에 모았다 */
 export const showToast = toast;
-/* 이름처럼 사람이 쓴 글자를 innerHTML 에 넣을 때 */
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export function updateCaption() { $('#capText').textContent = BG[state.bg].name + ' — ' + clockLabel(state.clock); }
 /* 아이템 상자: 첫 줄 = 이름(+ 기록), 둘째 줄 = 조작 안내 */
 export function updateHUD() {
@@ -694,9 +694,8 @@ export function updateHUD() {
   const ib = $('#itembox'), chop = state.mode === 'chop', fish = fishActive(), btn = isTouch ? '버튼 :' : '클릭 :';
   const covered = inModal() || state.mode === 'sleep';
   const mud = state.item === 'marsh' && ctx.W.item && ctx.W.item.userData, marshEmpty = !!mud && mud.amount <= 0;
-  /* 홀덤 자리에 앉아 있으면 아이템 상자가 포커 상자가 된다 (손에 든 것은 맡겨 두었다) */
-  const pk = chop || fish ? null : pokerBox();
-  ib.classList.toggle('on', chop || fish || !!pk || (!!state.item && !covered));
+  /* 홀덤 자리에서는 손에 든 것을 맡겨 두므로 아이템 상자가 꺼지고, 그 자리에 포커 상자(poker.js)가 뜬다 */
+  ib.classList.toggle('on', chop || fish || (!!state.item && !covered));
   /* 기록은 이름 줄 안에 넣는다 — .hn 은 모바일 세로에서 숨겨진다 */
   const sub = t => `<span style="display:block;font-size:.82em;opacity:.8;margin-top:2px">${t}</span>`;
   if (chop) {
@@ -708,9 +707,6 @@ export function updateHUD() {
     const n = fishCount(), [hn, act] = fishHint(btn);
     ib.querySelector('.ic').innerHTML = ICON.rod; ib.querySelector('.nm').innerHTML = '낚싯대' + (n ? sub(`잡은 물고기 ${n}`) : '');
     ib.querySelector('.hn').textContent = hn; $('#mSip').textContent = act;
-  } else if (pk) {
-    ib.querySelector('.ic').innerHTML = POKER_ICON; ib.querySelector('.nm').innerHTML = esc(pk.nm) + (pk.sub ? sub(esc(pk.sub)) : '');
-    ib.querySelector('.hn').textContent = pk.hn;
   } else if (state.item === 'marsh') {
     /* 익음 단계는 글자로 보여 주지 않는다 — 색으로만 판단하게 */
     const def = ITEMS.marsh, spot = roastSpot();
@@ -758,7 +754,8 @@ export function updatePrompt() {
   const clickLab = t && t.click && !state.item ? t.clickLabel() : null;
   cross.classList.toggle('hot', !!t || rl === '눈사람 만들기');
   if (isTouch) {
-    p.classList.remove('on'); setAct((t && t.tap) || label);
+    /* 홀덤 자리: 일어나기는 포커 상자 윗줄 버튼으로 옮겼다 → 행동 버튼은 숨긴다 */
+    p.classList.remove('on'); setAct(state.mode === 'seated' && seatKind(state.seat) === 'poker' ? null : (t && t.tap) || label);
     /* 빈손으로 서 있을 때 옆 버튼은 클릭 행동(부수기) 자리 — 할 것이 없으면 숨긴다 */
     if (state.mode === 'walk' && !state.item) { const ms = $('#mSip'); ms.style.display = clickLab ? '' : 'none'; if (clickLab) ms.textContent = clickLab; }
     return;

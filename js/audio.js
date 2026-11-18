@@ -18,12 +18,14 @@ export const FOLEY_FILES = {
   sand: [], dirt: [], gulpCoffee: [], gulpWhisky: [],
   crackle: [], firePop: [], cricketChirp: [], cricketTrill: [],
   chopHit: [], chopSplit: [], chopKnot: [], logPlace: [], woodLand: [],
+  chip: [], chipPush: [], cardSlide: [], cardFlip: [], shuffle: [],
 };
 /* 꿀꺽은 잔향 없는 dryBus 로 나가므로 발소리(0.12~0.13)와 비슷한 값이어야 비슷한 크기로 들린다 */
 const FOLEY_GAIN = {
   sand: 0.12, dirt: 0.13, gulpCoffee: 0.1, gulpWhisky: 0.11,
   crackle: 0.09, firePop: 0.17, cricketChirp: 0.022, cricketTrill: 0.016,
   chopHit: 0.32, chopSplit: 0.4, chopKnot: 0.3, logPlace: 0.2, woodLand: 0.17,
+  chip: 0.13, chipPush: 0.1, cardSlide: 0.07, cardFlip: 0.09, shuffle: 0.1,
 };
 /* 한 모금 하는 동안 배경 베드가 물러나는 정도 (0 = 끔). 0.3 이면 베드 -3dB, 고역 6kHz 위가 부드럽게 깎인다 */
 const SIP_FOCUS = 0.3;
@@ -376,7 +378,49 @@ const GEN = {
   cricketChirp: [() => cricketBuf(false), 6], cricketTrill: [() => cricketBuf(true), 3],
   chopHit: [() => chopBuf('hit'), 5], chopSplit: [() => chopBuf('split'), 5], chopKnot: [() => chopBuf('knot'), 4],
   logPlace: [() => knockBuf(380, 150, 0.03, 25), 4], woodLand: [() => knockBuf(650, 300, 0.02, 40), 5],
+  chip: [chipBuf, 6], chipPush: [feltPushBuf, 4], cardSlide: [cardSlideBuf, 5], cardFlip: [cardFlipBuf, 5], shuffle: [shuffleBuf, 2],
 };
+/* ── 홀덤: 점토 칩·카드 ──
+   칩: 점토 칩끼리 부딪히는 짧고 단단한 '착' — 2~4kHz 공명이 10ms 안에 사라지고, 아래에 작은 몸통. 가끔 두 번 연달아
+   칩 밀기: 펠트 위를 미끄러지는 부드러운 '스윽' 끝에 칩끼리 닿는 '착착'
+   카드: 펠트 위를 미끄러지는 가는 '샥' / 뒤집을 때 종이가 튕기는 '탁' / 섞기: 리플 '드르르륵' 다음 카드가 모이며 내려앉는 소리 */
+function chipBuf() {
+  return makeBuf(0.12, (d, sr) => {
+    const n = Math.random() < 0.5 ? 1 : 2;
+    for (let k = 0; k < n; k++) {
+      const t = k * rnd(0.012, 0.025);
+      resonance(d, sr, t, rnd(2400, 3600), 0.006, k ? 0.5 : 0.9, 0.05);
+      resonance(d, sr, t, rnd(4200, 5600), 0.004, k ? 0.3 : 0.5, 0);
+      thud(d, sr, t, 1400, 0.004, 0.35, 0.0005);
+    }
+  });
+}
+function feltPushBuf() {
+  return makeBuf(0.45, (d, sr) => {
+    hissLayer(d, sr, 0, 0.05, 0.12, 0.6, 500, 2200);
+    const tEnd = rnd(0.22, 0.3);
+    for (let k = 0; k < 3; k++) { const t = tEnd + k * rnd(0.015, 0.03); resonance(d, sr, t, rnd(2400, 3400), 0.006, 0.5 * (1 - k * 0.25), 0.05); thud(d, sr, t, 1300, 0.004, 0.2, 0.0005); }
+  });
+}
+function cardSlideBuf() {
+  return makeBuf(0.22, (d, sr) => { hissLayer(d, sr, 0, 0.015, 0.06, 0.8, 1800, 7000); grainLayer(d, sr, 0.01, 0.08, 30, 0.0003, 0.001, 1.5, 0.2, 2500, 8000); });
+}
+function cardFlipBuf() {
+  return makeBuf(0.12, (d, sr) => { thud(d, sr, 0, 2200, 0.004, 0.6, 0.0005); hissLayer(d, sr, 0, 0.004, 0.02, 0.5, 2000, 8000); resonance(d, sr, 0.002, rnd(900, 1300), 0.008, 0.25, 0); });
+}
+function shuffleBuf() {
+  return makeBuf(1.0, (d, sr) => {
+    const L = new Float32Array(d.length), n = Math.round(rnd(45, 60)), T = rnd(0.55, 0.7);
+    for (let k = 0; k < n; k++) {
+      const u = k / n, s = Math.floor((0.03 + T * (u + rnd(-0.004, 0.004)) * (0.7 + 0.3 * u)) * sr), len = Math.max(2, Math.floor(rnd(0.0008, 0.002) * sr)), a = 0.5 + 0.5 * Math.sin(Math.PI * u);
+      for (let i = 0; i < len && s + i < L.length; i++) L[s + i] += (Math.random() * 2 - 1) * a * Math.exp(-4 * i / len);
+    }
+    highpass(L, sr, 1500); lowpass(L, sr, 8000); mixIn(d, L, 0.8);
+    hissLayer(d, sr, 0.02, 0.1, 0.3, 0.15, 1500, 6000);
+    grainLayer(d, sr, T + 0.1, 0.18, 40, 0.0004, 0.0012, 0.8, 0.45, 1800, 7000);
+    thud(d, sr, T + 0.28, 900, 0.01, 0.3, 0.001);
+  });
+}
 function getBank(k) { return bank[k] || (bank[k] = Array.from({ length: GEN[k][1] }, GEN[k][0])); }
 function loadFoley() {
   for (const k in FOLEY_FILES) {
@@ -912,6 +956,16 @@ export function sfx(type, arg) {
       for (let i = 0; i < 8; i++) burst(B, false, 'bandpass', rnd(3500, 8000), 2, 0.001, rnd(0.02, 0.04), 0.03, t + 0.03 + Math.random() * 0.25);
       burst(B, 'pink', 'bandpass', 1600, 0.7, 0.01, 0.06, 0.6, t + 0.02, 500, 0.6);
       tone(B, 70, 35, 0.02, 0.1, 1.0, t + 0.05); return;
+    /* 홀덤: 칩 딸깍(arg = 몇 번) · 칩 밀기 · 칩 만지작 · 카드 미끄러짐·뒤집기 · 덱 섞기 (테이블 자리에서 나도록 poker.js 가 sfxAt 으로 부른다)
+       내 차례 두 음 · 마지막 5초 똑딱 (UI 버스 — 나에게만, 공간 잔향 없이) */
+    case 'chip': { const n = Math.max(1, Math.min(5, arg || 1)); for (let i = 0; i < n; i++) playBank('chip', B, FOLEY_GAIN.chip * rnd(0.6, 1), rnd(0.92, 1.1), t + i * rnd(0.03, 0.06)); return; }
+    case 'chipPush': playBank('chipPush', B, FOLEY_GAIN.chipPush * rnd(0.85, 1), rnd(0.93, 1.07), t); return;
+    case 'chipRiffle': for (let i = 0; i < 8; i++) playBank('chip', B, FOLEY_GAIN.chip * 0.35 * rnd(0.6, 1), rnd(1, 1.15), t + i * rnd(0.05, 0.08)); return;
+    case 'cardSlide': playBank('cardSlide', B, FOLEY_GAIN.cardSlide * rnd(0.8, 1), rnd(0.9, 1.1), t); return;
+    case 'cardFlip': playBank('cardFlip', B, FOLEY_GAIN.cardFlip * rnd(0.85, 1), rnd(0.92, 1.08), t); return;
+    case 'shuffle': playBank('shuffle', B, FOLEY_GAIN.shuffle, rnd(0.95, 1.05), t); return;
+    case 'pokerTurn': tone(U, 587, 0, 0.01, 0.03, 0.35, t); tone(U, 880, 0, 0.01, 0.03, 0.5, t + 0.14); return;
+    case 'pokerTick': tone(U, 1200, 900, 0.002, 0.018, 0.05, t); burst(U, false, 'bandpass', 2500, 3, 0.001, 0.01, 0.02, t); return;
     /* UI (컴프레서 우회, 실내 필터 무관) */
     case 'ui': tone(U, 880 * pv, 0, 0.004, 0.025, 0.08, t); tone(U, 1320 * pv, 0, 0.004, 0.01, 0.06, t); return;
     case 'uiGo': tone(U, 392, 0, 0.01, 0.035, 0.3, t); tone(U, 523, 0, 0.01, 0.035, 0.4, t + 0.16); return;

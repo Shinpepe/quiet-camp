@@ -38,8 +38,8 @@ for (let a = A_HIT; a > -1.4; a -= 0.005) if (PIVOT.y + FOLLOW_D.y + edgeAt(a).y
 /* 누르면 번쩍 들었다(T_RAISE) 내려친다(T_STRIKE). 판정은 누른 순간에 끝나 있다 */
 const T_RAISE = 0.12, T_STRIKE = 0.09;
 
-/* game.js 가 연결한다: stop = 그만둘 때(걷기로 돌아가기), hud = 쪼갤 때마다 기록 갱신 */
-export const chopHooks = { stop: null, hud: null };
+/* game.js 가 연결한다: stop = 그만둘 때(걷기로 돌아가기), hud = 쪼갤 때마다 기록 갱신, split(한 번에 쪼갰는지) = 내가 장작을 쪼갰을 때 (홀덤 칩 벌기) */
+export const chopHooks = { stop: null, hud: null, split: null };
 
 const C = {
   on: false, st: 'off', a: A_READY, t: 0, from: A_READY, pk: 0, pkFrom: 0, stop: 0, wantStop: false,
@@ -326,6 +326,7 @@ function split(fly) {
   spawnHalves(fly); C.st = 'follow';
   ctx.W.splitCount++;
   if (chopHooks.hud) chopHooks.hud();
+  if (chopHooks.split) chopHooks.split(fly > 1);
 }
 
 /* ── 장작: 장작더미에서 포물선으로 날아와 놓인다. 맞으면 눌렸다 튀어 오른다(스프링) ── */

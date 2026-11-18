@@ -53,7 +53,10 @@ export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: nul
    dreams: 꿈을 꾼 횟수 (0 이면 다음에 텐트에서 잠들 때 반드시 꿈을 꾼다 — dream.js pickDream)
    dreamBest: 꿈속에서 막아 낸 운석 최고 기록 (1인)
    dreamTeamBest: 멀티 꿈에서 함께 막아 낸 운석 최고 기록 (1인 기록과 따로) */
-export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0, dreamTeamBest: 0 };
+/* poker: 홀덤 기록 — hands 함께한 판 / wins 이긴 판(팟을 하나라도 가져간 판) / best 한 판에 가져간 가장 많은 칩
+   / broke 빈털터리가 된 횟수 / earned 장작으로 번 칩 / help 이미 본 홀덤 설명 소식 (poker.js NEWS 의 이름) */
+export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0, dreamTeamBest: 0,
+  poker: { hands: 0, wins: 0, best: 0, broke: 0, earned: 0, help: [] } };
 if (saved.records && typeof saved.records === 'object') {
   const f = saved.records.fish, okSize = v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 500;
   const okClock = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1;
@@ -74,6 +77,12 @@ if (saved.records && typeof saved.records === 'object') {
   if (okInt(saved.records.dreams)) records.dreams = Math.floor(saved.records.dreams);
   if (okInt(saved.records.dreamBest)) records.dreamBest = Math.floor(saved.records.dreamBest);
   if (okInt(saved.records.dreamTeamBest)) records.dreamTeamBest = Math.floor(saved.records.dreamTeamBest);
+  /* 홀덤: 0 이상 정수, 본 설명은 짧은 글자만 */
+  const pk = saved.records.poker;
+  if (pk && typeof pk === 'object') {
+    ['hands', 'wins', 'best', 'broke', 'earned'].forEach(k => { if (okInt(pk[k])) records.poker[k] = Math.floor(pk[k]); });
+    if (Array.isArray(pk.help)) records.poker.help = [...new Set(pk.help.filter(k => typeof k === 'string' && k.length > 0 && k.length < 20))].slice(0, 20);
+  }
 }
 
 /* 슬라이더처럼 연달아 바뀌는 값은 300ms 모아서 한 번에 쓴다. 페이지를 닫을 때는 바로 기록 */

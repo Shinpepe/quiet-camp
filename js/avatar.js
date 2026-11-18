@@ -296,6 +296,12 @@ export function updateAvatar(A, S, dt) {
   let hyaw = clamp(wrapPI(S.yaw - A.yaw), -1, 1);
   if (sp && sp.lie) { look = 0.05; hyaw *= 0.3; }
   j.head = [look, hyaw, 0]; j.spine = j.spine || [0, 0, 0];
+  /* 홀덤 자리 (다른 사람): 들춰 보는 동안(pk) 두 손을 손패 쪽으로, 칩을 낼 때(pushT — showBubble) 오른손을 앞으로 내밀었다 돌아온다 */
+  if (sp && poseOf(seat) === 'poker') {
+    if (S.pk) { setArm(j, 1, 0.09, 0.04, -0.36); setArm(j, -1, -0.05, 0.04, -0.34); }
+    else if (A.pushT > 0) { const u = Math.sin(PI * clamp(1 - A.pushT / 0.6, 0, 1)); setArm(j, 1, 0.1, 0.04 + 0.02 * u, -0.3 - 0.2 * u); }
+  }
+  if (A.pushT > 0) A.pushT -= dt;
   /* 손에 든 것 (누워 있으면 맡겨 두었다).
      장작을 패는 중이면 도끼, 부두에서 낚시 중이면 낚싯대 (다른 사람의 스냅샷 — 내 아바타는 이때 1인칭이라 보이지 않는다) */
   const it = S.mode === 'chop' ? 'axe' : sp && sp.lie ? null : S.fs >= 0 ? 'rod' : S.item, I = it ? ITEM[it] : null;
@@ -328,6 +334,13 @@ export function updateAvatar(A, S, dt) {
   }
   /* 이름표: 엉덩이 높이를 따라 머리 위에 (누우면 머리 자리 위) */
   if (A.tag) A.tag.position.set(0, sp && sp.lie ? 0.75 : A.hy + 1.2, 0);
+  /* 말풍선: 이름표 바로 위. 마지막 0.4초에 흐려진다 */
+  if (A.bubble) {
+    if (A.bubbleT > 0) {
+      A.bubbleT -= dt; A.bubble.visible = true; A.bubble.material.opacity = clamp(A.bubbleT / 0.4, 0, 1);
+      A.bubble.position.set(0, A.tag.position.y + (A.tagH || 0.17) / 2 + 0.1, 0);
+    } else A.bubble.visible = false;
+  }
   A.snap = false;
 }
 
@@ -357,20 +370,49 @@ function disposeTree(root) {
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m && m.dispose && m.dispose());
   });
 }
-function drawTag(A, name, away) {
-  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 96;
-  const g = cv.getContext('2d'), text = away ? name + ' · 자리 비움' : name;
-  let fs = 40; g.font = `500 ${fs}px "Pretendard Variable", Pretendard, sans-serif`;
-  while (g.measureText(text).width > 440 && fs > 22) { fs -= 2; g.font = `500 ${fs}px "Pretendard Variable", Pretendard, sans-serif`; }
-  const w = Math.min(500, g.measureText(text).width + 48), x = (512 - w) / 2, y = 18, h = 60, r = 30;
-  g.fillStyle = 'rgba(10,12,18,0.55)'; g.beginPath(); g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); g.fill();
-  g.fillStyle = away ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.95)'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, y + h / 2 + 2);
+/* 이름표: 이름 한 줄. sub 가 있으면 그 아래 작은 줄 (홀덤 자리의 칩·상태 — poker.js pokerTagLine). 두 줄이면 그만큼 키가 커진다 (A.tagH) */
+const TAG_FONT = s => `500 ${s}px "Pretendard Variable", Pretendard, sans-serif`;
+function pillPath(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function drawTag(A, name, away, sub) {
+  const two = !!sub, cv = document.createElement('canvas'); cv.width = 512; cv.height = two ? 150 : 96;
+  const g = cv.getContext('2d'), text = away ? name + ' / 자리 비움' : name;
+  let fs = 40; g.font = TAG_FONT(fs);
+  while (g.measureText(text).width > 440 && fs > 22) { fs -= 2; g.font = TAG_FONT(fs); }
+  let tw = g.measureText(text).width;
+  if (two) { g.font = TAG_FONT(30); tw = Math.max(tw, g.measureText(sub).width); }
+  const w = Math.min(500, tw + 48), x = (512 - w) / 2, y = 18, h = two ? 114 : 60;
+  g.fillStyle = 'rgba(10,12,18,0.55)'; pillPath(g, x, y, w, h, 30); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = TAG_FONT(fs); g.fillStyle = away ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.95)'; g.fillText(text, 256, y + 32);
+  if (two) { g.font = TAG_FONT(30); g.fillStyle = 'rgba(255,255,255,0.62)'; g.fillText(sub, 256, y + 82, 460); }
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
   if (A.tag.material.map) A.tag.material.map.dispose();
   A.tag.material.map = t; A.tag.material.needsUpdate = true;
+  A.tag.scale.set(0.9, 0.9 * cv.height / 512, 1); A.tagH = 0.9 * cv.height / 512;
 }
-export function setRemoteTag(A, name, away) { const key = name + (away ? '|away' : ''); if (key === A.tagKey) return; A.tagKey = key; drawTag(A, name, away); }
+export function setRemoteTag(A, name, away, sub) { const key = name + '|' + (away ? 1 : 0) + '|' + (sub || ''); if (key === A.tagKey) return; A.tagKey = key; drawTag(A, name, away, sub); }
+/* 말풍선: 이름표 위에 2.2초 떠올랐다가 흐려진다 (홀덤 행동 — 나중에 이모트·빠른 말도 쓴다).
+   hot = 강조색 (벳·레이즈·올인), push = 칩을 내는 동작 (홀덤 자리에서 오른손을 앞으로 내밀었다 돌아온다) */
+function drawBubble(A, text, hot) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 96;
+  const g = cv.getContext('2d'); let fs = 40; g.font = TAG_FONT(fs);
+  while (g.measureText(text).width > 440 && fs > 22) { fs -= 2; g.font = TAG_FONT(fs); }
+  const w = Math.min(500, g.measureText(text).width + 52), x = (512 - w) / 2, y = 16, h = 64;
+  g.fillStyle = hot ? 'rgba(233,197,138,0.96)' : 'rgba(246,243,236,0.96)'; pillPath(g, x, y, w, h, 32); g.fill();
+  g.fillStyle = '#1b1b1d'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, y + h / 2 + 2);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  if (A.bubble.material.map) A.bubble.material.map.dispose();
+  A.bubble.material.map = t; A.bubble.material.needsUpdate = true;
+}
+export function showBubble(A, text, hot, push) {
+  if (!A.bubble) {
+    A.bubble = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
+    A.bubble.scale.set(0.8, 0.15, 1); A.bubble.renderOrder = 11; A.bubble.userData.noAO = true; A.bubble.userData.noRefl = true; A.bubble.visible = false;
+    A.root.add(A.bubble); if (ctx.W.noRefl) ctx.W.noRefl.push(A.bubble);
+  }
+  drawBubble(A, String(text).slice(0, 24), hot); A.bubbleT = 2.2;
+  if (push) A.pushT = 0.6;
+}
 export function addRemote(name) {
   const A = buildAvatar(); A.remote = true; A.itemType = null; A.itemMesh = null; A.tagKey = '';
   A.tag = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
@@ -387,6 +429,7 @@ export function removeRemote(A) {
   REMOTES.delete(A); A.root.removeFromParent();
   const W = ctx.W; if (W.noRefl) { const i = W.noRefl.indexOf(A.tag); if (i >= 0) W.noRefl.splice(i, 1); }
   if (A.tag.material.map) A.tag.material.map.dispose();
+  if (A.bubble) { const W2 = ctx.W; if (W2.noRefl) { const i = W2.noRefl.indexOf(A.bubble); if (i >= 0) W2.noRefl.splice(i, 1); } if (A.bubble.material.map) A.bubble.material.map.dispose(); }
   if (A.mat.zip.map) A.mat.zip.map.dispose();
   disposeTree(A.root);
 }

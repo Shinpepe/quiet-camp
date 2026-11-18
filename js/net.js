@@ -10,12 +10,12 @@ import { seatKind, seatsOf } from './camp.js';
 /* 아래 모듈들도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
 import { startGame, exitGame, toLobby, updateHUD, previewRebuild, renderMenu, showToast, spawnPlanted, surfaceAt, refreshGo, startNap, sleepWaiting } from './game.js';
 import { showHome } from './home.js';
-import { addRemote, removeRemote, hideRemote, setRemoteTag, updateAvatar, snapshot } from './avatar.js';
+import { addRemote, removeRemote, hideRemote, setRemoteTag, updateAvatar, snapshot, showBubble } from './avatar.js';
 import { meteorHooks, showMeteor } from './scene.js';
 import { dreamNet, dreamGo, dreamWaiting, dreamReady, dreamStatus, dreamSync, dreamRemote, dreamClaim, dreamOn } from './dream.js';
 import { chopNet, chopRemote } from './chop.js';
 import { fishNet, fishRemote } from './fish.js';
-import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo } from './poker.js';
+import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo, pokerTagLine, pokerPeeking } from './poker.js';
 
 /* ══ 멀티 캠핑 연결 (Trystero, P2P) ══
    서버 없이 브라우저끼리 직접 잇는다. 방 이름 = 'camp-' + 초대 코드. 최대 4명.
@@ -245,9 +245,10 @@ function pack() {
     am: ud && typeof ud.amount === 'number' ? r(ud.amount) : 1, ck: ud && typeof ud.cook === 'number' ? r(ud.cook) : 0, lt: ud && ud.lit ? 1 : 0,
     br: sb ? r(sb.r) : 0, bx: sb ? r(sb.x) : 0, bz: sb ? r(sb.z) : 0,
     aw: ctx.paused || document.hidden ? 1 : 0, zz: sleepWaiting() ? 1 : 0, nd: records.dreams === 0 ? 1 : 0,
-    /* 장작 패기: 휘두른 횟수·결과·장작이 놓였는지 / 낚시: 상태 번호(-1 = 아님)·찌 자리·휜 정도 */
+    /* 장작 패기: 휘두른 횟수·결과·장작이 놓였는지 / 낚시: 상태 번호(-1 = 아님)·찌 자리·휜 정도 / 홀덤: 카드를 들춰 보는 중 (카드 정보는 보내지 않는다) */
     cw: cn ? cn.sw : 0, cr: cn ? cn.res : 0, cg: cn && cn.log ? 1 : 0,
-    fs: fn ? fn.st : -1, fx: fn ? r(fn.x) : 0, fz: fn ? r(fn.z) : 0, fb: fn ? r(fn.b) : 0 };
+    fs: fn ? fn.st : -1, fx: fn ? r(fn.x) : 0, fz: fn ? r(fn.z) : 0, fb: fn ? r(fn.b) : 0,
+    pk: pokerPeeking() ? 1 : 0 };
 }
 function gotSnap(d, id) {
   if (!d || typeof d.t !== 'number') return;
@@ -273,6 +274,7 @@ function sample(p, now, S) {
   S.amount = c.am; S.cook = c.ck; S.lit = !!c.lt;
   S.cw = c.cw || 0; S.cr = c.cr || 0; S.cg = !!c.cg;
   S.fs = typeof c.fs === 'number' ? c.fs : -1; S.fx = c.fx || 0; S.fz = c.fz || 0; S.fb = L(a.fb, c.fb);
+  S.pk = c.pk === 1;
   /* 굴리는 눈덩이: 앞뒤 스냅샷 모두 굴리는 중일 때만 보간한다 (막 굴리기 시작한 순간 원점에서 날아오지 않게) */
   const both = a.br > 0 && c.br > 0;
   S.br = c.br || 0; S.bx = both ? L(a.bx, c.bx) : c.bx || 0; S.bz = both ? L(a.bz, c.bz) : c.bz || 0;
@@ -329,7 +331,8 @@ function updatePeer(p, now, dt) {
   }
   if (!p.av) p.av = addRemote(p.name || '캠퍼');
   sample(p, now, _S);
-  setRemoteTag(p.av, p.name || '캠퍼', !!last.aw || now - p.last > STALE);
+  /* 이름표: 홀덤 자리에 앉아 있으면 아래 줄에 칩과 상태 */
+  setRemoteTag(p.av, p.name || '캠퍼', !!last.aw || now - p.last > STALE, pokerTagLine(p.id));
   p.av.root.visible = true;
   updateAvatar(p.av, _S, dt);
   peerSounds(p);
@@ -344,13 +347,13 @@ function updatePeer(p, now, dt) {
   if (!p.snowHold && _S.br > 0) remoteRoll(p.id, _S.bx, _S.bz, _S.br); else remoteRoll(p.id, null);
 }
 
-/* 캠핑장 안(같은 장소에서 캠핑 중)의 사람마다 { 누워 기다리는지, 자리 비움인지, 앉은 자리, 총을 들었는지, 꿈을 꾼 적이 없는지 }. 첫 칸은 나 */
+/* 캠핑장 안(같은 장소에서 캠핑 중)의 사람마다 { 누워 기다리는지, 자리 비움인지, 앉은 자리, 총을 들었는지, 꿈을 꾼 적이 없는지, 홀덤 카드를 들춰 보는 중인지 }. 첫 칸은 나 */
 function campers(now) {
-  const out = [{ id: N.self, zz: sleepWaiting(), away: ctx.paused || document.hidden, seat: SEATED(state.mode) ? state.seat : null, gun: state.item === 'gun', nd: records.dreams === 0 }];
+  const out = [{ id: N.self, zz: sleepWaiting(), away: ctx.paused || document.hidden, seat: SEATED(state.mode) ? state.seat : null, gun: state.item === 'gun', nd: records.dreams === 0, pk: pokerPeeking() }];
   for (const p of N.peers.values()) {
     const s = p.buf[p.buf.length - 1];
     if (!s || s.run !== 1 || s.bg !== state.bg || (isHost() && !p.ok)) continue;
-    out.push({ id: p.id, zz: s.zz === 1, away: s.aw === 1 || now - p.last > STALE, seat: SEATED(s.m) ? s.st : null, gun: s.i === 'gun', nd: s.nd === 1 });
+    out.push({ id: p.id, zz: s.zz === 1, away: s.aw === 1 || now - p.last > STALE, seat: SEATED(s.m) ? s.st : null, gun: s.i === 'gun', nd: s.nd === 1, pk: s.pk === 1 });
   }
   return out;
 }
@@ -511,7 +514,7 @@ export function netPokerSeats() {
   const out = [];
   for (const c of campers(performance.now())) {
     const k = pokerSeatNo(c.seat); if (k < 0) continue;
-    out.push({ id: c.id, name: netName(c.id), seat: k, away: c.away });
+    out.push({ id: c.id, name: netName(c.id), seat: k, away: c.away, pk: !!c.pk });
   }
   return out;
 }
@@ -521,4 +524,10 @@ export function netPoker(d, to) {
   if (to === 'host') { if (N.hostId) N.act.poker.send(d, N.hostId); }
   else if (to) N.act.poker.send(d, to);
   else N.act.poker.send(d);
+}
+
+/* 행동 말풍선 (poker.js): 그 사람 아바타가 보일 때만. push = 칩을 내는 동작 (손을 앞으로) */
+export function netBubble(id, text, hot, push) {
+  const p = N.peers.get(id);
+  if (p && p.av && p.av.root.visible) showBubble(p.av, text, hot, push);
 }
