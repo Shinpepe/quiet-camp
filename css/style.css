@@ -251,3 +251,97 @@ body.touch .go span,body.touch .keys,body.touch #legend{display:none}
   #itembox .hn{display:block}
   #mobile{right:calc(18px + var(--sar));bottom:calc(16px + var(--sab))}
 }
+
+
+/* ── 홀덤 포커 상자 (poker.js): 홀덤 자리에 앉아 있는 동안 아이템 상자 자리에 뜬다 ──
+   윗줄: 작은 카드·족보(누르고 있으면 들춰 보기) 또는 제목, 오른쪽에 족보·일어나기 버튼
+   칩·팟 / 남은 시간 막대 / 상황 문장 / 키 버튼. 레이즈 패널은 상황 문장과 키 자리에 열린다
+   PC 는 키로, 폰은 상자 안 버튼을 직접 누른다 (폰에서는 오른쪽 아래 행동 버튼을 숨긴다) */
+#pokerbox{position:absolute;right:calc(30px + var(--sar));bottom:calc(26px + var(--sab));width:min(340px,calc(100% - 60px));display:none;padding:12px 14px;border-radius:14px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-size:13px}
+#pokerbox.on{display:block}
+#pokerbox .top{display:flex;align-items:center;gap:8px}
+#pokerbox .who{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+#pokerbox .hd{display:flex;gap:4px;flex:none}
+#pokerbox .pc{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;flex:none;width:28px;height:38px;border-radius:5px;background:#f6f3ec;color:#1b1b1d;font-family:Georgia,"Times New Roman",serif;font-weight:700;font-size:14px;line-height:1.05}
+#pokerbox .pc.red{color:#c0262c}
+#pokerbox .pc u{text-decoration-thickness:2px;text-underline-offset:2px}
+#pokerbox .pc.back{background:#7a1f2b;border:2px solid #f6f3ec}
+#pokerbox .hand{font-family:var(--serif);font-size:15px;letter-spacing:.03em;margin-left:4px;line-height:1.35}
+#pokerbox .title{font-family:var(--serif);font-size:15px;letter-spacing:.03em;line-height:1.45}
+#pokerbox .stats{display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--mute)}
+#pokerbox .stats b{color:var(--ink);font-weight:500;font-size:14px;margin:0 2px 0 5px}
+#pokerbox .tm{display:flex;justify-content:space-between;margin-top:10px;font-size:12px}
+#pokerbox .tm .me{color:var(--accent)}
+#pokerbox .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;margin:5px 0 2px}
+#pokerbox .bar i{display:block;height:100%;background:var(--accent)}
+#pokerbox .bar.low i{background:#e06c5a}
+#pokerbox .bar.other i{background:rgba(255,255,255,.45)}
+#pokerbox .bar.earn i{background:#7cc47f}
+#pokerbox .msg{margin-top:8px;font-size:12px;color:var(--mute);line-height:1.55}
+#pokerbox .keys{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+#pokerbox .key,#pokerRanks .key{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.22);font-size:12.5px;white-space:nowrap}
+#pokerbox .key kbd,#pokerRanks .key kbd{min-width:18px;height:18px;padding:0 4px;font-size:10px}
+#pokerbox .hd .key,#pokerRanks .rh .key{padding:3px 8px;font-size:11px}
+#pokerbox .key.sel{border-color:var(--accent);color:var(--accent)}
+#pokerbox .amt{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font-size:12px;color:var(--mute)}
+#pokerbox .amt b{font-family:var(--serif);font-size:24px;font-weight:400;color:var(--ink)}
+#pokerbox .rng{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--mute);margin-top:6px}
+#pokerbox .trw{flex:1;padding:8px 0;margin:-8px 0}
+#pokerbox .tr{height:4px;border-radius:2px;background:rgba(255,255,255,.14);position:relative}
+#pokerbox .tr i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:2px}
+#pokerbox .tr em{position:absolute;top:-4px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--accent)}
+
+/* ── 홀덤 족보표 (poker.js): 폰 "족보" 버튼, PC H 키. 지금 내 패에 "지금" 표시 ── */
+#pokerRanks{position:absolute;right:calc(30px + var(--sar));top:50%;transform:translateY(-50%);width:300px;display:none;padding:12px 14px;border-radius:14px;background:rgba(10,12,18,.88);border:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-size:12px}
+#pokerRanks.on{display:block}
+#pokerRanks .rh{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-family:var(--serif);font-size:14px}
+#pokerRanks .rk{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0;border-top:1px solid rgba(255,255,255,.07)}
+#pokerRanks .rk b{font-weight:500;font-size:12px;white-space:nowrap}
+#pokerRanks .rk span{color:var(--mute);font-size:11px;text-align:right}
+#pokerRanks .rk.me b{color:var(--accent)}
+#pokerRanks .rk em{font-style:normal;font-size:10.5px;margin-left:6px;padding:0 6px;border:1px solid var(--accent);border-radius:99px}
+
+/* ── 폰·태블릿: 상자 안 버튼을 손가락으로 누른다 ── */
+body.touch #pokerbox,body.touch #pokerRanks{pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+body.touch #pokerbox .key{flex:1;justify-content:center;padding:11px 4px;font-size:13px}
+body.touch #pokerbox .key:active,body.touch #pokerRanks .key:active{background:rgba(233,197,138,.22);border-color:rgba(233,197,138,.5)}
+body.touch #pokerbox .key kbd,body.touch #pokerRanks .key kbd{display:none}
+body.touch #pokerbox .hd .key,body.touch #pokerRanks .rh .key{flex:none;padding:6px 10px;font-size:12px}
+body.touch #pokerbox .keys.quick{display:grid;grid-template-columns:1fr 1fr}
+body.touch #pokerbox .key.wide{flex:2}
+body.touch #pokerbox .pc{width:32px;height:44px;font-size:16px}
+body.touch #pokerbox .tr{height:6px}
+body.touch #pokerbox .tr em{top:-6px;width:18px;height:18px;margin-left:-9px}
+@media (max-width:700px){
+  #pokerbox{right:calc(10px + var(--sar));left:calc(10px + var(--sal));bottom:calc(10px + var(--sab));width:auto;padding:10px 12px}
+  #pokerRanks{right:calc(10px + var(--sar));left:calc(10px + var(--sal));width:auto;top:calc(64px + var(--sat));transform:none}
+}
+@media (max-width:900px) and (max-height:480px){
+  #pokerbox{right:auto;left:calc(18px + var(--sal));bottom:calc(10px + var(--sab));width:min(380px,calc(100% - 36px))}
+  #pokerRanks{right:calc(18px + var(--sar));left:auto;width:290px;top:calc(10px + var(--sat));transform:none}
+}
+
+/* ── 홀덤 화면 밖 자리 알약 (poker.js): 홀덤 자리에 앉아 있을 때, 화면 밖에 앉은 사람 쪽 가장자리에 ──
+   이름 / 칩과 상태 / 차례면 강조 테두리 / 폴드면 흐리게 / 방금 한 행동 2초 */
+#pokerPills{position:absolute;inset:0;pointer-events:none}
+#pokerPills .pill{position:absolute;transform:translateY(-50%);display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:99px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:12px;white-space:nowrap;transition:opacity .2s,border-color .2s}
+#pokerPills .pill.l{left:calc(12px + var(--sal))}
+#pokerPills .pill.r{right:calc(12px + var(--sar))}
+#pokerPills .pill b{font-weight:500;font-family:var(--serif);font-size:13px}
+#pokerPills .pill span{color:var(--mute)}
+#pokerPills .pill i{font-style:normal;color:var(--mute);font-size:15px;line-height:1}
+#pokerPills .pill em{font-style:normal;color:var(--accent)}
+#pokerPills .pill.turn{border-color:rgba(233,197,138,.75)}
+#pokerPills .pill.dim{opacity:.5}
+#pokerPills .pill .fl{color:var(--ink);background:rgba(255,255,255,.1);border-radius:99px;padding:1px 8px}
+#pokerPills .pill .fl.hot{background:rgba(233,197,138,.22);color:var(--accent)}
+
+/* ── 오늘의 테이블 (poker.js): 홀덤 자리에서 일어날 때 8초. 폰은 누르면 닫힌다 ── */
+#pokerDay{position:absolute;left:50%;top:calc(124px + var(--sat));transform:translateX(-50%);width:min(340px,calc(100% - 40px));display:none;padding:16px 18px;border-radius:14px;background:rgba(10,12,18,.85);border:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);font-size:12px;line-height:1.6}
+#pokerDay.on{display:block;animation:dayIn .4s ease-out}
+#pokerDay .t{font-size:11px;letter-spacing:.3em;color:var(--accent)}
+#pokerDay .big{font-family:var(--serif);font-size:30px;margin:2px 0}
+#pokerDay .sub{color:var(--mute)}
+#pokerDay hr{border:0;border-top:1px solid var(--line);margin:10px 0}
+body.touch #pokerDay{pointer-events:auto}
+@keyframes dayIn{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translateX(-50%)}}
