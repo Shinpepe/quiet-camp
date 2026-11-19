@@ -247,22 +247,26 @@ export class ChipSet {
   }
   /* 한 더미: 바닥 (x, z) 에서 n 개. 살짝씩 어긋나고 저마다 돌아가 있다 */
   stack(k, x, z, n, top) { for (let i = 0; i < n; i++) this.put(k, x + this.j(0.0007), top + CHIP.h * (i + 0.5), z + this.j(0.0007), this.r() * 6.283); }
-  /* 팟처럼 흩어 놓은 칩: counts = 액면가별 개수. 작은 더미 여러 개로, 서로 겹치지 않게 */
+  /* 팟처럼 흩어 놓은 칩: counts = 액면가별 개수 (보기용 판) */
   pile(counts, cx, cz, top, R = 0.05) {
+    const list = []; counts.forEach((n, k) => { for (let i = 0; i < n; i++) list.push(k); });
+    this.heap(list, cx, cz, top, R);
+  }
+  /* list = 액면가 목록 (놓인 순서). 작은 더미 여러 개로, 서로 겹치지 않게.
+     칩마다 자리는 앞의 칩들로만 정해지므로, 뒤에 칩이 더해지거나 빠져도 앞의 칩은 움직이지 않는다 */
+  heap(list, cx, cz, top, R = 0.05) {
     const piles = [], r = this.r;
-    counts.forEach((n, k) => {
-      for (let i = 0; i < n; i++) {
-        let p = piles.length && r() < 0.5 ? piles[Math.floor(r() * piles.length)] : null;
-        if (!p) {
-          for (let t = 0; t < 10 && !p; t++) {
-            const ang = r() * 6.283, rad = R * Math.sqrt(r()), x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
-            if (piles.every(q => Math.hypot(q.x - x, q.z - z) > CHIP.r * 2.05)) p = { x, z, n: 0 };
-          }
-          if (!p) p = piles[0] || { x: cx, z: cz, n: 0 };
-          if (!piles.includes(p)) piles.push(p);
+    list.forEach(k => {
+      let p = piles.length && r() < 0.5 ? piles[Math.floor(r() * piles.length)] : null;
+      if (!p) {
+        for (let t = 0; t < 10 && !p; t++) {
+          const ang = r() * 6.283, rad = R * Math.sqrt(r()), x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
+          if (piles.every(q => Math.hypot(q.x - x, q.z - z) > CHIP.r * 2.05)) p = { x, z, n: 0 };
         }
-        this.put(k, p.x + this.j(0.003), top + CHIP.h * (p.n + 0.5), p.z + this.j(0.003), r() * 6.283, this.j(0.04), this.j(0.04)); p.n++;
+        if (!p) p = piles[0] || { x: cx, z: cz, n: 0 };
+        if (!piles.includes(p)) piles.push(p);
       }
+      this.put(k, p.x + this.j(0.003), top + CHIP.h * (p.n + 0.5), p.z + this.j(0.003), r() * 6.283, this.j(0.04), this.j(0.04)); p.n++;
     });
   }
   commit() { this.ims.forEach((im, k) => { im.count = this.n[k]; im.instanceMatrix.needsUpdate = true; }); }
@@ -284,11 +288,46 @@ export function stackChips(amount) {
   return out;
 }
 
+/* ── 칩 구성 유지: 금액이 바뀔 때 처음부터 다시 나누지 않고, 줄어든 만큼 빼고 늘어난 만큼 더한다 ──
+   다시 나누면 20칩을 내도 더미 전체가 바뀐다 (1,000 → 980 이면 5칩·25칩이 하나씩 줄고 10칩은 오히려 하나 는다).
+   빼는 칩은 큰 것부터 — 날아가는 칩(chipsFor)과 같은 칩이 더미에서 빠진다 */
+const worth = c => c.reduce((s, n, q) => s + n * DENOMS[q].v, 0);
+const nChips = c => c.reduce((s, n) => s + n, 0);
+function payFrom(c, a) {
+  for (let q = DENOMS.length - 1; q >= 0 && a > 0; q--) { const n = Math.min(c[q], Math.floor(a / DENOMS[q].v)); c[q] -= n; a -= n * DENOMS[q].v; }
+  if (a <= 0) return true;
+  /* 딱 맞게 낼 수 없으면 남은 칩 중 가장 작은 것(a 보다 크다)을 깨서 거스름을 받는다 */
+  const q = c.findIndex(n => n > 0); if (q < 0) return false;
+  c[q]--; chipsFor(DENOMS[q].v - a).forEach((n, k) => { c[k] += n; }); return true;
+}
+/* store 의 k 번째 구성을 amount 로 맞춘다. 주인(id)이 바뀌었거나, 맞출 수 없거나, 칩이 max 개를 넘으면 init(amount) 로 새로 나눈다 */
+function keepComp(store, k, id, amount, init, max) {
+  let c = store.c[k];
+  if (!c || store.id[k] !== id) c = init(amount);
+  else {
+    const have = worth(c);
+    if (amount < have && !payFrom(c, have - amount)) c = init(amount);
+    else if (amount > have) chipsFor(amount - have).forEach((n, q) => { c[q] += n; });
+    if (worth(c) !== amount || nChips(c) > max) c = init(amount);
+  }
+  store.c[k] = c; store.id[k] = id; return c;
+}
+/* 팟: 들어온 순서대로 쌓는 칩 목록. 새 칩은 위에 얹고, 나갈 때는 위에서부터 집는다 → 이미 놓인 칩은 움직이지 않는다 */
+function keepPot(K, amount) {
+  const L = K.pot, sum = () => L.reduce((s, q) => s + DENOMS[q].v, 0);
+  const push = c => { for (let q = c.length - 1; q >= 0; q--) for (let i = 0; i < c[q]; i++) L.push(q); };
+  const have = sum();
+  if (amount > have) push(chipsFor(amount - have));
+  else if (amount < have) { let a = have - amount; while (a > 0 && L.length) a -= DENOMS[L.pop()].v; if (a < 0) push(chipsFor(-a)); }
+  if (sum() !== amount) { L.length = 0; push(stackChips(amount)); }
+  return L;
+}
+
 /* ── 날아가는 칩 묶음: 한 번에 최대 5개 (금액의 큰 칩부터). 포물선으로 옮겨 가고 도착하면 done() ── */
 class ChipFlights {
   constructor(parent, top) {
     const a = assets(); this.top = top;
-    this.pool = Array.from({ length: 16 }, () => {
+    this.pool = Array.from({ length: 24 }, () => {
       const g = new THREE.Group(); g.visible = false; parent.add(g);
       const ms = Array.from({ length: 5 }, (_, i) => { const m = new THREE.Mesh(a.chipGeo, a.chipMats[0]); m.position.y = CHIP.h * (i + 0.5); m.castShadow = true; g.add(m); return m; });
       return { g, ms, on: false, t: 0, dur: 1, from: [0, 0], to: [0, 0], done: null };
@@ -296,7 +335,8 @@ class ChipFlights {
   }
   fly(from, to, amount, dur, done) {
     let f = this.pool.find(o => !o.on);
-    if (!f) { f = this.pool[0]; const d = f.done; f.done = null; f.on = false; if (d) d(); }
+    /* 모두 날아가는 중이면 가장 많이 날아간(곧 도착할) 것을 바로 도착시키고 그 자리를 쓴다 */
+    if (!f) { f = this.pool.reduce((a, b) => b.t / b.dur > a.t / a.dur ? b : a); const d = f.done; f.done = null; f.on = false; if (d) d(); }
     const n = chipsFor(amount), list = [];
     for (let k = DENOMS.length - 1; k >= 0 && list.length < 5; k--) for (let i = 0; i < n[k] && list.length < 5; i++) list.push(k);
     f.ms.forEach((m, i) => { m.visible = i < list.length; if (i < list.length) { m.material = A.chipMats[list[i]]; m.rotation.y = Math.random() * 6.283; } });
@@ -395,28 +435,30 @@ function demo(T) {
 }
 
 /* ══ 판의 모습 (poker.js 가 쓴다) ══ */
-/* 놓여 있는 칩: d = { stacks: [칩 ×4], bets: [칩 ×4], pot: 칩 }. 같은 금액이면 늘 같은 모양 (자리·팟마다 정해진 난수) */
-export function renderChips(T, d) {
+/* 놓여 있는 칩: d = { stacks: [칩 ×4], bets: [칩 ×4], pot: 칩 }, ids = 자리마다 주인 (주인이 바뀌면 구성을 새로 나눈다).
+   앞 칩·베팅 줄·팟 모두 지난 구성에서 빠진 만큼 빼고 들어온 만큼 더한다 (keepComp·keepPot).
+   더미마다 정해진 난수라 다른 더미의 개수가 바뀌어도 흔들리지 않는다 */
+export function renderChips(T, d, ids) {
   const { chips, frames, top } = T; let s = 1;
   const seed = v => { s = v; chips.r = () => (s = (s * 16807) % 2147483647) / 2147483647; };
+  const K = T.keep || (T.keep = { st: { c: [], id: [] }, bt: { c: [], id: [] }, pot: [] });
   chips.clear();
   frames.forEach((f, k) => {
-    seed(7 + k * 101);
+    const id = (ids && ids[k]) || '';
     /* 앞의 칩: 큰 것부터 더미마다 20개까지 */
-    const n = stackChips(Math.max(0, d.stacks[k] || 0)); let col = 0;
+    const n = keepComp(K.st, k, id, Math.max(0, d.stacks[k] || 0), stackChips, 80); let col = 0;
     for (let q = DENOMS.length - 1; q >= 0; q--) {
       let m = n[q];
-      while (m > 0) { const c = Math.min(m, 20), [x, z] = spot(f, LAY.chips[0], LAY.chips[1] + col * LAY.chips[2]); chips.stack(q, x, z, c, top); m -= c; col++; }
+      while (m > 0) { seed(7 + k * 101 + col * 13); const c = Math.min(m, 20), [x, z] = spot(f, LAY.chips[0], LAY.chips[1] + col * LAY.chips[2]); chips.stack(q, x, z, c, top); m -= c; col++; }
     }
     /* 이번 라운드에 건 칩: 베팅 줄 위에 액면가마다 한 더미 */
-    const bet = Math.max(0, d.bets[k] || 0);
-    if (bet > 0) {
-      const used = chipsFor(bet).map((v, q) => [q, v]).filter(e => e[1] > 0);
-      used.forEach(([q, v], i) => { const [x, z] = spot(f, LAY.bet, (i - (used.length - 1) / 2) * 0.056); chips.stack(q, x, z, v, top); });
-    }
+    const b = keepComp(K.bt, k, id, Math.max(0, d.bets[k] || 0), chipsFor, 40);
+    const used = b.map((v, q) => [q, v]).filter(e => e[1] > 0);
+    used.forEach(([q, v], i) => { seed(5003 + k * 101 + q * 17); const [x, z] = spot(f, LAY.bet, (i - (used.length - 1) / 2) * 0.056); chips.stack(q, x, z, v, top); });
   });
   seed(991);
-  if (d.pot > 0) chips.pile(stackChips(d.pot), LAY.pot[0], LAY.pot[1], top);
+  const pot = keepPot(K, Math.max(0, d.pot || 0));
+  if (pot.length) chips.heap(pot, LAY.pot[0], LAY.pot[1], top);
   chips.commit(); chips.r = Math.random;
 }
 /* 딜러 버튼: dur 초에 걸쳐 그 자리로 미끄러진다 (0 이면 바로). seat < 0 이면 숨긴다 */
@@ -442,5 +484,5 @@ export function updateTable(T, dt) {
 export function clearTable(T) {
   [...T.board, ...T.hole.flat()].forEach(c => { c.userData.hide(); c.userData.tint(1); });
   T.flights.clear(); T.deck.visible = false; T.btn.visible = false; T.btnTw = null;
-  T.chips.clear(); T.chips.commit();
+  T.chips.clear(); T.chips.commit(); T.keep = null;
 }

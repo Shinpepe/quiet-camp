@@ -12,9 +12,9 @@ import { netPoker, netPokerSeats, netIsHost, netSelf, netName, netBubble } from 
    방장이 딜러다: 누가 앉았는지 보고(net.js netPokerSeats), 규칙 엔진(pokerEngine.js)으로 판을 돌리고, 칩 장부를 가진다.
    모두에게 공개 상태(st)를 보내고, 손패(hole)는 각자에게만 보낸다. 친구는 행동(act)·시작(go)·손패 다시 받기(sync)·칩 벌기(earn)를 방장에게 부탁한다.
    방장도 같은 길을 쓴다 — 자기에게 보내는 것은 바로 받는다.
-   판의 흐름: wait(대기) → 앉은 사람 누구나 C → count(3초 세기) → play(판) → result(결과가 떠 있음) → 누구나 C 다시하기 → count …
+   판의 흐름: wait(대기) → 앉은 사람 누구나 C → count(10초 세기) → play(판) → result(결과가 떠 있음) → 누구나 C 다시하기 → count …
      세는 동안 일어나면 그 판에서 빠진다. 칩이 있는 사람이 둘 아래로 줄면 세기를 멈춘다.
-   차례 시간 60초, 자리 비움이면 3초. 시간이 지나면 체크할 수 있으면 체크, 아니면 폴드.
+   차례 시간 60초, 자리 비움이면 10초. 시간이 지나면 체크할 수 있으면 체크, 아니면 폴드.
    두 판 연속 시간이 지나면 쉬는 중(다음 판부터 빠진다, C 로 다시 낀다).
    판 도중 일어나거나 연결이 끊기면 폴드 (올인한 사람은 판에 남는다).
    칩 장부: 처음 앉을 때 1,000칩. 일어나도·잠들어도 그대로, 캠핑장을 나가면 사라진다.
@@ -32,7 +32,7 @@ import { netPoker, netPokerSeats, netIsHost, netSelf, netName, netBubble } from 
    마무리(H5): 이름표 아래 칩 줄(pokerTagLine) · 기록(records.poker) · 오늘의 테이블 카드(#pokerDay, 홀덤 자리에서 일어날 때)
    화면 문구: 나란한 항목은 " / ", 문장이 끝나고 이어지면 ". ", 이름 여러 개는 ", " */
 
-const TURN = 60000, AWAY = 3000, COUNT = 3, LOW = 10, E = POKER.earn;
+const TURN = 60000, AWAY = 10000, COUNT = 3, LOW = 10, E = POKER.earn;
 const PEEK_HINT = isTouch ? '눌러서 카드 보기' : 'Space를 눌러서 카드 보기';
 /* 다른 사람이 들춰 볼 때 그 사람 카드의 가까운 쪽 모서리를 드는 각도 (rad, 약 17°) */
 const REMOTE_PEEK = 0.3;
@@ -51,7 +51,7 @@ const potNow = pub => pub.pot + pub.seats.reduce((s, p) => s + (p ? p.bet : 0), 
 const H = {};
 function hostReset(keep) {
   const L = keep ? H.ledger : null, B = keep ? H.broke : null;
-  Object.assign(H, { ledger: new Map(), gone: new Set(), rest: new Set(), streak: new Map(), timed: new Set(), broke: new Set(), lastEarn: new Map(),
+  Object.assign(H, { ledger: new Map(), gone: new Set(), rest: new Set(), streak: new Map(), timed: new Set(), broke: new Set(), lastEarn: new Map(), awayAt: new Map(),
     S: null, ph: 'wait', cnt: 0, cntT: 0, by: '', hand: 0, prevBtn: -1, dl: 0, turnKey: '', turnAt: 0, res: null,
     tbl: [null, null, null, null], tblKey: '', beat: 0, dirty: true, logN: 0 });
   if (L) { H.ledger = L; H.broke = B; }
@@ -82,7 +82,9 @@ const D = {};
 function dirReset() {
   Object.assign(D, { hand: -1, board: 0, until: 0, btn: -1, sawCount: false, swept: false, sweptHand: -1,
     seat: [0, 1, 2, 3].map(() => ({ on: false, mine: false, shown: false, peek: false, rpeek: false })),
-    goal: null, disp: null, chipKey: '', chipDirty: false, pend: 0, tasks: [], tick: -1, riffle: 3 });
+    goal: null, disp: null, chipKey: '', chipDirty: false, pend: 0, tasks: [], tick: -1, riffle: 3,
+    /* 칩 계획 번호: 계획이 바뀌면 그 전에 잡아 둔 비행(출발 전·날아가는 중)은 무시한다 */
+    cgen: (D.cgen || 0) + 1 });
 }
 hostReset(); viewReset(); dirReset();
 /* 캠핑장에 들어갈 때·나갈 때 (game.js) */
@@ -96,8 +98,11 @@ export function pokerReset(keepLedger) {
 const short = id => H.broke.has(id) && (H.ledger.get(id) || 0) < E.back;
 /* 다음 판에 들어갈 사람: 앉아 있고, 칩이 있고, 쉬는 중이 아니고, 빈털터리라면 다시 낄 만큼 모은 사람 */
 const eligible = () => H.tbl.filter(o => o && (H.ledger.get(o.id) || 0) > 0 && !H.rest.has(o.id) && !short(o.id));
-/* 지금 차례의 마감 시각 (자리 비움이면 3초) */
-const turnDl = () => { const S = H.S, o = S && H.tbl[S.turn]; return o && o.away ? Math.min(H.dl, H.turnAt + AWAY) : H.dl; };
+/* 지금 차례의 마감 시각: 자리 비움이면 차례가 시작된 때와 자리를 비운 때 중 늦은 쪽부터 10초 */
+const turnDl = () => {
+  const S = H.S, o = S && H.tbl[S.turn]; if (!o || !o.away) return H.dl;
+  return Math.min(H.dl, Math.max(H.turnAt, H.awayAt.get(o.id) || 0) + AWAY);
+};
 
 function hostTick(dt) {
   const now = performance.now(), tbl = [null, null, null, null], at = new Map();
@@ -108,6 +113,10 @@ function hostTick(dt) {
     if (!H.ledger.has(o.id)) H.ledger.set(o.id, POKER.start);
   }
   H.tbl = tbl;
+  /* 자리 비움이 시작된 시각 (앉아 있는 사람만, 돌아오면 지운다) — 차례 마감은 이때부터 10초 */
+  const aw = new Map();
+  tbl.forEach(o => { if (o && o.away) aw.set(o.id, H.awayAt.get(o.id) ?? now); });
+  H.awayAt = aw;
   const key = tbl.map(o => o ? o.id + (o.away ? '*' : '') : '').join(',');
   if (key !== H.tblKey) { H.tblKey = key; H.dirty = true; }
   const S = H.S;
@@ -820,13 +829,27 @@ function addTo(e, a) {
   if (e[0] === 'p') D.disp.pot += a; else if (e[0] === 's') D.disp.stacks[e[1]] += a; else D.disp.bets[e[1]] += a;
   D.chipDirty = true;
 }
-function launch(T, f) {
+/* g = 이 비행을 잡을 때의 계획 번호. 그 사이 계획이 바뀌었으면(flush) 출발하지도, 도착해서 더하지도 않는다 */
+function launch(T, f, g) {
+  if (g !== D.cgen) return;
   addTo(f.f, -f.a);
   const from = xzOf(T, f.f), to = xzOf(T, f.to);
   if (f.f[0] === 's' && f.to[0] === 'b') tsfx('chipPush', to[0], to[1]);
-  T.flights.fly(from, to, f.a, f.ph ? 0.5 : 0.38, () => { addTo(f.to, f.a); D.pend--; tsfx('chip', to[0], to[1], f.a >= 100 ? 3 : 2); });
+  T.flights.fly(from, to, f.a, f.ph === 2 ? 0.5 : 0.38, () => {
+    if (g !== D.cgen) return;
+    addTo(f.to, f.a); D.pend--; tsfx('chip', to[0], to[1], f.a >= 100 ? 3 : 2);
+  });
 }
+/* 아직 출발을 기다리거나 날아가는 칩이 있는데 새 상태가 왔다: 날아가는 칩을 거두고, 지난 목표에 다 도착한 것으로 맞춘 뒤 새로 계획한다.
+   (그대로 두면 새 비행이 아직 도착하지 않은 칩을 빼 가서, 칩이 중간에 사라졌다가 나중에 덮어씌워진다) */
+function flush(T) {
+  D.cgen++; D.pend = 0; T.flights.clear();
+  const G = D.goal; D.disp = { stacks: G.stacks.slice(), bets: G.bets.slice(), pot: G.pot }; D.chipDirty = true;
+}
+/* 단계: 0 = 앞 칩 ↔ 베팅 줄 (바로, 0.06초 간격) · 1 = 베팅 줄 → 팟 (0단계가 다 내려앉은 뒤) · 2 = 팟 → 앞 칩 (1단계가 끝나고 카드를 다 펼친 뒤).
+   라운드를 닫는 콜·올인도 먼저 베팅 줄로 밀었다가 다른 베팅과 함께 팟으로 간다 */
 function plan(T, G, N) {
+  if (D.pend > 0) flush(T);
   const same = k => !!G.ids[k] && G.ids[k] === N.ids[k], ds = [0, 0, 0, 0], db = [0, 0, 0, 0], fl = [];
   for (let k = 0; k < 4; k++) {
     if (same(k)) { ds[k] = N.stacks[k] - G.stacks[k]; db[k] = N.bets[k] - G.bets[k]; }
@@ -835,15 +858,20 @@ function plan(T, G, N) {
   const move = (f, to, a, ph) => { if (a > 0) fl.push({ f, to, a, ph }); };
   for (let k = 0; k < 4; k++) if (ds[k] < 0 && db[k] > 0) { const a = Math.min(-ds[k], db[k]); move(['s', k], ['b', k], a, 0); ds[k] += a; db[k] -= a; }
   for (let k = 0; k < 4; k++) if (db[k] < 0 && ds[k] > 0) { const a = Math.min(-db[k], ds[k]); move(['b', k], ['s', k], a, 0); db[k] += a; ds[k] -= a; }
+  /* 남은 앞 칩 감소 = 라운드를 닫으며 낸 칩: 베팅 줄로 먼저 민다 (그만큼 베팅 줄에서 팟으로 갈 몫이 늘어난다) */
+  for (let k = 0; k < 4; k++) if (ds[k] < 0) { const a = -ds[k]; move(['s', k], ['b', k], a, 0); db[k] -= a; ds[k] = 0; }
   let potIn = 0;
-  for (let k = 0; k < 4; k++) if (db[k] < 0) { move(['b', k], ['p'], -db[k], 0); potIn -= db[k]; db[k] = 0; }
-  for (let k = 0; k < 4; k++) if (ds[k] < 0) { move(['s', k], ['p'], -ds[k], 0); potIn -= ds[k]; ds[k] = 0; }
+  for (let k = 0; k < 4; k++) if (db[k] < 0) { move(['b', k], ['p'], -db[k], 1); potIn -= db[k]; db[k] = 0; }
   let avail = Math.max(0, G.pot + potIn - N.pot);
-  for (let k = 0; k < 4; k++) if (ds[k] > 0 && avail > 0) { const a = Math.min(ds[k], avail); move(['p'], ['s', k], a, 1); ds[k] -= a; avail -= a; }
+  for (let k = 0; k < 4; k++) if (ds[k] > 0 && avail > 0) { const a = Math.min(ds[k], avail); move(['p'], ['s', k], a, 2); ds[k] -= a; avail -= a; }
   for (let k = 0; k < 4; k++) { D.disp.stacks[k] += ds[k]; D.disp.bets[k] += db[k]; }
-  const p1 = Math.max(fl.some(f => !f.ph) ? 0.6 : 0, D.until - clock + 0.5);
-  let i0 = 0, i1 = 0;
-  fl.forEach(f => { const at = f.ph ? p1 + 0.08 * i1++ : 0.06 * i0++; D.pend++; later(at, () => launch(T, f)); });
+  /* 단계별 시작 시각: 앞 단계의 마지막 칩이 내려앉은 뒤 */
+  const FLY = 0.38, GAP = 0.06, n = [0, 0, 0];
+  fl.forEach(f => n[f.ph]++);
+  const end = (t, c) => c ? t + GAP * (c - 1) + FLY + 0.05 : t;
+  const t1 = end(0, n[0]), t2 = Math.max(end(t1, n[1]), D.until - clock + 0.5);
+  const at = [0, t1, t2], i = [0, 0, 0], g = D.cgen;
+  fl.forEach(f => { const t = at[f.ph] + GAP * i[f.ph]++; D.pend++; later(t, () => launch(T, f, g)); });
   D.chipDirty = true;
 }
 function directChips(T, t) {
@@ -906,7 +934,7 @@ export function pokerUpdate(dt) {
   direct(T);
   updateTable(T, dt);
   settle();
-  if (D.chipDirty && D.disp) { D.chipDirty = false; renderChips(T, D.disp); }
+  if (D.chipDirty && D.disp) { D.chipDirty = false; renderChips(T, D.disp, D.goal && D.goal.ids); }
   sounds(T, dt);
   pills(T);
   /* 결과: 카드를 다 펼친 뒤에 소식과 강조 */
