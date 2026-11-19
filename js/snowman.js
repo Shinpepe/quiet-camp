@@ -18,7 +18,7 @@ import { player, updateHUD } from './game.js';
    크기: 최소 SNOW.min (이보다 작으면 눈사람이 안 된다) · 최대 SNOW.max (머리·몸통 같다. 최대가 되면 더 커지지 않고 천천히 굴러간다).
    눈사람이 되면 돌 눈·당근 코·잔가지 팔·단추 두 개·텐트 색 목도리가 크기에 맞춰 톡톡 붙는다.
    내려놓은 눈덩이와 눈사람은 W.trees(걷기 충돌)와 W.interact(조준)에 들어간다.
-   굴린 자국은 하나로 이어진 띠(Track) — 바닥 색에 배율을 곱해 조명을 그대로 따르고, SNOW.trackLife 초 뒤 사라진다.
+   눈덩이마다 이어지는 띠(Track) — 바닥 색에 배율을 곱해 조명을 그대로 따르고, SNOW.trackLife 초 뒤 사라진다.
    멀티: 눈덩이·눈사람은 누가 만들었든 모두가 굴리고 부술 수 있다. 내 행동은 snowHooks.fx 로 알리고(net.js 가 모두에게),
    다른 사람의 행동은 snowRemote 가 받는다. 다른 사람이 굴리는 눈덩이는 스냅샷의 위치·크기로 remoteRoll 이 따라 그린다.
    id 는 창마다 다른 앞글자(PFX) + 번호라 여러 사람이 만들어도 겹치지 않는다 ── */
@@ -119,6 +119,8 @@ function makeButton(R) {
 class Track {
   constructor(W, n) {
     this.N = n; this.head = 0;
+    /* 칸마다 일련번호: 눈덩이가 기억해 둔 직전 칸이 아직 그 단면인지(링이 한 바퀴 돌아 덮이지 않았는지) 확인한다 */
+    this.ser = new Uint32Array(n); this.serial = 0;
     this.pos = new Float32Array(n * 6); this.u = new Float32Array(n * 2); this.b = new Float32Array(n * 2).fill(-1e9); this.d = new Float32Array(n * 4); this.idx = new Uint32Array(n * 6);
     for (let i = 0; i < n; i++) { this.u[i * 2] = 1; this.u[i * 2 + 1] = -1; }
     const g = this.geo = new THREE.BufferGeometry();
@@ -155,16 +157,23 @@ class Track {
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.castShadow = this.mesh.receiveShadow = false;
     this.mesh.userData.noAO = true; this.mesh.userData.noRefl = true;
   }
+   /* 칸 a 에서 칸 b 로 잇는 면 (칸 a 자리에 적는다). 칸 하나에서 나가는 연결은 하나뿐이다 */
   quad(a, b, on) { const o = a * 6; if (on) this.idx.set([a * 2, b * 2, a * 2 + 1, a * 2 + 1, b * 2, b * 2 + 1], o); else this.idx.fill(0, o, o + 6); }
-  /* 단면 하나를 더한다. link = 직전 단면과 잇는다 (새로 굴리기 시작한 첫 단면은 잇지 않는다) */
-  push(x, z, dx, dz, hw, link) {
+  /* 단면 하나를 더하고 그 칸 번호를 돌려준다.
+     prev = 같은 눈덩이의 직전 칸 { j, s } — 그 칸이 아직 덮이지 않았을 때만 잇는다 (없으면 새로 굴리기 시작한 첫 칸).
+     여러 사람이 한 버퍼에 번갈아 쓰므로 링의 바로 앞 칸이 아니라 눈덩이마다 기억한 칸과 잇는다 */
+  push(x, z, dx, dz, hw, prev) {
     const j = this.head; this.head = (j + 1) % this.N;
     const l = Math.hypot(dx, dz) || 1, ax = -dz / l, az = dx / l, x1 = x + ax * hw, z1 = z + az * hw, x2 = x - ax * hw, z2 = z - az * hw;
     this.pos.set([x1, groundAt(x1, z1) + 0.012, z1, x2, groundAt(x2, z2) + 0.012, z2], j * 6);
     this.b[j * 2] = this.b[j * 2 + 1] = ctx.W.uTime.value;
     this.d.set([ax, az, ax, az], j * 4);
-    this.quad((j - 1 + this.N) % this.N, j, link); this.quad(j, (j + 1) % this.N, false);
+    this.ser[j] = ++this.serial;
+    /* 이 칸에서 나가던 옛 연결을 지우고, 같은 눈덩이의 직전 칸에서 이 칸으로 잇는다 */
+    this.quad(j, 0, false);
+    if (prev && prev.j !== j && this.ser[prev.j] === prev.s) this.quad(prev.j, j, true);
     const at = this.geo.attributes; at.position.needsUpdate = at.aB.needsUpdate = at.aD.needsUpdate = true; this.geo.index.needsUpdate = true;
+    return j;
   }
   clear() { this.b.fill(-1e9); this.idx.fill(0); this.geo.attributes.aB.needsUpdate = true; this.geo.index.needsUpdate = true; }
 }
@@ -470,11 +479,13 @@ function rollTo(o, nx, nz, grow) {
   if (grow) trackAt(o, nx, nz, dx, dz);
   return ds;
 }
-/* 굴린 자국 한 칸: 6cm 넘게 움직였을 때만 (새로 굴리기 시작한 첫 칸은 앞 칸과 잇지 않는다) */
+/* 굴린 자국 한 칸: 6cm 넘게 움직였을 때만. 눈덩이마다 자기 직전 칸(o.tk)과 잇는다 (새로 굴리기 시작한 첫 칸은 잇지 않는다) */
 function trackAt(o, nx, nz, dx, dz) {
   const tdx = nx - o.tx, tdz = nz - o.tz;
   if (o.trackNew || Math.hypot(tdx, tdz) > 0.06) {
-    S.track.push(nx, nz, o.trackNew ? dx : tdx, o.trackNew ? dz : tdz, o.r * 0.6 * rnd(0.94, 1.06), !o.trackNew);
+    const T = S.track, prev = o.trackNew ? null : o.tk;
+    const j = T.push(nx, nz, o.trackNew ? dx : tdx, o.trackNew ? dz : tdz, o.r * 0.6 * rnd(0.94, 1.06), prev);
+    o.tk = { j, s: T.ser[j] };
     o.trackNew = false; o.tx = nx; o.tz = nz;
   }
 }

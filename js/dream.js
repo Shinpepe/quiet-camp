@@ -434,9 +434,9 @@ export function dreamRemote(d) {
 }
 /* 방장 시계에 실려 오는 꿈 상태 (1초마다, 친구 쪽): 시작 여부·남은 시간·캠프가 버티는 횟수를 맞춘다.
    방장이 꿈에 없으면(null) 나도 깨어난다 — 늦게 돌아왔는데 모두 이미 깨어난 경우 */
-export function dreamSync(s) {
+export function dreamSync(s, hostNapping) {
   if (!D.on || !D.multi || dreamNet.host() || D.phase === 'wake') return;
-  if (!s) { if (state.mode !== 'sleep') { D.phase = 'wake'; startSleep(true); } return; }
+  if (!s) { if (hostNapping) return; if (state.mode !== 'sleep') { D.phase = 'wake'; startSleep(true); } return; }
   if (typeof s.hp === 'number') setHp(s.hp);
   if (s.live && !D.live) goLive(+s.left || 0);
   else if (D.live && D.phase !== 'end' && D.phase !== 'night' && typeof s.left === 'number' && Math.abs(D.left - s.left) > 0.5) { D.left = s.left; D.t = DREAM.dur - s.left; }

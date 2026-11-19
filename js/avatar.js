@@ -18,7 +18,7 @@ import { seatOf, seatKind, camp } from './camp.js';
      내 아바타는 localState() 가 게임 상태에서 채우고, 멀티가 되면 다른 플레이어는 네트워크로 받은 같은 스냅샷을 넣는다.
      다른 사람의 스냅샷에는 장작 패기(cw 휘두른 횟수 · cr 결과)와 낚시(fs 상태)도 들어 있어 도끼·낚싯대를 쥐여 준다.
    자리에 앉으면 SEAT_ANCHOR 의 자리(의자·부두 끝·돗자리…)에 몸을 놓고, 걸을 때는 플레이어 위치를 따라가며 걸음 위상을 실제 이동 거리로 정한다(발이 미끄러지지 않게).
-   손에 든 물건: 오른손의 mount(몸 기준 방향) 안 grip(물건별 쥐는 자리)에 W.item 을 그대로 옮겨 붙인다 (view.js 의 mountItem).
+   손에 든 물건: 오른손의 mount(몸 기준 방향) 안 grip(물건별 쥐는 자리)에 W.item 을 그대로 옮겨 붙인다 (mountItem).
    모델은 씬을 옮겨 다닌다 — root.userData.persist 라서 scene.js 의 정리에서 빠진다 */
 
 const V3 = THREE.Vector3, Z = [0, 0, 0], PI = Math.PI;
@@ -468,7 +468,7 @@ export function attachAvatar(scene, cfg) {
 /* 손에 든 것(W.item)을 아바타 손(true) 또는 카메라 손(false)에 붙인다 */
 export function mountItem(onAvatar) {
   const it = ctx.W.item; if (!it || !LA) return;
-  const dest = onAvatar ? LA.grip : ctx.hand;
+  const dest = onAvatar && state.mode !== 'chop' ? LA.grip : ctx.hand;
   if (it.parent !== dest) dest.add(it);
 }
 export function updateLocalAvatar(dt, show) {

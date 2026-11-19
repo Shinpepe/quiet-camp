@@ -888,7 +888,7 @@ export function startGame(fromHost) {
     ctx.W.wasNight = night;
     ctx.W.domeLit = night;
     /* 멀티: 방장은 지금 불·랜턴 상태를 알리고, 친구는 받아 둔 상태로 맞춘다 */
-    pokerReset(); netBegin();
+    pokerReset(true); netBegin();
     startAmbience(BG[state.bg].ambience, night ? 'night' : 'day');
     setIndoor(!!seat);
     $('#hud').classList.add('on'); $('#mobile').classList.toggle('on', isTouch);
@@ -909,7 +909,7 @@ export function exitGame() {
   startGen++; starting = false;
   hidePause(); ctx.running = false; if (document.pointerLockElement) document.exitPointerLock();
   endSleepUI(); sleep.wait = false; sleep.bed = 'bed'; resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx();
-  $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); pokerReset();
+  $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); pokerReset(true);
   $('#fade').style.opacity = 0;
   stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); ctx.hand.visible = false; hideJoy();
 }

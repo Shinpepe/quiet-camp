@@ -49,10 +49,12 @@ const potNow = pub => pub.pot + pub.seats.reduce((s, p) => s + (p ? p.bet : 0), 
 /* ── 방장: 판과 칩 장부 ──
    logN: 지난번 보낸 뒤로 S.log 의 몇 번째 줄부터가 새 일인지 */
 const H = {};
-function hostReset() {
+function hostReset(keep) {
+  const L = keep ? H.ledger : null, B = keep ? H.broke : null;
   Object.assign(H, { ledger: new Map(), gone: new Set(), rest: new Set(), streak: new Map(), timed: new Set(), broke: new Set(), lastEarn: new Map(),
     S: null, ph: 'wait', cnt: 0, cntT: 0, by: '', hand: 0, prevBtn: -1, dl: 0, turnKey: '', turnAt: 0, res: null,
     tbl: [null, null, null, null], tblKey: '', beat: 0, dirty: true, logN: 0 });
+  if (L) { H.ledger = L; H.broke = B; }
 }
 /* ── 모두(방장 포함): 받은 상태와 내 화면 ──
    peek = 지금 들춰 보는 중, seen = 손패를 본 판 번호, ranks = 족보표가 열려 있는지
@@ -64,7 +66,7 @@ function viewReset() {
     hole: null, raise: null, stN: 0, lock: -1, asked: 0, resHand: 0, wasTurn: false, hudT: 0, boxKey: '', upKey: '',
     peek: false, seen: 0, ranks: false, ranksKey: '',
     flash: [null, null, null, null], runHand: -1, sideHand: -1, my: { hand: -1, start: 0 },
-    day: { hands: 0, wins: 0, net: 0, best: 0, shown: 0 }, dayUntil: 0, seatPrev: -1 });
+    day: { hands: 0, wins: 0, net: 0, best: 0, shown: 0 }, dayUntil: 0, seatPrev: -1, lostT: 0 });
 }
 /* ══ 테이블 연출 (H4-2) ══
    받은 상태(V)에서 테이블이 "되어야 할 모습"(target)을 만들고, 지금 보이는 모습(D)과 비교해 움직임을 만든다.
@@ -84,8 +86,8 @@ function dirReset() {
 }
 hostReset(); viewReset(); dirReset();
 /* 캠핑장에 들어갈 때·나갈 때 (game.js) */
-export function pokerReset() {
-  hostReset(); viewReset(); dirReset(); render(null); renderRanks(); hideDay();
+export function pokerReset(keepLedger) {
+  hostReset(keepLedger); viewReset(); dirReset(); render(null); renderRanks(); hideDay();
   const pe = document.getElementById('pokerPills'); if (pe) pe.innerHTML = '';
   if (ctx.W.poker) clearTable(ctx.W.poker);
 }
@@ -416,7 +418,12 @@ function raiseView(L) {
 }
 function body(me) {
   const self = netSelf(), pub = V.pub, live = !!pub && pub.street !== 'done', t = V.tbl[me] && V.tbl[me].id === self ? V.tbl[me] : null;
-  if (!t) return { title: '홀덤 테이블', msg: '자리를 맞추는 중' };
+  if (!t) {
+    if (!V.lostT) V.lostT = clock;
+    else if (clock - V.lostT > 3) { V.lostT = 0; toast('다른 사람이 먼저 앉았다'); pokerHooks.stand(); }
+    return { title: '홀덤 테이블', msg: '자리를 맞추는 중' };
+  }
+  V.lostT = 0;
   const k = mineAt(), p = live && k >= 0 ? pub.seats[k] : null;
   if (p) {
     const hole = V.hole && V.hole.h === pub.hand ? V.hole.c : null, seen = !!hole && V.seen === pub.hand, L = legal(pub, k);

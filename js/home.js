@@ -1,9 +1,10 @@
-import { session, state } from './state.js';
+import { ctx, session, state } from './state.js';
 import { $, newSeed } from './util.js';
 import { sfx } from './audio.js';
 /* game.js 와 서로 불러오지만, 실행 중에만 부르므로 순환해도 괜찮다 */
-import { openMenu, previewRebuild } from './game.js';
+import { openMenu, previewRebuild, renderMenu } from './game.js';
 import { netHost, netJoin, netLeave } from './net.js';
+import { campForBuild } from './camp.js';
 
 /* ══ 홈 화면 ══
    처음 열면 나오는 화면. 1인 캠핑 / 멀티 캠핑을 고른다.
@@ -31,6 +32,9 @@ export function showHome(at = 'start', msg = '') {
   session.mode = 'solo'; session.code = null; session.seed = null; session.gear = null;
   $('#menu').classList.add('hidden'); $('#home').classList.remove('hidden'); step(at);
   $('#hErr').textContent = msg;
+  const W = ctx.W;
+  if (W.cfg && (W.cfg.key !== state.bg || W.camp !== campForBuild())) previewRebuild();
+  renderMenu();
 }
 /* 방장은 초대할 때 월드 시드를 정하고 프리뷰를 그 월드로 다시 만든 뒤 캠핑장을 연다. 친구는 받은 코드의 캠핑장을 찾는다 */
 function enter(mode, code) {

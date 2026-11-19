@@ -208,7 +208,7 @@ function loop(now) {
   updateFish(ctx.paused ? 0 : dt);
   applyTime();
   updateAudio(dt);
-  W.envT += dt; if (W.envT > 6) { W.envT = 0; if (settings.flow) rebakeEnv(); }
+  W.envT += dt; if (W.envT > 6) { W.envT = 0; if (cr.flow) rebakeEnv(); }
   /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리거나 파라솔을 접고 펴는 동안에는 매 프레임 갱신한다 */
   W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving() || viewThird() || netBusy()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
 
@@ -341,7 +341,7 @@ function loop(now) {
         burnSparkler(W, ud, dt);
         sparkLv = Math.max(sparkLv, 1 / (1 + 0.35 * tmpV.distanceToSquared(camera.position)));
         if (ud.amount === 0) { ud.setLit(false); s.doneT = 0; sfx('sparkOff'); }
-      } else sparkLv = 1;
+      } else { ud.emitter.getWorldPosition(tmpV); sparkLv = Math.max(sparkLv, 1 / (1 + 0.35 * tmpV.distanceToSquared(camera.position))); }
       if (ud.decal) { ud.decal.visible = ud.lit; ud.decal.material.opacity = 0.3 + Math.random() * 0.2; }
     } else if (s.doneT >= 0) {
       s.doneT += dt; const k = 1 - smooth(18, 20, s.doneT); s.g.scale.setScalar(Math.max(0.001, k));

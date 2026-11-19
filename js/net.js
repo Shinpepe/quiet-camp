@@ -15,7 +15,7 @@ import { meteorHooks, showMeteor } from './scene.js';
 import { dreamNet, dreamGo, dreamWaiting, dreamReady, dreamStatus, dreamSync, dreamRemote, dreamClaim, dreamOn } from './dream.js';
 import { chopNet, chopRemote } from './chop.js';
 import { fishNet, fishRemote } from './fish.js';
-import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo, pokerTagLine, pokerPeeking } from './poker.js';
+import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo, pokerTagLine, pokerPeeking, pokerReset } from './poker.js';
 
 /* ══ 멀티 캠핑 연결 (Trystero, P2P) ══
    서버 없이 브라우저끼리 직접 잇는다. 방 이름 = 'camp-' + 초대 코드. 최대 4명.
@@ -52,6 +52,7 @@ const N = { room: null, act: null, gen: 0, self: null, hostId: null, hostName: '
   napT: 0, zzKey: '', gunT: 0 };
 
 const nm = s => (typeof s === 'string' ? s.trim().slice(0, 12) : '') || '캠퍼';
+const fin = v => typeof v === 'number' && Number.isFinite(v);
 const isHost = () => session.mode === 'host', isGuest = () => session.mode === 'guest';
 const SEATED = m => m === 'seated' || m === 'memo' || m === 'sleep';
 function peer(id) { let p = N.peers.get(id); if (!p) { p = { id, name: '', ok: false, slot: 0, buf: [], off: null, last: 0, av: null, fxT: 0, seat: undefined, step: undefined, side: false, lit: false, snowHold: false }; N.peers.set(id, p); } return p; }
@@ -60,7 +61,8 @@ const guests = () => [...N.peers.values()].filter(p => p.ok);
 const profile = () => ({ name: nm(state.name) });
 const worldInfo = () => ({ v: V, seed: session.seed, bg: state.bg, time: state.time, clock: state.clock, dayMin: settings.dayMin, flow: settings.flow, car: state.carColor, tent: state.tentColor });
 /* dm: 방장의 꿈 상태 (시작 여부·남은 시간). 꿈이 아니면 null */
-const clockInfo = () => ({ clock: state.clock, dayMin: settings.dayMin, flow: settings.flow, dm: dreamStatus() });
+const clockInfo = () => ({ clock: state.clock, dayMin: settings.dayMin, flow: settings.flow,
+  dm: dreamStatus(), nap: state.mode === 'sleep' ? 1 : 0 });
 const flagsOf = () => { const o = {}; for (const k in FLAG) o[k] = !!FLAG[k].get(); return o; };
 function applyFlags(d, now) { for (const k in FLAG) if (typeof d[k] === 'boolean') FLAG[k].set(d[k], now); }
 const nameOf = id => id === N.hostId ? N.hostName : nm((N.peers.get(id) || {}).name);
@@ -156,7 +158,7 @@ function guestWire(A) {
   A.start.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); N.hostLive = true; N.shared = N.snow = null; applyWorld(d); if (!ctx.running) follow(); roomNote(); refreshGo(); });
   A.room.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); applyWorld(d); if (!ctx.running) follow(); });
   A.lobby.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); N.hostLive = false; N.shared = N.snow = null; toLobby(); roomNote(); refreshGo(); });
-  A.world.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); syncClock(d); if (ctx.running) dreamSync(d.dm || null); });
+  A.world.get((d, id) => { if (!fromHost(id)) return; N.lastHost = performance.now(); syncClock(d); if (ctx.running) dreamSync(d.dm || null, !!d.nap); });
   A.meteor.get((d, id) => { if (fromHost(id) && ctx.running && d) showMeteor(d); });
   /* 다 같이 잠든다: 방장이 정해 준 내 침낭으로 (자리 비움이었어도) */
   A.nap.get((d, id) => { if (!fromHost(id) || !d || !d.beds) return; N.lastHost = performance.now(); if (ctx.running) startNap(d.beds[N.self] || 'bed', !!d.dream); });
@@ -178,7 +180,7 @@ function guestWire(A) {
 function gotFx(d, id) {
   if (!d || !ctx.running || d.bg !== state.bg) return;
   if (isHost() && !(N.peers.get(id) || {}).ok) return;
-  if (d.k === 'plant' && Array.isArray(d.q) && d.q.length === 4 && Array.isArray(d.s) && typeof d.x === 'number') {
+  if (d.k === 'plant' && Array.isArray(d.q) && d.q.length === 4 && Array.isArray(d.s) && d.s.length === 2 && [d.x, d.y, d.z, ...d.q, ...d.s].every(fin)) {
     spawnPlanted(d); sfxAt('plant', d.x, d.y, d.z, surfaceAt(d.x, d.z));
   } else if (d.k === 'cooler') {
     ctx.W.coolerT = 0.7; soundAt('cooler', 'cooler'); setTimeout(() => { if (ctx.running) soundAt('cooler', 'cooler', 'close'); }, 1100);
@@ -251,7 +253,8 @@ function pack() {
     pk: pokerPeeking() ? 1 : 0 };
 }
 function gotSnap(d, id) {
-  if (!d || typeof d.t !== 'number') return;
+  if (!d || !fin(d.t)) return;
+  if (d.run === 1 && !['x', 'z', 'y', 'p'].every(k => fin(d[k]))) return;
   const p = peer(id), now = performance.now();
   if (id === N.hostId) N.lastHost = now;
   const b = p.buf; if (b.length && d.t <= b[b.length - 1].t) return;
@@ -438,6 +441,7 @@ export function netLeave() {
   N.peers.forEach(p => { if (p.av) removeRemote(p.av); remoteRoll(p.id, null); chopRemote(p.id, null, 0); fishRemote(p.id, null); }); N.peers.clear();
   meteorHooks.send = null; session.gear = null;
   if (N.stash) { const s = N.stash; N.stash = null; state.bg = s.bg; state.time = s.time; state.clock = s.clock; }
+  pokerReset();
   applyGear();
 }
 /* 방장: 출발 · 메뉴로 · 메뉴에서 장소·시각·색 바꿈 · 하루 길이·시간 흐름 바꿈 */
