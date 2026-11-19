@@ -140,7 +140,7 @@ body.touch .card kbd,body.touch .b kbd{display:none}
 /* 안내 문장이 PC 용(.k)과 모바일 용(.t)으로 나뉜 곳은 기기에 맞는 쪽만 보인다 (일시정지 창 아래 안내) */
 body:not(.touch) .hint .t,body.touch .hint .k{display:none}
 /* 모바일: 메뉴의 Enter 표시, 키보드 조작 목록, 게임 화면의 키 안내 줄은 숨긴다 (모바일 안내 줄 .legend 는 남긴다) */
-body.touch .go span,body.touch .keys,body.touch #legend{display:none}
+body.touch .go span,body.touch #menu .keys,body.touch #legend{display:none}
 
 /* ── 가상 조이스틱 (터치 시작점에 나타남) ── */
 #joy{position:absolute;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.05);pointer-events:none;opacity:0;transition:opacity .18s}
@@ -148,10 +148,10 @@ body.touch .go span,body.touch .keys,body.touch #legend{display:none}
 #joy .stick{position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:rgba(255,255,255,.55);box-shadow:0 2px 8px rgba(0,0,0,.4)}
 
 /* ── 조작 목록 (메인 메뉴) ── */
-.keys{display:flex;flex-direction:column;gap:9px;font-size:12px;color:var(--mute)}
-.keys>div{display:flex;align-items:center;gap:6px}
-.keys kbd{flex:none}
-.keys span{margin-left:6px;color:var(--ink)}
+#menu .keys{display:flex;flex-direction:column;gap:9px;font-size:12px;color:var(--mute)}
+#menu .keys>div{display:flex;align-items:center;gap:6px}
+#menu .keys kbd{flex:none}
+#menu .keys span{margin-left:6px;color:var(--ink)}
 /* ── 잠자기 화면 ── */
 #sleep{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;font-family:var(--serif);color:var(--ink)}
 #sleep.on{display:flex}
@@ -222,7 +222,7 @@ body.touch .go span,body.touch .keys,body.touch #legend{display:none}
   .sws{gap:6px}
   .sw{width:22px;height:22px}
   .go{margin-top:20px;padding:14px 18px;font-size:15px}
-  .keys{display:none}
+  #menu .keys{display:none}
   .preview-tag{top:calc(18px + var(--sat));bottom:auto;right:calc(18px + var(--sar))}
   #caption{font-size:12px;top:calc(18px + var(--sat));left:calc(18px + var(--sal))}
   #legend{display:none}
