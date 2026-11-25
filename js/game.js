@@ -21,6 +21,7 @@ import { onRoad, roadYaw } from './road.js';
 import { toggleView, beginView, endView } from './view.js';
 import { netStart, netLobby, netRoom, netWorld, netProfile, netNotice, netStartSeat, roomNoteText, netBegin, netShare, netFx, netSeatTaken, netEnter, netHostLive, netSleepCount } from './net.js';
 import { pokerKey, pokerKeyUp, pokerWheel, pokerCancel, pokerHooks, pokerReset, pokerUpLabel, pokerEarn } from './poker.js';
+import { resetAnimals, animalPhoto } from './animals.js';
 
 /* ── 조작 원칙: E 는 바라보는 것, 클릭은 손에 든 것. 앉아서 아무것도 안 보면 E = 일어나기.
    장작 패기·낚시 중에는 클릭(스페이스)이 타이밍 입력이 된다.
@@ -663,7 +664,7 @@ export function updateSleep(dt) {
       setIndoor(true);
       sleep.from = state.clock; sleep.to = sleep.dream ? 1 : state.clock < WAKE ? WAKE : 1 + WAKE; sleep.phase = 'night'; sleep.t = 0;
       st.classList.add('on'); ctx.W.fireLit = false;
-      clearPlanted();
+      clearPlanted(); resetAnimals();
     }
   } else if (sleep.phase === 'night') {
     const k = Math.min(1, sleep.t / 4.5), e = k * k * (3 - 2 * k);
@@ -785,6 +786,8 @@ function takePhoto() {
   const hud = $('#hud'); hud.classList.add('photo'); sfx('shutter');
   const third = beginView(ctx.camera);
   ctx.post.render();
+  /* 사진에 담긴 동물 (찍는 카메라 그대로 — 3인칭이면 뒤로 뺀 카메라) */
+  const note = animalPhoto(ctx.camera);
   const src = canvas(), w = src.width, h = src.height, cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
   g.drawImage(src, 0, 0);
   if (third) endView(ctx.camera);
@@ -795,21 +798,22 @@ function takePhoto() {
   g.fillStyle = 'rgba(255,255,255,.92)'; g.font = `400 ${Math.round(27 * s)}px "Noto Serif KR", serif`; try { g.letterSpacing = '0.06em'; } catch (_) {} g.fillText(`${BG[state.bg].name} — ${label}`, x0, h - 44 * s);
   const name = `quiet-camp-${state.bg}-${label.replace(':', '')}.png`;
   setTimeout(() => hud.classList.remove('photo'), 180);
-  cv.toBlob(blob => { savePhoto(blob, name).finally(() => { shooting = false; }); }, 'image/png');
+  cv.toBlob(blob => { savePhoto(blob, name, note).finally(() => { shooting = false; }); }, 'image/png');
 }
-async function savePhoto(blob, name) {
+async function savePhoto(blob, name, note) {
+  const say = m => showToast(note ? `${m}. ${note}` : m);
   if (!blob) { showToast('사진을 저장하지 못했다'); return; }
   if (isTouch && navigator.canShare) {
     const file = new File([blob], name, { type: 'image/png' });
     if (navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'Quiet Camp' }); showToast('사진을 공유했다'); return; }
-      catch (e) { if (e && e.name === 'AbortError') { showToast('사진 공유를 취소했다'); return; } }
+      try { await navigator.share({ files: [file], title: 'Quiet Camp' }); say('사진을 공유했다'); return; }
+      catch (e) { if (e && e.name === 'AbortError') { say('사진 공유를 취소했다'); return; } }
     }
   }
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
-  showToast('사진을 저장했다');
+  say('사진을 저장했다');
 }
 export function renderMenu() {
   const bl = $('#bgList'); bl.innerHTML = '';
@@ -860,7 +864,7 @@ function startSeat() {
 function resetSceneForStart() {
   const W = ctx.W, tm = W.tm;
   W.fireLit = tm.stars > 0.1; W.lanternLit = tm.lantern > 0.5; W.tentLampLit = tm.tentLamp > 0.5;
-  clearPlanted(); resetChop(); resetFish(); clearSnowman(); resetBeach(); resetDream(); hideAllFx(); W.splitCount = 0; W.trunkT = 0;
+  clearPlanted(); resetChop(); resetFish(); clearSnowman(); resetBeach(); resetDream(); resetAnimals(); hideAllFx(); W.splitCount = 0; W.trunkT = 0;
 }
 let rebuildT = null;
 export function previewRebuild() { const f = $('#fade'); f.style.opacity = 1; clearTimeout(rebuildT); rebuildT = setTimeout(() => buildWithLoading(() => { f.style.opacity = 0; if (!ctx.running) menuAmbience(state.bg); }), 420); }
@@ -908,7 +912,7 @@ export function startGame(fromHost) {
 export function exitGame() {
   startGen++; starting = false;
   hidePause(); ctx.running = false; if (document.pointerLockElement) document.exitPointerLock();
-  endSleepUI(); sleep.wait = false; sleep.bed = 'bed'; resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); hideAllFx();
+  endSleepUI(); sleep.wait = false; sleep.bed = 'bed'; resetDream(); state.mode = 'seated'; state.seat = 'car'; stashed = null; putBack(); clearPlanted(); resetChop(); resetFish(); clearSnowman(); resetAnimals(); hideAllFx();
   $('#hud').classList.remove('on'); $('#trunk').classList.remove('on'); hideJournal(); hideMemo(); guideReady = false; guide(null); pokerReset(true);
   $('#fade').style.opacity = 0;
   stopAmbience(); setIndoor(false); setVolume(settings.vol); menuAmbience(state.bg); ctx.hand.visible = false; hideJoy();

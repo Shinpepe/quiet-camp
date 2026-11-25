@@ -19,6 +19,7 @@ import { updateView, beginView, endView, viewThird } from './view.js';
 import { camp } from './camp.js';
 /* 홀덤 규칙 엔진 — 지금은 콘솔 시험용 (pokerTest()). H3 부터 방장이 판을 돌리는 데 쓴다 */
 import './pokerEngine.js';
+import { updateAnimals } from './animals.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 const canvas = $('#c');
@@ -222,6 +223,7 @@ function loop(now) {
   updateFlocks(dt, T);
   updateMeteors(dt);
   updateLighthouse(T);
+  updateAnimals(ctx.running && (!ctx.paused || session.mode !== 'solo') ? dt : 0);
   if (!ctx.paused) updateChop(dt);
   /* 눈사람: 메뉴에서는 dt 0. 1인은 멈춘 동안에도 0 (굴리는 소리도 잦아든다), 멀티는 세계가 멈추지 않는다 */
   updateSnowman(ctx.running && (!ctx.paused || session.mode !== 'solo') ? dt : 0);

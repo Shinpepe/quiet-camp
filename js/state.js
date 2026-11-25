@@ -1,4 +1,4 @@
-import { BG, TIME, GEAR, GEAR_DEFAULT } from './data.js';
+import { BG, TIME, GEAR, GEAR_DEFAULT, ANIMALS } from './data.js';
 
 const fine = matchMedia('(pointer:fine)').matches;
 export const ctx = { renderer: null, camera: null, hand: null, rod: null, post: null, pmrem: null, scene: null, W: {}, running: false, paused: false };
@@ -56,7 +56,7 @@ export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: nul
 /* poker: 홀덤 기록 — hands 함께한 판 / wins 이긴 판(팟을 하나라도 가져간 판) / best 한 판에 가져간 가장 많은 칩
    / broke 빈털터리가 된 횟수 / earned 장작으로 번 칩 / help 이미 본 홀덤 설명 소식 (poker.js NEWS 의 이름) */
 export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0, dreamTeamBest: 0,
-  poker: { hands: 0, wins: 0, best: 0, broke: 0, earned: 0, help: [] } };
+  poker: { hands: 0, wins: 0, best: 0, broke: 0, earned: 0, help: [] }, animals: {} };
 if (saved.records && typeof saved.records === 'object') {
   const f = saved.records.fish, okSize = v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 500;
   const okClock = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1;
@@ -82,6 +82,14 @@ if (saved.records && typeof saved.records === 'object') {
   if (pk && typeof pk === 'object') {
     ['hands', 'wins', 'best', 'broke', 'earned'].forEach(k => { if (okInt(pk[k])) records.poker[k] = Math.floor(pk[k]); });
     if (Array.isArray(pk.help)) records.poker.help = [...new Set(pk.help.filter(k => typeof k === 'string' && k.length > 0 && k.length < 20))].slice(0, 20);
+  }
+  /* 동물 사진: 아는 종만, 사진 수는 1 이상 정수 */
+  const sa = saved.records.animals;
+  if (sa && typeof sa === 'object') for (const k in sa) {
+    const v = sa[k]; if (!Object.hasOwn(ANIMALS, k) || !v || typeof v !== 'object') continue;
+    const n = okInt(v.n) && v.n >= 1 ? Math.min(99999, Math.floor(v.n)) : 1;
+    const first = v.first && typeof v.first === 'object' && BG[v.first.bg] && okClock(v.first.clock) ? { bg: v.first.bg, clock: v.first.clock } : null;
+    records.animals[k] = { n, first };
   }
 }
 

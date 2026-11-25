@@ -18,6 +18,7 @@ import { prepareRoad, makeRoad } from './road.js';
 import { buildDream, dreamOn } from './dream.js';
 import { attachAvatar } from './avatar.js';
 import { campForBuild, seatKind } from './camp.js';
+import { buildAnimals } from './animals.js';
 
 const FINE = matchMedia('(pointer:fine)').matches;
 
@@ -364,6 +365,8 @@ export function buildScene(bgKey) {
   if (cfg.snow) makeSnowCaps();
   /* 눈사람 만들기: 설산이면 재질·자국·견본을 만들고, 다른 장소면 이전 상태만 비운다 (텐트 다음 — 목도리를 W.tentMats 에 넣는다) */
   buildSnowman(cfg);
+  /* 동물: 식생·유목·부두가 W.trees 에 들어간 뒤에 (다람쥐가 오갈 나무 줄기를 모으고, 이 장소 동물을 미리 만들어 둔다) */
+  buildAnimals(cfg);
   contactShadow(T.x, T.z + 0.1, T.w + 2.0, T.l + 2.2); L.chairs.forEach(([x, z]) => contactShadow(x, z, 1.3, 1.3, 0.7));
   contactShadow(L.table[0], L.table[1], 1.0, 1.0, 0.6); contactShadow(0, 8.05, 3.4, 6.4); contactShadow(L.fire[0], L.fire[1], 2.0, 2.0, 0.6);
   contactShadow(L.cooler[0], L.cooler[1], 1.0, 0.9, 0.6); contactShadow(L.pack[0], L.pack[1], 0.8, 0.8, 0.5);

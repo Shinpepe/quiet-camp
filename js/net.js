@@ -6,7 +6,8 @@ import { applyGear } from './props.js';
 import { sfxAt } from './audio.js';
 import { parasolOpen, setParasol } from './beach.js';
 import { rollState, remoteRoll, snowRemote, snowList, snowLoad } from './snowman.js';
-import { seatKind, seatsOf } from './camp.js';
+import { seatKind, seatsOf, seatOf } from './camp.js';
+import { animalRecv, animalPack, animalHooks } from './animals.js';
 /* 아래 모듈들도 이 파일을 불러오지만, 서로 실행 중에만 부르므로 순환해도 괜찮다 */
 import { startGame, exitGame, toLobby, updateHUD, previewRebuild, renderMenu, showToast, spawnPlanted, surfaceAt, refreshGo, startNap, sleepWaiting } from './game.js';
 import { showHome } from './home.js';
@@ -32,7 +33,7 @@ import { pokerRecv, pokerUpdate, pokerPeerLeft, pokerSeatNo, pokerTagLine, poker
    방장 신호가 4초 끊기면 친구 화면에 "방장이 잠시 자리를 비웠다". 방장 연결이 끊기면 친구는 홈으로.
    1인 캠핑에서는 이 파일의 연결 코드가 돌지 않는다 (Trystero 도 멀티를 고를 때 처음 불러온다) */
 
-const APP = 'quiet-camp-v1', V = 11, MAX = 4;
+const APP = 'quiet-camp-v1', V = 12, MAX = 4;
 /* GUN_WAIT: 꿈속에서 첫 사람이 총을 든 뒤 나머지를 기다리는 최대 시간 (ms) */
 const HZ = 12, DELAY = 120, STALE = 3000, AWAY = 4000, FIND = 15000, GUN_WAIT = 30000;
 /* 함께 쓰는 물건: 읽기·쓰기, 소리를 낼 자리(W.interact 의 id)와 켤 때·끌 때 소리. now = 움직임 없이 바로 맞추기 (중간에 들어올 때) */
@@ -49,7 +50,7 @@ const N = { room: null, act: null, gen: 0, self: null, hostId: null, hostName: '
   /* 친구 쪽: hostLive = 방장이 캠핑장으로 떠나 있는지, entering = 떠나기를 눌러 방장의 답을 기다리는 중 */
   hostLive: false, entering: false,
   /* 같이 잠들기: napT = 방장 쪽, 모두 누운 채 지난 시간 / zzKey = 마지막으로 띄운 "(2/4)" / gunT = 방장 쪽, 꿈속에서 첫 사람이 총을 든 시각 */
-  napT: 0, zzKey: '', gunT: 0 };
+  napT: 0, zzKey: '', gunT: 0, animalT: 0 };
 
 const nm = s => (typeof s === 'string' ? s.trim().slice(0, 12) : '') || '캠퍼';
 const fin = v => typeof v === 'number' && Number.isFinite(v);
@@ -96,7 +97,7 @@ async function open(code) {
   N.room = room; N.self = lib.selfId;
   const mk = name => { const [send, get] = room.makeAction(name); return { send, get }; };
   const A = N.act = { hello: mk('hello'), welcome: mk('welcome'), nope: mk('nope'), profile: mk('profile'), start: mk('start'),
-    room: mk('room'), lobby: mk('lobby'), world: mk('world'), snap: mk('snap'), meteor: mk('meteor'), flags: mk('flags'), ask: mk('ask'), fx: mk('fx'), nap: mk('nap'), dream: mk('dream'), poker: mk('poker') };
+    room: mk('room'), lobby: mk('lobby'), world: mk('world'), snap: mk('snap'), meteor: mk('meteor'), flags: mk('flags'), ask: mk('ask'), fx: mk('fx'), nap: mk('nap'), dream: mk('dream'), poker: mk('poker'), animal: mk('animal') };
   room.onPeerJoin(id => { A.profile.send(profile(), id); if (isGuest()) A.hello.send({ v: V, name: nm(state.name) }, id); });
   room.onPeerLeave(id => peerLeft(id));
   A.profile.get((d, id) => { const p = peer(id); p.name = nm(d && d.name); if (isHost()) roomNote(); });
@@ -110,6 +111,9 @@ async function open(code) {
     else if (id === N.hostId) { N.lastHost = performance.now(); pokerRecv(d, id); }
   });
   wireDream();
+  /* 동물 (animals.js): 친구는 방장이 보낸 것만 받는다. 방장은 다른 사람 자리를 읽어 동물을 놀라게 한다 */
+  A.animal.get((d, id) => { if (!isHost() && id === N.hostId) { N.lastHost = performance.now(); animalRecv(d); } });
+  animalHooks.peers = peerSpots;
   if (isHost()) hostWire(A); else guestWire(A);
   roomNote();
 }
@@ -360,6 +364,17 @@ function campers(now) {
   }
   return out;
 }
+/* 동물이 보는 다른 사람: 같은 장소에서 캠핑 중인 사람의 자리(앉아 있으면 그 자리), 가만히 있는지, 장작을 패는지 */
+function peerSpots() {
+  const out = [];
+  for (const p of N.peers.values()) {
+    const b = p.buf, s = b[b.length - 1];
+    if (!s || s.run !== 1 || s.bg !== state.bg || (isHost() && !p.ok)) continue;
+    const q = b[b.length - 3] || s, sp = SEATED(s.m) ? seatOf(s.st) : null, at = sp && Array.isArray(sp.pos) ? sp.pos : null;
+    out.push({ x: at ? at[0] : s.x, z: at ? at[2] : s.z, still: (s.m !== 'walk' && s.m !== 'chop') || Math.hypot(s.x - q.x, s.z - q.z) < 0.08, loud: s.m === 'chop' });
+  }
+  return out;
+}
 /* 안내 줄 "(2/4)": 자리 비움이 아닌 사람 중 누워 기다리는 사람 수 / 자리 비움이 아닌 사람 수 */
 export function netSleepCount() {
   const on = campers(performance.now()).filter(o => !o.away);
@@ -417,6 +432,7 @@ export function updateNet(dt) {
   N.sendT += dt;
   if (N.sendT >= (ctx.running ? 1 / HZ : 1)) { N.sendT = 0; A.snap.send(pack()); }
   if (isHost()) { N.worldT += dt; if (N.worldT >= 1) { N.worldT = 0; A.world.send(clockInfo()); } }
+  if (isHost()) { N.animalT += dt; if (N.animalT >= 0.2) { N.animalT = 0; const pk = animalPack(); if (pk) A.animal.send(pk); } }
   if (isGuest() && N.hostId) { const away = now - N.lastHost > AWAY; if (away !== N.away) { N.away = away; if (ctx.running) updateHUD(); } }
   if (isHost()) { hostNap(dt); hostGuns(now); }
   /* 누워 기다리는 중·꿈속에서 총을 들고 기다리는 중이면 숫자(2/4)가 바뀔 때 안내 줄을 새로 쓴다 */
@@ -439,7 +455,7 @@ export function netLeave() {
   N.room = null; N.act = null; N.self = null; N.hostId = null; N.hostName = ''; N.slot = 0; N.phase = 'off'; N.err = ''; N.away = false; N.live = false; N.shared = null; N.snow = null;
   N.hostLive = false; N.entering = false; N.napT = 0; N.zzKey = ''; N.gunT = 0;
   N.peers.forEach(p => { if (p.av) removeRemote(p.av); remoteRoll(p.id, null); chopRemote(p.id, null, 0); fishRemote(p.id, null); }); N.peers.clear();
-  meteorHooks.send = null; session.gear = null;
+  meteorHooks.send = null; animalHooks.peers = null; session.gear = null;
   if (N.stash) { const s = N.stash; N.stash = null; state.bg = s.bg; state.time = s.time; state.clock = s.clock; }
   pokerReset();
   applyGear();

@@ -63,6 +63,23 @@ export const ITEMS = {
   gun:      { name: '총', ic: ICON.gun, act: '쏘기', hold: false, ds: '꿈속에서만 보이는 총', trunk: false },
 };
 
+/* 동물 (animals.js) — 바라보기만. 다가가면 달아나고, 멀리서 사진(P)을 찍으면 기록된다
+   bg: 나오는 장소 · hours: 나오는 시각 [[시작, 끝], …](시. 24 를 넘으면 다음 날 새벽까지) · max: 한꺼번에 몇 마리(오리는 한 가족)
+   every: 나올지 살피는 간격 [최소, 최대](초) · alert: 이 거리 안에 사람이 오면 멈춰 바라본다 · flee: 이 거리 안이면 달아난다 (m)
+   photo: 사진 판정 반지름(m) — 화면 높이 대비 ANIMAL.minShot 이상으로 잡혀야 기록된다 */
+export const ANIMALS = {
+  duck:     { name: '흰뺨검둥오리 가족', bg: 'lake',  hours: [[6, 18]],           max: 1, every: [50, 120],  alert: 13,  flee: 8,   photo: 0.35 },
+  squirrel: { name: '다람쥐',           bg: 'lake',  hours: [[7, 18]],           max: 2, every: [25, 70],   alert: 7,   flee: 4,   photo: 0.16 },
+  hare:     { name: '산토끼',           bg: 'snow',  hours: [[5, 10], [16, 22]], max: 2, every: [35, 90],   alert: 14,  flee: 9,   photo: 0.2 },
+  fox:      { name: '여우',             bg: 'snow',  hours: [[5, 10], [16, 24]], max: 1, every: [70, 160],  alert: 18,  flee: 12,  photo: 0.35 },
+  crab:     { name: '달랑게',           bg: 'beach', hours: [[0, 24]],           max: 3, every: [20, 50],   alert: 4.5, flee: 2.5, photo: 0.09 },
+  turtle:   { name: '바다거북',         bg: 'beach', hours: [[19, 29]],          max: 1, every: [120, 260], alert: 7,   flee: 4,   photo: 0.5 },
+};
+/* calm: 가만히 있는 사람과의 거리를 이만큼만 친다 · calmAfter: 모두 이만큼(초) 가만히 있으면 동물이 다가온다
+   spawnMin: 사람에게서 이만큼 떨어져 나타난다 · gone: 모두에게서 이만큼 멀어지면 사라진다 · minShot: 사진에 잡혀야 하는 크기
+   ik: 카메라에서 이 거리(m) 안의 동물만 지형 맞춤·다리 IK 를 돌린다 */
+export const ANIMAL = { calm: 0.55, calmAfter: 15, spawnMin: 20, gone: 32, minShot: 0.02, ik: 35 };
+
 /* 캠핑 메모에 적힌 할 일. 1인은 조수석 담요 위, 멀티는 운전석·조수석 사이 가운데 팔걸이 위의 줄노트
    key: 읽음 기록(state.js 의 records.memoRead)에 남는 이름표 — 한 번 정하면 바꾸지 않는다
    only: 이 장소에서만 메모에 적힌다 (없으면 모든 장소)
@@ -73,6 +90,7 @@ export const MEMO = [
   { key: 'fire',  text: '모닥불 피우기' },
   { key: 'marsh', text: '아이스박스에서 마시멜로 꺼내 구워 먹기' },
   { key: 'chair', text: '의자에 앉아 한숨 돌리기' },
+  { key: 'animal', text: '멀리서 야생 동물들 사진 찍기' },
   { key: 'fish',  text: '부두 끝에서 낚시하기', only: ['lake'] },
   { key: 'snowman', text: '눈덩이를 굴려 눈사람 만들기', only: ['snow'] },
   { key: 'stars', text: '바닷가 돗자리에 누워 별 보기', only: ['beach'] },

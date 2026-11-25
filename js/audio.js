@@ -969,6 +969,18 @@ export function sfx(type, arg) {
       for (let i = 0; i < 6; i++) burst(P, false, 'bandpass', rnd(2500, 5000), 2, 0.002, 0.03 * k, 0.04, t0 + 0.15 + Math.random() * 0.7);
       return;
     }
+    /* 동물 (animals.js): 오리 꽥(arg = 몇 번) · 작은 발이 모래·낙엽을 긁는 소리(arg = 크기) */
+    case 'quack': {
+      const n = Math.max(1, Math.min(4, arg || 1));
+      for (let i = 0; i < n; i++) {
+        const tt = t + i * rnd(0.17, 0.24), o = osc('sawtooth', 330 * pv), f1 = filt('bandpass', 950, 4), f2 = filt('bandpass', 2300, 6), g = gainN(0), g2 = gainN(0.45);
+        o.frequency.setValueAtTime(340 * pv, tt); o.frequency.exponentialRampToValueAtTime(255 * pv, tt + 0.13);
+        env(g, tt, 0.012, 0.03, 0.12); o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g2); g2.connect(g); g.connect(B);
+        o.start(tt); o.stop(tt + 0.17);
+      }
+      return;
+    }
+    case 'scurry': for (let i = 0; i < 9; i++) burst(B, false, 'bandpass', rnd(2600, 5200), 2, 0.001, 0.014 * (arg || 1), 0.016, t + Math.random() * 0.35); return;
     /* 홀덤: 칩 딸깍(arg = 몇 번) · 칩 밀기 · 칩 만지작 · 카드 미끄러짐·뒤집기 · 덱 섞기 (테이블 자리에서 나도록 poker.js 가 sfxAt 으로 부른다)
        내 차례 두 음 · 마지막 5초 똑딱 (UI 버스 — 나에게만, 공간 잔향 없이) */
     case 'chip': { const n = Math.max(1, Math.min(5, arg || 1)); for (let i = 0; i < n; i++) playBank('chip', B, FOLEY_GAIN.chip * rnd(0.6, 1), rnd(0.92, 1.1), t + i * rnd(0.03, 0.06)); return; }
