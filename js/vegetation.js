@@ -484,6 +484,7 @@ export function makeVegetation(cfg) {
   leafs.forEach((t, i) => { t.shape = i % 3; });
   const pinesK = thin(pines, 101, true), leafsK = thin(leafs, 102, true), bushesK = thin(bushes, 103, true);
   for (const t of [...pinesK, ...leafsK, ...bushesK]) W.trees.push([t.x, t.z, t.cr]);
+  for (const t of [...pinesK, ...leafsK]) W.trunks.push([t.x, t.z, t.cr]);   // 덤불은 빼고 나무만
 
   const treeColor = cfg.key === 'snow' ? 0x2f4f46 : 0x2b5a2b, fol = () => tex('foliage', 1, 1, 0.3);
   /* 소나무: 방위 8조각 × 60m 안팎. 60m 안쪽은 16칸, 바깥은 10칸 모양. 치마 아래가 뚫려 있어 양면으로 그린다 */
@@ -515,7 +516,7 @@ export function makeVegetation(cfg) {
     const x = (rand() < 0.5 ? -1 : 1) * rnd(5, 42), z = rnd(-2, 34);
     if (reserved(x, z) || !S.fits(x, z, 0.6)) continue;
     S.add(x, z, 0.6, 0.3);
-    const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); n++;
+    const p = makePalm(); p.position.set(x, terrainH(x, z, cfg) - 0.1, z); scene.add(p); W.trees.push([x, z, 0.35]); W.trunks.push([x, z, 0.35]); n++;
   }
 
   /* 낙엽: 활엽수 밑에만 (눈 제외). 땅에 납작하게 깔려 겹쳐도 자연스러우므로 자리 검사를 하지 않는다. 길 위에는 깔지 않는다.

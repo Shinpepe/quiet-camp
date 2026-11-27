@@ -124,3 +124,9 @@ export function showJournal() {
   sel = -1; render(); e.classList.add('on');
 }
 export function hideJournal() { if (el) el.classList.remove('on'); }
+/* 그림을 미리 만들어 둔다 — 부두가 있는 씬을 다 만든 뒤 한가할 때 (처음 열 때 멈칫하지 않게) */
+export function prewarmJournal() {
+  if (thumbs) return;
+  const run = () => { if (!thumbs) thumbs = makeThumbs(); };
+  if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 5000 }); else setTimeout(run, 2000);
+}

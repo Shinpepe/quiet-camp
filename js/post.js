@@ -59,45 +59,52 @@ export function createPost(renderer, camera) {
   composer.setSize(innerWidth, innerHeight);
   const dummy = new THREE.Scene();
   const renderPass = new RenderPass(dummy, camera);
-  const gtao = new GTAOPass(dummy, camera, innerWidth, innerHeight);
-  gtao.output = GTAOPass.OUTPUT.Default;
-  gtao.updateGtaoMaterial({ radius: 0.4, distanceExponent: 1, thickness: 1, scale: 1.2, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
-  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 9, radiusExponent: 1, rings: 4, samples: 16 });
-  gtao.blendIntensity = 0.6; gtao.enabled = settings.ao;
-  if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
-  if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
-  /* GTAO 합성에 깊이 비교를 넣는다 (BLEND_FS 설명 참고).
-     three r169 GTAOPass 의 내부 이름(blendMaterial · depthTexture)에 기대므로, three 를 올리면 여기를 다시 확인한다 */
-  if (gtao.blendMaterial) {
-    const bm = gtao.blendMaterial;
-    Object.assign(bm.uniforms, {
-      tSceneDepth: { value: null }, tAODepth: { value: null },
-      cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
-    });
-    bm.fragmentShader = BLEND_FS; bm.needsUpdate = true;
-    /* 이번 프레임의 화면 깊이 = GTAO 가 받는 readBuffer(RenderPass 가 장면을 그린 버퍼)의 깊이 */
-    const render = gtao.render.bind(gtao);
-    gtao.render = (r, wb, rb, dt, mask) => {
-      bm.uniforms.tSceneDepth.value = rb.depthTexture; bm.uniforms.tAODepth.value = gtao.depthTexture;
-      bm.uniforms.cameraNear.value = camera.near; bm.uniforms.cameraFar.value = camera.far;
-      render(r, wb, rb, dt, mask);
-    };
+  /* GTAO 는 처음 켤 때 만든다 (모바일 기본값은 꺼짐 — 전체 해상도 타깃 여러 장을 아낀다) */
+  let ao = null, curScene = dummy;
+  function makeGtao() {
+    const gtao = new GTAOPass(curScene, camera, innerWidth, innerHeight);
+    gtao.output = GTAOPass.OUTPUT.Default;
+    gtao.updateGtaoMaterial({ radius: 0.4, distanceExponent: 1, thickness: 1, scale: 1.2, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
+    gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 9, radiusExponent: 1, rings: 4, samples: 16 });
+    gtao.blendIntensity = 0.6;
+    if (gtao.normalMaterial) gtao.normalMaterial.side = THREE.DoubleSide;
+    if (gtao.overrideVisibility) { const ov = gtao.overrideVisibility.bind(gtao); gtao.overrideVisibility = function () { ov(); this.scene.traverse(o => { if (o.isSprite || o.userData.noAO) o.visible = false; }); }; }
+    if (gtao.blendMaterial) {
+      const bm = gtao.blendMaterial;
+      Object.assign(bm.uniforms, { tSceneDepth: { value: null }, tAODepth: { value: null }, cameraNear: { value: camera.near }, cameraFar: { value: camera.far } });
+      bm.fragmentShader = BLEND_FS; bm.needsUpdate = true;
+      const render = gtao.render.bind(gtao);
+      gtao.render = (r, wb, rb, dt, mask) => {
+        bm.uniforms.tSceneDepth.value = rb.depthTexture; bm.uniforms.tAODepth.value = gtao.depthTexture;
+        bm.uniforms.cameraNear.value = camera.near; bm.uniforms.cameraFar.value = camera.far;
+        render(r, wb, rb, dt, mask);
+      };
+    }
+    composer.insertPass(gtao, 1);   // RenderPass 바로 뒤. insertPass 가 크기도 맞춘다
+    return gtao;
   }
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.4, 1.25);
   const output = new OutputPass();
+  /* SMAA 는 PC 에서만 → 모바일에서는 만들지 않는다 */
   const pr = renderer.getPixelRatio();
-  const smaa = new SMAAPass(innerWidth * pr, innerHeight * pr); smaa.enabled = FINE;
+  const smaa = FINE ? new SMAAPass(innerWidth * pr, innerHeight * pr) : null;
   const grade = new ShaderPass(GradeShader);
-  composer.addPass(renderPass); composer.addPass(gtao); composer.addPass(bloom); composer.addPass(output); composer.addPass(smaa); composer.addPass(grade);
+  composer.addPass(renderPass); composer.addPass(bloom); composer.addPass(output);
+  if (smaa) composer.addPass(smaa);
+  composer.addPass(grade);
+  /* GTAO 는 켜져 있을 때만 지금 만든다 (RenderPass 바로 뒤에 끼워 넣는다) */
+  if (settings.ao) ao = makeGtao();
   return {
-    composer, bloom, gtao, smaa,
-    setScene(scene) { renderPass.scene = scene; gtao.scene = scene; },
+    composer, bloom, smaa,
+    get gtao() { return ao; },
+    setScene(scene) { renderPass.scene = scene; curScene = scene; if (ao) ao.scene = scene; },
     setTime(tm) {
       const g = tm.grade, mul = ctx.W.cfg ? (ctx.W.cfg.bloomMul || 1) : 1;
       grade.uniforms.tint.value.set(...g.tint); grade.uniforms.sat.value = g.sat + AGX_SAT; grade.uniforms.con.value = g.con + AGX_CON; bloom.strength = g.bloom * mul;
       hueTint(grade.uniforms.sTint.value, tm.top, 0.16); hueTint(grade.uniforms.hTint.value, tm.sunColor, 0.2);
     },
-    setBloom(on) { bloom.enabled = on; }, setAO(on) { gtao.enabled = on; },
+    setBloom(on) { bloom.enabled = on; },
+    setAO(on) { if (on && !ao) ao = makeGtao(); if (ao) ao.enabled = on; },
     resize(w, h) { composer.setSize(w, h); },
     update(T) { grade.uniforms.uTime.value = T; },
     render() { composer.render(); },

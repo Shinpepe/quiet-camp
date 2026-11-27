@@ -447,7 +447,11 @@ export function updateNet(dt) {
 /* ── game.js·home.js·main.js 가 부르는 것 ── */
 /* 홈에서 초대하기·놀러가기를 고를 때. 친구는 내 장소·시각을 맡겨 두었다가 나갈 때 돌려받는다 */
 export function netHost() { netLeave(); N.phase = 'host'; open(session.code); }
-export function netJoin() { netLeave(); N.stash = { bg: state.bg, time: state.time, clock: state.clock }; N.phase = 'find'; open(session.code); }
+export function netJoin() {
+  netLeave(); N.stash = { bg: state.bg, time: state.time, clock: state.clock };
+  session.home = N.stash;   // 저장할 때 내 원래 장소를 쓰게
+  N.phase = 'find'; open(session.code);
+}
 /* 방을 나간다 (홈으로 돌아갈 때 showHome 이 부른다) */
 export function netLeave() {
   N.gen++; clearTimeout(N.findT); clearTimeout(N.profT);
@@ -457,6 +461,7 @@ export function netLeave() {
   N.peers.forEach(p => { if (p.av) removeRemote(p.av); remoteRoll(p.id, null); chopRemote(p.id, null, 0); fishRemote(p.id, null); }); N.peers.clear();
   meteorHooks.send = null; animalHooks.peers = null; session.gear = null;
   if (N.stash) { const s = N.stash; N.stash = null; state.bg = s.bg; state.time = s.time; state.clock = s.clock; }
+  session.home = null;
   pokerReset();
   applyGear();
 }

@@ -43,6 +43,8 @@ function disposeScene() {
     if (persists(o)) return;
     /* 라이트의 그림자맵과 InstancedMesh 의 인스턴스 버퍼는 dispose 를 불러야 GPU 에서 풀린다 */
     if ((o.isLight || o.isInstancedMesh) && o.dispose) o.dispose();
+    /* 동물 피부(SkinnedMesh)의 뼈 텍스처 */
+    if (o.isSkinnedMesh && o.skeleton) o.skeleton.dispose();
     /* userData.shared: 여러 씬에 걸쳐 재사용하는 자원(새 지오메트리·재질)은 정리하지 않는다 */
     if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
     if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
@@ -79,15 +81,19 @@ export function compileReflection() {
 
 /* ── 사전 컴파일: 로딩 화면 뒤에서 셰이더를 미리 만든다 ──
    숨겨진 것(불꽃·유성·오로라·장작 패기 도구·꿈의 운석 등)도 잠깐 보이게 해야 컴파일 대상에 들어간다.
-   손에 드는 아이템(꿈의 총 포함)은 임시로 한 벌 만들어 프로그램을 캐시에 올린다 — 재질을 dispose 하면 프로그램도 풀리므로 지오메트리만 정리한다.
+   손에 드는 아이템(꿈의 총 포함)은 견본 한 벌(warmItems)을 처음에 만들어 두고 빌드마다 다시 써서 프로그램을 캐시에 올린다.
    ctx.compiling 동안 메인 루프는 그리지 않고, 컴파일이 겹치면 마지막 것이 끝날 때만 푼다 */
-let compileGen = 0;
+let compileGen = 0, warmItems = null;
 export function precompileScene() {
   const scene = ctx.scene, r = ctx.renderer; if (!scene) return Promise.resolve();
   const gen = ++compileGen;
   ctx.compiling = true;
-  const temp = new THREE.Group();
-  Object.keys(ITEMS).forEach(k => { const it = makeItem(k); if (it.userData.setLit) it.userData.setLit(true); temp.add(it); });
+  /* 손에 드는 아이템 견본: 처음 한 번만 만든다. persist 라 씬 정리에서도 빠진다 */
+  if (!warmItems) {
+    warmItems = new THREE.Group(); warmItems.userData.persist = true;
+    Object.keys(ITEMS).forEach(k => { const it = makeItem(k); if (it.userData.setLit) it.userData.setLit(true); warmItems.add(it); });
+  }
+  const temp = warmItems;
   scene.add(temp);
   const shown = []; scene.traverse(o => { if (!o.visible) { o.visible = true; shown.push(o); } });
   const run = async () => {
@@ -96,7 +102,7 @@ export function precompileScene() {
   };
   return run().catch(e => console.warn('precompile skipped', e)).finally(() => {
     shown.forEach(o => { o.visible = false; });
-    scene.remove(temp); temp.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    scene.remove(temp);   // 지오메트리는 해제하지 않고 다음 빌드에 다시 쓴다
     if (gen === compileGen) ctx.compiling = false;
   });
 }
@@ -209,7 +215,7 @@ export function applyTime() {
   ctx.scene.fog.color.copy(cur.fog); ctx.renderer.toneMappingExposure = cur.exposure; ctx.scene.environmentIntensity = cur.ibl;
   /* 대기 안개: 밀도 = 시간대의 fogDen × 장소의 haze. 물 셰이더도 같은 FOG 배열을 읽는다 */
   FOG[0] = L.x; FOG[1] = L.y; FOG[2] = L.z; FOG[3] = cur.insc * fade;
-  FOG[4] = cur.fogDen * (W.cfg.haze || 1); FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
+  FOG[4] = cur.fogDen * (W.cfg.haze || 1) * 0.8; FOG[5] = 1 / cur.fogH; FOG[6] = -3; FOG[7] = 0;
   _fc.copy(cur.disc).multiplyScalar(up ? 1.0 : 0.45); FOG[8] = _fc.r; FOG[9] = _fc.g; FOG[10] = _fc.b; FOG[11] = 0;
   ctx.camera.matrixWorldInverse.copy(ctx.camera.matrixWorld).invert();
   W.uSunV.value.copy(L).transformDirection(ctx.camera.matrixWorldInverse);
@@ -279,7 +285,7 @@ export function buildScene(bgKey) {
      wind: 바람 0..1 (main.js 가 계산하고 셰이더·오디오가 읽는다)
      fireBase·firePop·fireBurst: 모닥불 기본 밝기·오디오 파칙의 순간 밝기·큰 파칙의 불티
      trunkT: 트렁크 뚜껑을 잠깐 여는 남은 시간 (꿈속에서 총을 꺼낼 때) */
-  const W = ctx.W = { cfg, tm: cur, trees: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
+  const W = ctx.W = { cfg, tm: cur, trees: [], trunks: [], flocks: [], birdT: 5, uTime: { value: 0 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uLeafCol: { value: new THREE.Color(0, 0, 0) }, interact: [], fireLit: cur.stars > 0.1, lanternLit: cur.lantern > 0.5, tentLampLit: cur.tentLamp > 0.5, platforms: [], envT: 0, envScene: null, envRT: null, wasNight: null, sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), sunUp: true, meteors: [], meteorT: rnd(4, 12), heightTex: null, shoreTex: null, groundMat: null, shT: 0, aurora: null, prints: null, lighthouse: null, planted: [], sparkLights: [], noRefl: [], tentCloth: null, tentGlow: 0,
     dome: null, domeLit: false, domeK: 0,
     wind: { value: 0.4 },
     fireBase: 0, firePop: 0, fireBurst: false, trunkT: 0,

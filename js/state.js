@@ -37,7 +37,8 @@ const pickGear = (k, def) => GEAR.some(g => g.key === k) ? k : def;
 /* 지금 캠핑 방식 (저장하지 않는다): solo = 1인 캠핑, host = 캠핑장을 연 방장, guest = 놀러 간 친구. code = 초대 코드
    seed = 월드 시드. 방장은 초대할 때 정하고 친구는 연결되면 받는다(net.js). null 이면 빌드마다 새로 (1인)
    gear = 친구가 쓰는 방장의 차·텐트 색 { car, tent } (내 저장값은 그대로 둔다). null 이면 내 색 */
-export const session = { mode: 'solo', code: null, seed: null, gear: null };
+/* home = 친구로 놀러 간 동안 맡겨 둔 내 원래 장소·시각 { bg, time } (저장할 때 이 값을 쓴다) */
+export const session = { mode: 'solo', code: null, seed: null, gear: null, home: null };
 
 /* clock: 하루를 0..1 로 (0 = 자정, 0.5 = 정오). carColor·tentColor·jacketColor 는 GEAR 의 key. name = 멀티 캠핑 이름표 (12자까지) */
 export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: null, mode: 'seated', seat: 'car',
@@ -55,7 +56,7 @@ export const state = { bg: bg0, time: time0, clock: TIME[time0].clock, item: nul
    dreamTeamBest: 멀티 꿈에서 함께 막아 낸 운석 최고 기록 (1인 기록과 따로) */
 /* poker: 홀덤 기록 — hands 함께한 판 / wins 이긴 판(팟을 하나라도 가져간 판) / best 한 판에 가져간 가장 많은 칩
    / broke 빈털터리가 된 횟수 / earned 장작으로 번 칩 / help 이미 본 홀덤 설명 소식 (poker.js NEWS 의 이름) */
-export const records = { fish: {}, chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0, dreamTeamBest: 0,
+export const records = { fish: Object.create(null), chopBest: 0, memoRead: [], dreams: 0, dreamBest: 0, dreamTeamBest: 0,
   poker: { hands: 0, wins: 0, best: 0, broke: 0, earned: 0, help: [] }, animals: {} };
 if (saved.records && typeof saved.records === 'object') {
   const f = saved.records.fish, okSize = v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 500;
@@ -95,6 +96,15 @@ if (saved.records && typeof saved.records === 'object') {
 
 /* 슬라이더처럼 연달아 바뀌는 값은 300ms 모아서 한 번에 쓴다. 페이지를 닫을 때는 바로 기록 */
 let saveT = null;
-function flush() { clearTimeout(saveT); saveT = null; try { localStorage.setItem(KEY, JSON.stringify({ v: SAVE_V, settings, records, bg: state.bg, time: state.time, carColor: state.carColor, tentColor: state.tentColor, jacketColor: state.jacketColor, name: state.name })); } catch (e) {} }
+function flush() {
+  clearTimeout(saveT); saveT = null;
+  /* 친구로 놀러 간 동안 state.bg·time 은 방장 것이다 → 내 원래 값을 저장한다 */
+  const h = session.home;
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ v: SAVE_V, settings, records,
+      bg: h ? h.bg : state.bg, time: h ? h.time : state.time,
+      carColor: state.carColor, tentColor: state.tentColor, jacketColor: state.jacketColor, name: state.name }));
+  } catch (e) {}
+}
 export function saveSettings() { clearTimeout(saveT); saveT = setTimeout(flush, 300); }
 addEventListener('pagehide', () => { if (saveT) flush(); });

@@ -16,7 +16,7 @@ import { mountItem, updateLocalAvatar } from './avatar.js';
    자리는 종류로 본다 — 멀티의 조수석(car2)·뒷좌석(car3·car4)·텐트 자리(tent2~4)도 1인칭.
    차·텐트를 뚫지 않게 카메라를 당기고, 땅 아래로는 내려가지 않게 띄운다 */
 
-const V = { k: 0, d: 0, shown: false }, BOOM = 2.4, LIFT = 0.3;
+const V = { k: 0, d: 0, shown: false, dt: 1 / 60 }, BOOM = 2.4, LIFT = 0.3;
 const FIRST_SEATS = { car: 1, tent: 1, bed: 1, dock: 1, poker: 1 };
 const _f = new THREE.Vector3(), _h = new THREE.Vector3(), _p = new THREE.Vector3(), _pv = new THREE.Vector3(), _b = new THREE.Vector3(), _sp = new THREE.Vector3(), _sq = new THREE.Quaternion();
 
@@ -42,6 +42,7 @@ export function toggleView() {
 }
 /* 매 프레임 (main.js): 전환 정도, 손에 든 것 옮기기, 내 아바타 자세 */
 export function updateView(dt) {
+  V.dt = dt;
   if (!ctx.running) V.k = 0;
   else V.k = clamp(V.k + (settings.third && allowed() ? dt : -dt) / 0.45, 0, 1);
   V.shown = V.k > 0.25;
@@ -62,7 +63,8 @@ export function beginView(camera) {
   let d = BOOM * e;
   for (let s = 0.3; s <= d; s += 0.1) { _p.copy(_pv).addScaledVector(_b, s); if (camBlocked(_p.x, _p.y, _p.z)) { d = Math.max(0.3, s - 0.2); break; } }
   /* 막히면 바로 당기고, 풀리면 천천히 물러난다 */
-  V.d = d < V.d ? d : V.d + (d - V.d) * 0.08;
+  /* 60fps 에서 예전 0.08 과 같은 빠르기 (1 - e^(-5/60) ≈ 0.08) */
+  V.d = d < V.d ? d : V.d + (d - V.d) * (1 - Math.exp(-V.dt * 5));
   _p.copy(_pv).addScaledVector(_b, V.d); _p.y = Math.max(_p.y, terrainH(_p.x, _p.z, ctx.W.cfg) + 0.25);
   camera.position.copy(_p);
   camera.lookAt(_p.copy(_sp).addScaledVector(_f, 8));

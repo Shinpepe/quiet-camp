@@ -11,7 +11,7 @@ import { clockLabel, paramsAt } from './time.js';
 import { initAudio, resumeAudio, setVolume, startAmbience, stopAmbience, sfx, setIndoor, menuAmbience } from './audio.js';
 import { startChop, chopEye, chopYaw, chopPress, requestChopStop, resetChop, chopHooks, chopStats } from './chop.js';
 import { beginFish, stopFish, resetFish, fishPress, fishActive, fishBusy, fishHint, fishHooks, fishCount } from './fish.js';
-import { showJournal, hideJournal, journalHooks } from './journal.js';
+import { showJournal, hideJournal, journalHooks, prewarmJournal } from './journal.js';
 import { hideAllFx, gaugeHide, toast, guide } from './gauge.js';
 import { showMemo, hideMemo, memoHooks } from './memo.js';
 import { snowRolling, snowSpeed, rollBlocked, snowStartable, startSnowball, rollAct, rollLabel, clearSnowman, snowHooks } from './snowman.js';
@@ -847,7 +847,11 @@ export function buildWithLoading(after) {
     const seed = session.seed !== null ? session.seed : newSeed();
     setSeed(seed); buildScene(state.bg); ctx.W.seed = seed;
     const refl = settings.reflect;
-    precompileScene().then(() => { if (gen !== buildGen) return; doneGen = gen; builtReflect = refl; $('#loading').classList.remove('on'); after && after(); });
+    precompileScene().then(() => {
+      if (gen !== buildGen) return; doneGen = gen; builtReflect = refl; $('#loading').classList.remove('on');
+      if (ctx.W.cfg.dock) prewarmJournal();
+      after && after();
+    });
   }, 40);
 }
 function sceneReady(bg) {

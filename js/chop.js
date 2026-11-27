@@ -231,10 +231,16 @@ export function chopRemote(id, d, dt) {
   if (d.cg && !C.log) newLog();
   if (d.cw !== RC.sw) { RC.sw = d.cw; RC.res = d.cr; RC.hitT = T_RAISE + T_STRIKE; }
   if (RC.hitT >= 0) { RC.hitT -= dt; if (RC.hitT < 0) remoteImpact(RC.res); }
+  /* 상대 장작은 이미 쪼개져 없는데(cg 0) 내 화면에만 남아 있으면 치운다 */
+  if (!d.cg && C.log && C.log.landed && RC.hitT < 0) {
+    C.log = null; R.logG.visible = false; R.crackD.visible = R.crackL.visible = false; RC.hits = 0;
+  }
 }
-/* 다른 사람의 도끼가 장작에 닿았다: 내 impact 와 같은 모양이지만 기록·카메라는 건드리지 않는다 */
+/* 내 화면에서는 아직 날아오는 중이어도, 상대 화면에서는 이미 착지했다 → 바로 내려놓고 판정한다 */
+function landNow(L) { L.landed = true; L.t = 1; R.logG.position.set(0, LOG_CY, 0); R.logG.rotation.set(0, 0, 0); }
 function remoteImpact(res) {
-  const L = C.log; if (!L || !L.landed) return;
+  const L = C.log; if (!L) return;
+  if (!L.landed) landNow(L);
   if (res === 0) { L.sqV -= 0.8; L.wob = 1; spawnChips(2, 0.5); snd('chop', { knot: true, power: 0 }); return; }
   if (res === 2) {
     snd('chop', { fin: true, power: 0.6 }); spawnChips(12, 0.85); dust(0, LOG_TOP, 0, 3, 0.12);

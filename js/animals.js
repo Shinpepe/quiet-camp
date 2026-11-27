@@ -921,7 +921,7 @@ function follow(a, dt) {
    → 로딩 화면 뒤 사전 컴파일에 함께 들어가고, 처음 나올 때 멈칫하지 않는다 */
 export function buildAnimals(cfg) {
   mats(); A.list = []; A.pool = {}; A.seq = 0; A.on = true; A.sentEmpty = true;
-  A.trunks = cfg.key === 'lake' ? ctx.W.trees.filter(t => { const d = Math.hypot(t[0], t[1]); return t[2] >= 0.25 && t[2] <= 0.9 && d > 8 && d < 50; }) : [];
+  A.trunks = cfg.key === 'lake' ? ctx.W.trunks.filter(t => { const d = Math.hypot(t[0], t[1]); return d > 8 && d < 50; }) : [];
   for (const k of KEYS) if (ANIMALS[k].bg === cfg.key) { give(build(k)); if (k === 'duck') give(build('chick')); }
   resetAnimals();
 }
@@ -956,8 +956,7 @@ export function updateAnimals(dt) {
 const _v = new THREE.Vector3();
 function behindTree(c, a) {
   const dx = a.x - c.x, dz = a.z - c.z, L2 = dx * dx + dz * dz;
-  for (const t of ctx.W.trees) {
-    if (t[2] < 0.25) continue;
+  for (const t of ctx.W.trunks) {
     const u = ((t[0] - c.x) * dx + (t[1] - c.z) * dz) / L2; if (u <= 0.02 || u >= 1) continue;
     const px = c.x + dx * u - t[0], pz = c.z + dz * u - t[1], r = t[2] * 0.8;
     if (px * px + pz * pz < r * r && (1 - u) * Math.sqrt(L2) > 1.2) return true;

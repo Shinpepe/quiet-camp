@@ -44,7 +44,8 @@ function fitView() {
 }
 /* 물 반사용 렌더타깃·카메라 (데스크톱, 설정 켜짐일 때만) */
 const reflSize = () => [Math.max(256, Math.round(innerWidth * 0.45)), Math.max(144, Math.round(innerHeight * 0.45))];
-ctx.reflRT = new THREE.WebGLRenderTarget(...reflSize(), { type: THREE.HalfFloatType });
+/* 물 반사는 PC 에서만 쓴다 → 모바일에서는 만들지 않는다 (terrain.js 의 uRefl 은 null 을 받아도 된다) */
+ctx.reflRT = FINE ? new THREE.WebGLRenderTarget(...reflSize(), { type: THREE.HalfFloatType }) : null;
 ctx.reflCam = new THREE.PerspectiveCamera(70, 1, 0.05, 3000);
 const reflMat = new THREE.Matrix4(), _lk = new THREE.Vector3(), _rd = new THREE.Vector3(), clipArr = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y + 0.02)];
 ctx.reflClip = clipArr;
@@ -74,7 +75,7 @@ function renderReflection(scene) {
   }
 }
 fitView();
-addEventListener('resize', () => { fitView(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); ctx.reflRT.setSize(...reflSize()); });
+addEventListener('resize', () => { fitView(); renderer.setSize(innerWidth, innerHeight); ctx.post.resize(innerWidth, innerHeight); if (ctx.reflRT) ctx.reflRT.setSize(...reflSize()); });
 
 /* ── 바람(0..1): 풀·나무·연기·배경음·돌풍 소리가 모두 이 값을 읽는다. 느린 흐름 위에 가끔 돌풍이 솟는다 ── */
 const WIND_BIAS = { lake: 0, beach: 0.05, snow: 0.1 };
@@ -210,8 +211,14 @@ function loop(now) {
   applyTime();
   updateAudio(dt);
   W.envT += dt; if (W.envT > 6) { W.envT = 0; if (cr.flow) rebakeEnv(); }
-  /* 그림자맵은 보통 0.1초마다, 장작을 패거나 눈덩이를 굴리거나 파라솔을 접고 펴는 동안에는 매 프레임 갱신한다 */
-  W.shT += dt; if (W.shT >= (ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving() || viewThird() || netBusy()) ? 0 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  /* 그림자맵: 손 가까이 빠르게 움직이는 것(장작·눈덩이·파라솔)은 매 프레임,
+     3인칭 내 몸·다른 사람 아바타는 초당 30번(사람 걸음에는 충분), 그 밖에는 0.1초마다 */
+  {
+    const hard = ctx.running && (state.mode === 'chop' || snowMoving() || parasolMoving());
+    const soft = ctx.running && (viewThird() || netBusy());
+    W.shT += dt;
+    if (W.shT >= (hard ? 0 : soft ? 1 / 30 : 0.1)) { W.shT = 0; renderer.shadowMap.needsUpdate = true; }
+  }
 
   /* 트렁크 뚜껑: 트렁크 창이 열린 동안, 또는 꿈속에서 총을 꺼낼 때 W.trunkT 동안 열린다 */
   if (W.trunkLid) { W.trunkT = Math.max(0, (W.trunkT || 0) - dt); const tgt = state.mode === 'trunk' || W.trunkT > 0 || netTrunk() ? -1.55 : 0; W.trunkLid.rotation.x += (tgt - W.trunkLid.rotation.x) * Math.min(1, dt * 5); }

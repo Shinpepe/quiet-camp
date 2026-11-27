@@ -35,10 +35,10 @@ export const BG = {
 
 /* 시간대 키프레임.
    fogDen: 지면 높이에서의 안개 밀도(1m 당). 거리 d 에서 대략 1 - exp(-fogDen·d) 만큼 흐려진다
-           (0.0004 → 1km 에서 약 33%, 0.0035 → 300m 에서 약 65%). 예전엔 fogFar 에서 거꾸로 계산해 낮에도 300m 에서 절반이 뿌옇었다
+           (0.0004 → 1km 에서 약 33%, 0.002 → 300m 에서 약 45%). 예전엔 fogFar 에서 거꾸로 계산해 낮에도 300m 에서 절반이 뿌옇었다
    fogH: 안개가 위로 옅어지는 높이 스케일, insc: 해/달 쪽 산란 세기 */
 export const TIME = {
-  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: ICON.dawn, clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogDen: 0.0035, fogH: 40, insc: 0.6, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a,
+  dawn: { key: 'dawn', name: '안개 낀 새벽', ic: ICON.dawn, clock: 0.27, top: 0x3a4f86, bottom: 0xf0b892, sunColor: 0xffd2a8, sunI: 2.4, amb: 0.5, hemi: 0.8, ibl: 0.45, stars: 0.12, sunSize: 18, disc: 0xffd8a8, glow: 0.8, lantern: 3, tentLamp: 1.5, fireI: 10, fog: 0xe6c2ae, fogDen: 0.002, fogH: 40, insc: 0.6, exposure: 1.0, waterMul: 0.8, cloudCover: 0.62, cloudLit: 0xffd8c0, cloudShade: 0x6a6a8a,
     grade: { tint: [1.0, 0.98, 1.02], sat: 0.95, con: 1.0, bloom: 0.28 } },
   afternoon: { key: 'afternoon', name: '화창한 오후', ic: ICON.afternoon, clock: 0.58, top: 0x2b6fd6, bottom: 0xd8edff, sunColor: 0xfff3dc, sunI: 3.6, amb: 0.9, hemi: 1.3, ibl: 0.6, stars: 0, sunSize: 10, disc: 0xfff9e0, glow: 0.35, lantern: 0, tentLamp: 0, fireI: 6, fog: 0xd8edff, fogDen: 0.0004, fogH: 120, insc: 0.3, exposure: 0.92, waterMul: 1, cloudCover: 0.45, cloudLit: 0xffffff, cloudShade: 0x8a96a8,
     grade: { tint: [1, 1, 1], sat: 1.04, con: 1.0, bloom: 0.12 } },

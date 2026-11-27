@@ -12,7 +12,7 @@ import { netPoker, netPokerSeats, netIsHost, netSelf, netName, netBubble } from 
    방장이 딜러다: 누가 앉았는지 보고(net.js netPokerSeats), 규칙 엔진(pokerEngine.js)으로 판을 돌리고, 칩 장부를 가진다.
    모두에게 공개 상태(st)를 보내고, 손패(hole)는 각자에게만 보낸다. 친구는 행동(act)·시작(go)·손패 다시 받기(sync)·칩 벌기(earn)를 방장에게 부탁한다.
    방장도 같은 길을 쓴다 — 자기에게 보내는 것은 바로 받는다.
-   판의 흐름: wait(대기) → 앉은 사람 누구나 C → count(10초 세기) → play(판) → result(결과가 떠 있음) → 누구나 C 다시하기 → count …
+   판의 흐름: wait(대기) → 앉은 사람 누구나 C → count(3초 세기, COUNT) → play(판) → result(결과가 떠 있음) → 누구나 C 다시하기 → count …
      세는 동안 일어나면 그 판에서 빠진다. 칩이 있는 사람이 둘 아래로 줄면 세기를 멈춘다.
    차례 시간 60초, 자리 비움이면 10초. 시간이 지나면 체크할 수 있으면 체크, 아니면 폴드.
    두 판 연속 시간이 지나면 쉬는 중(다음 판부터 빠진다, C 로 다시 낀다).
